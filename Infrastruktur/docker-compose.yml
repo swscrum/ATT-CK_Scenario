@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   nginx:
     image: nginx:latest
@@ -24,7 +22,6 @@ services:
       RAM_SIZE: "4G"
       CPU_CORES: "2"
       DISK_SIZE: "64G"
-      DHCP: "Y"
     devices:
       - /dev/kvm
       - /dev/vhost-net
@@ -33,12 +30,9 @@ services:
     cap_add:
       - NET_ADMIN
     stop_grace_period: 2m
-    secrets:
-      - windows_username
-      - windows_password
-      - secrets2env
     networks:
       - internal_net
+      - public_net
     restart: unless-stopped
 
   kali:
