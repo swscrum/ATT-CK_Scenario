@@ -13,6 +13,8 @@ services:
     restart: unless-stopped
 
   windows:
+    networks:
+      - internal_net
     image: dockurr/windows
     container_name: windows
     environment:
@@ -30,9 +32,6 @@ services:
     cap_add:
       - NET_ADMIN
     stop_grace_period: 2m
-    networks:
-      - internal_net
-      - public_net
     restart: unless-stopped
 
   kali:
