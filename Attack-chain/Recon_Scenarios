@@ -1,0 +1,46 @@
+Notes:
+- The following scenario can be expanded and added more advanced methods (stealth) 
+- The single steps can be adjusted based on the vulnerabiity
+
+
+1) Initial recon
+
+1. Port scanning using <nmap>
+- scan Ports to find open ones and then do more focused scans 
+ $ nmap -Pn -sS -p-
+ $ nmap -Pn -sS -sV -sC -p[port_num] 
+
+2. DNS enumeration
+- discover subdomains using:
+ $ subfinder -d inlanefreight.com -v
+ $ dnsenum --dnsserver (IP) --enum -p 0 -s 0 -o subdomains.txt -f top1million-110000.txt (URL)
+- (optionally) double-check results with <httpx>
+
+3. Website enumeration
+- enumerate directories:
+ $ dirb http://(target)
+ $ gobuster dir -u <https://example.com> -w ~/wordlists/dir/common.txt`
+- fuzz for web extentions
+ $ ffuf -w web-extensions.txt:FUZZ -u http://SERVER_IP:PORT/directory/indexFUZZ
+- vuln scanner
+ $ nikto -h website.com -Tuning b
+
+2) Weaponization
+
+1. confirm possible vulnerabilities
+- using <sqlmap>
+
+-> or in a different way depending on the vulnerability
+
+3) Delivery 
+
+
+
+
+
+
+
+
+
+
+
