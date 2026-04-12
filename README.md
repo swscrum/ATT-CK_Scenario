@@ -2,7 +2,7 @@
 
 This project is about an custom attack scenario to showcase IT security demonstrations.
 
-Currently, it consists of an attacker client (Kali Linux), a victim webserver based on NGINX, and a victim windows client. Both, the NGINX webserver and the Windows client share a internal docker network. The NGINX and the attacker Kali share a different network which simulates a public access.
+Currently, it consists of an attacker client (Kali Linux), a router container that simulates the edge of the network, a victim webserver based on NGINX, and a victim Windows client. The NGINX webserver and the Windows client share an internal docker network. The Windows client also uses an egress network so it can communicate outward. The router connects the internal network to the public side and forwards only port 80 to the NGINX server.
 
 ## Prerequisites
 
@@ -19,37 +19,12 @@ WINDOWS_PASSWORD=password
 
 ### Running for the first time or on update
 
-1. Within the `docker-compose.yml` file, TEMPORARILY add the public network to the Windows host in order to download the current Windows image from the internet like this:
-
-```yaml
-windows:
-    networks:
-      - public_net
-      - internal_net
-    [...]
-```
-
-This is a 1-time step.
-
-2. Run the docker environment via
-
-```bash
-docker compose up -d
-```
-
-3. Revert the change within the `docker-compose.yml` file:
-
-```yaml
-windows:
-    networks:
-      - internal_net
-    [...]
-```
-
-### Running subsequently
-
 Run the docker environment via
 
 ```bash
 docker compose up -d
 ```
+
+The Windows client keeps outbound connectivity through its egress network, while inbound access from the attacker side reaches the NGINX server only through the router's forwarded port 80.
+
+To add more internal clients later, connect them to `internal_net` and `egress_net` as well. Do not attach Kali to those internal networks.
