@@ -12,7 +12,7 @@ Notes:
 
 2. DNS enumeration
 - discover subdomains using:
- $ subfinder -d inlanefreight.com -v
+ $ subfinder -d website.com -v
  $ dnsenum --dnsserver (IP) --enum -p 0 -s 0 -o subdomains.txt -f top1million-110000.txt (URL)
 - (optionally) double-check results with <httpx>
 
