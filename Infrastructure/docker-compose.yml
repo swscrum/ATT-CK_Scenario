@@ -26,6 +26,8 @@ services:
   windows:
     image: dockurr/windows
     container_name: windows
+    ports:
+      - "8806:3389"
     networks:
       - egress_net
       - internal_net
