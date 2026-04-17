@@ -46,6 +46,8 @@ services:
     cap_add:
       - NET_ADMIN
     stop_grace_period: 2m
+    volumes:
+      - windows_storage:/storage
     restart: unless-stopped
 
   kali:
@@ -68,3 +70,6 @@ networks:
   internal_net:
     driver: bridge
     internal: true
+
+volumes:
+  windows_storage:
