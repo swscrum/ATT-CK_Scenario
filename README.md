@@ -25,6 +25,9 @@ Run the docker environment via
 docker compose up -d
 ```
 
+The Windows VM storage is persisted in a Docker volume, so `docker compose down` will not force a fresh OS download on next startup.
+Use `docker compose down -v` only if you intentionally want to reset the Windows VM storage.
+
 The Windows client keeps outbound connectivity through its egress network, while inbound access from the attacker side reaches the NGINX server only through the router's forwarded port 80.
 
 To add more internal clients later, connect them to `internal_net` and `egress_net` as well. Do not attach Kali to those internal networks.

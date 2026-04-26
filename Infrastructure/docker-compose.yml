@@ -16,7 +16,9 @@ services:
     restart: unless-stopped
 
   apache:
-    image: httpd:2.4.50
+    build: ./apache
+    # wir brauchen einen eigenen build um Dinge im Container selbst zu configurieren und nicht fertige images per httpd:2.4.50
+    # muss nur httpd:2.4.50 intern nutzen 
     container_name: apache
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
@@ -49,6 +51,8 @@ services:
     cap_add:
       - NET_ADMIN
     stop_grace_period: 2m
+    volumes:
+      - windows_storage:/storage
     restart: unless-stopped
 
   kali:
@@ -71,3 +75,6 @@ networks:
   internal_net:
     driver: bridge
     internal: true
+
+volumes:
+  windows_storage:
