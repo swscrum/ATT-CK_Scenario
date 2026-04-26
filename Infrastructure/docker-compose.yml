@@ -48,8 +48,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ../Attack-chain:/recon
-      - ../Attack-chain/results:/recon/results
+      - ../Attack-chain:/Attack-chain
     networks:
       - public_net
     restart: unless-stopped
