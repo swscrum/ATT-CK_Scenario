@@ -18,7 +18,8 @@ RUN apt-get update \
         dbus-x11 \
         tigervnc-standalone-server \
     && rm -rf /var/lib/apt/lists/* \
-    # Create a dedicated lab user with a known password for SSH access.
+    # LAB ONLY – intentional weak credentials for the attack-chain demo.
+    # Do NOT use outside an isolated lab environment.
     && useradd -m -s /bin/bash labuser \
     && echo 'labuser:labpass' | chpasswd \
     && adduser labuser sudo \
