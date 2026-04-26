@@ -4,6 +4,10 @@ This project is about an custom attack scenario to showcase IT security demonstr
 
 Currently, it consists of an attacker client (Kali Linux), a router container that simulates the edge of the network, a victim webserver, and a victim Ubuntu workstation with an XFCE desktop. The webserver and the workstation share an internal docker network. The workstation also uses an egress network so it can communicate outward. The router connects the internal network to the public side and forwards only port 80 to the webserver.
 
+## Network topology
+
+![Network topology](docs/images/network-topology.jpg)
+
 The Ubuntu workstation exposes its desktop on host port 5901 — connect with any VNC client (e.g. `vinagre`, `remmina`, `tigervnc-viewer`) to `localhost:5901`. No VNC password is set; this is a placeholder lab host. SSH (port 22) and the VNC server run side-by-side inside the container.
 
 **Lab SSH credentials (intentionally weak — isolated lab use only):** `labuser` / `labpass`
