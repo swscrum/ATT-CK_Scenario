@@ -29,20 +29,20 @@ To add more internal clients later, connect them to `internal_net` and `egress_n
 
 ## Running the recon phase
 
-The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, plus `wget` and `curl`. The `Attack-chain/` directory is mounted into the container at `/recon`, so `initial_recon_1.py` is runnable from inside.
+The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, plus `wget` and `curl`. The `Attack-chain/` directory is mounted into the container at `/Attack-chain`, so `initial_recon_1.py` is runnable from inside.
 
 ```bash
 # Full recon flow against the default target (router)
-docker compose exec kali python3 /recon/initial_recon_1.py
+docker compose exec kali python3 /Attack-chain/initial_recon_1.py
 
 # Override the target to the internal webserver instead of the default router
-docker compose exec kali python3 /recon/initial_recon_1.py --target webserver
+docker compose exec kali python3 /Attack-chain/initial_recon_1.py --target webserver
 
 # Run a single phase
-docker compose exec kali python3 /recon/initial_recon_1.py --phase gobuster
+docker compose exec kali python3 /Attack-chain/initial_recon_1.py --phase gobuster
 
 # Override the gobuster wordlist
-docker compose exec kali python3 /recon/initial_recon_1.py --wordlist /usr/share/wordlists/dirb/small.txt
+docker compose exec kali python3 /Attack-chain/initial_recon_1.py --wordlist /usr/share/wordlists/dirb/small.txt
 ```
 
 Results land in `Attack-chain/results/` (bind-mounted, persisted on the host):

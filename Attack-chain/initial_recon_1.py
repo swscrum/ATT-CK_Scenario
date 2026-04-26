@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 DEFAULT_TARGET = "router"
-DEFAULT_RESULTS_DIR = "/recon/results"
+DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
 
 EXT_LIST = [".php", ".html", ".txt", ".bak", ".sh", ".cgi", ".old"]
