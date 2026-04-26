@@ -35,8 +35,8 @@ The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, pl
 # Full recon flow against the default target (router)
 docker compose exec kali python3 /recon/initial_recon_1.py
 
-# Override the target
-docker compose exec kali python3 /recon/initial_recon_1.py --target router
+# Override the target to the internal webserver instead of the default router
+docker compose exec kali python3 /recon/initial_recon_1.py --target webserver
 
 # Run a single phase
 docker compose exec kali python3 /recon/initial_recon_1.py --phase gobuster
