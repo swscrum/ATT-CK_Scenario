@@ -6,6 +6,14 @@
 /.*ignore*
 */isos/*.iso
 
+# Recon scan output
+Attack-chain/results/*
+!Attack-chain/results/.gitkeep
+
+# Python bytecode
+__pycache__/
+*.pyc
+
 
 ########################
 # macOS
