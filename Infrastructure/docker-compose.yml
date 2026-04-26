@@ -26,6 +26,7 @@ services:
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
     networks:
       - internal_net
+      - egress_net
     restart: unless-stopped
 
   ubuntu_workstation:
