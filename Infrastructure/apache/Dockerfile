@@ -3,11 +3,11 @@ FROM httpd:2.4.49
 
 # Debian Buster ist End of life --> kein apt update geht --> kein cron installieren --> rip xd 
 # updates weg sonst fehler 
-RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive.debian.org|g; /buster-updates/d' /etc/apt/sources.list \ 
+RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive.debian.org|g; /buster-updates/d' /etc/apt/sources.list \
 #mirror archiv von debian 2019
     && apt-get -o Acquire::Check-Valid-Until=false update \
     # wegen veraltetetn paketen 
-    && apt-get install -y --no-install-recommends cron \ 
+    && apt-get install -y --no-install-recommends cron \
     # online empfehlung zum abschalten als best practice damit image klein bleibt 
     && rm -rf /var/lib/apt/lists/* 
     #cleanup kann auch weggelassen werden 
