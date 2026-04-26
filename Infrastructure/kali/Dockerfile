@@ -20,6 +20,6 @@ RUN echo 'deb http://kali.download/kali kali-rolling main contrib non-free non-f
     && ln -s /usr/share/dirb/wordlists /usr/share/wordlists/dirb \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /recon
+WORKDIR /Attack-chain
 
 CMD ["sleep", "infinity"]
