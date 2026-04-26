@@ -92,7 +92,7 @@ def phase_gobuster(target: str, results_dir: Path, wordlist: Path) -> Path:
 
 def phase_ffuf(target: str, results_dir: Path) -> Path:
     _header(4, "ffuf extension fuzz")
-    out = results_dir / "ffuf.txt"
+    out = results_dir / "ffuf.json"
     ext_file = results_dir / ".web-extensions.txt"
     ext_file.write_text("\n".join(EXT_LIST) + "\n")
     # ffuf can exit non-zero when no matches are found — don't make it fatal.
