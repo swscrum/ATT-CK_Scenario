@@ -50,7 +50,7 @@ Results land in `Attack-chain/results/` (bind-mounted, persisted on the host):
 | File | Source |
 |---|---|
 | `nmap-fullscan.txt` | `nmap -Pn -sS -p-` |
-| `nmap-services.txt` | `nmap -Pn -sS -sV -sC -p<open-ports>` |
+| `nmap-services.txt` | `nmap -Pn -sS -sV -sC -p <open-ports>` |
 | `gobuster.txt` | `gobuster dir` against `dirb/common.txt` (override via `--wordlist`) |
 | `ffuf.json` | extension fuzz on `/index<ext>` (JSON output from ffuf `-of json`) |
 | `nikto.txt` | `nikto -Tuning b` |

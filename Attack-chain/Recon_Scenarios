@@ -24,7 +24,7 @@ __________________________
 - enumerate directories:
  $ dirb http://(target)
  $ gobuster dir -u <https://example.com> -w ~/wordlists/dir/common.txt`
-- fuzz for web extentions
+- fuzz for web extensions
  $ ffuf -w web-extensions.txt:FUZZ -u http://SERVER_IP:PORT/directory/indexFUZZ
 - vuln scanner
  $ nikto -h website.com -Tuning b
