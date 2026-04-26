@@ -1,11 +1,13 @@
 services:
   router:
-    image: nginx:latest
+    build: ./router
     container_name: router
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
     ports:
       - "80:80"
-    volumes:
-      - ./router.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - public_net
       - internal_net
@@ -14,7 +16,7 @@ services:
     restart: unless-stopped
 
   apache:
-    image: httpd:2.4.49
+    image: httpd:2.4.50
     container_name: apache
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
