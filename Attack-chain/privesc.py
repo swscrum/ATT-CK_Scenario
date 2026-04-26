@@ -15,7 +15,7 @@ CLEANUP_SCRIPT = "/opt/cleanup.sh"
 
 def send_command(shell, command):
     """Sendet einen Befehl durch eine aktive Shell-Verbindung."""
-    shell.send((command + "\n").encode())
+    shell.sendall((command + "\n").encode())
     time.sleep(0.5)
 
 
