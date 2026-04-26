@@ -47,3 +47,5 @@ RUN printf '#!/bin/sh\nservice cron start\nexec httpd-foreground\n' > /usr/local
 CMD ["/usr/local/bin/start.sh"]
 
 
+# run build with docker compose up -d --build apache router
+#Test with docker compose exec apache cat /etc/cron.d/cleanup or sleep 63 && docker compose exec apache cat /var/log/cleanup.log --> should be new timestamps 
