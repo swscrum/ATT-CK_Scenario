@@ -14,7 +14,9 @@ services:
     restart: unless-stopped
 
   apache:
-    image: httpd:2.4.49
+    build: ./apache 
+    # wir brauchen einen eigenen build um Dinge im Container selbst zu configurieren und nicht fertige images per httpd:2.4.49
+    # muss nur httpd:2.4.49 intern nutzen 
     container_name: apache
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
