@@ -26,9 +26,11 @@ services:
       - internal_net
     restart: unless-stopped
 
-  workstation:
-    build: ./workstation
-    container_name: workstation
+  ubuntu_workstation:
+    build: ./ubuntu_workstation
+    container_name: ubuntu_workstation
+    ports:
+      - "5901:5901"
     networks:
       - egress_net
       - internal_net
