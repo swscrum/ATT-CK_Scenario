@@ -6,6 +6,8 @@ services:
       - NET_ADMIN
     sysctls:
       - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.rp_filter=0
+      - net.ipv4.conf.default.rp_filter=0
     ports:
       - "80:80"
     networks:
@@ -20,6 +22,8 @@ services:
     # wir brauchen einen eigenen build um Dinge im Container selbst zu configurieren und nicht fertige images per httpd:2.4.50
     # muss nur httpd:2.4.50 intern nutzen 
     container_name: apache
+    cap_add:
+      - NET_ADMIN
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
       - ./html:/usr/local/apache2/htdocs:ro
@@ -70,11 +74,21 @@ services:
 networks:
   public_net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.0.0/24
   egress_net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.20.0.0/24
   internal_net:
     driver: bridge
-    internal: true
+    # internal: true entfernt - Docker blockiert sonst IP-Forwarding
+    # durch den Router-Container hindurch auf Host-Bridge-Ebene.
+    ipam:
+      config:
+        - subnet: 10.30.0.0/24
 
 volumes:
   windows_storage:
