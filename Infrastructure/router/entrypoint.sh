@@ -27,6 +27,7 @@ if [ -n "$APACHE_IP" ]; then
     iptables -t nat -A POSTROUTING -o eth1 -j MASQUERADE
 else
     echo "ERROR: Konnte 'apache' Container im DNS nicht finden."
+    exit 1
 fi
 
 echo "Router aktiv! Warte auf Traffic..."
