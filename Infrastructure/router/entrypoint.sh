@@ -66,15 +66,13 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$PUBLIC_IF" ]; then
     echo ""
     iptables -t nat -nvL
 else
-    echo "WARNUNG: Konnte Interfaces oder Apache IP nicht ermitteln."
+    echo "FEHLER: Konnte Interfaces oder Apache IP nicht ermitteln."
     echo "  APACHE_IP=$APACHE_IP INTERNAL_IF=$INTERNAL_IF PUBLIC_IF=$PUBLIC_IF"
-    echo "  Fallback: Erlaube generelles Forwarding..."
+    echo "  Breche ab, um fail-closed zu bleiben und kein generelles Forwarding zu erlauben."
 
-    if [ -n "$APACHE_IP" ]; then
-        iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination $APACHE_IP:80
-    fi
-    iptables -t nat -A POSTROUTING -j MASQUERADE
-    iptables -A FORWARD -j ACCEPT
+    # Fail-closed: Kein unspezifisches NAT/Forwarding aktivieren
+    iptables -P FORWARD DROP
+    exit 1
 fi
 
 echo ""
