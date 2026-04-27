@@ -6,7 +6,7 @@ Currently, it consists of an attacker client (Kali Linux), a router container th
 
 ## Network topology
 
-![Network topology](docs/images/network-topology.jpg)
+![Network topology](intern/Bilder/network-topology.jpg)
 
 The Ubuntu workstation exposes its desktop on host port 5901 — connect with any VNC client (e.g. `vinagre`, `remmina`, `tigervnc-viewer`) to `localhost:5901`. No VNC password is set; this is a placeholder lab host. SSH (port 22) and the VNC server run side-by-side inside the container.
 
