@@ -24,6 +24,7 @@ log = logging.getLogger("chain")
 DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_KALI_HOST = "kali"
+DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
 
 
 @dataclass
@@ -38,6 +39,7 @@ class Context:
     target: str = DEFAULT_TARGET
     results_dir: str = DEFAULT_RESULTS_DIR
     kali_host: str = DEFAULT_KALI_HOST
+    wordlist: str = DEFAULT_WORDLIST
     state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -59,7 +61,11 @@ class Step:
 def _step_recon(ctx: Context) -> dict[str, Any]:
     from initial_recon_1 import run as recon_run
 
-    recon_run(target=ctx.target, results_dir=ctx.results_dir)
+    recon_run(
+        target=ctx.target,
+        results_dir=ctx.results_dir,
+        wordlist=ctx.wordlist,
+    )
     return {"recon_results": ctx.results_dir}
 
 
@@ -185,17 +191,28 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--target", default=DEFAULT_TARGET)
     p.add_argument("--results-dir", default=DEFAULT_RESULTS_DIR)
     p.add_argument("--kali-host", default=DEFAULT_KALI_HOST)
+    p.add_argument("--wordlist", default=DEFAULT_WORDLIST)
 
+    step_names = [s.name for s in CHAIN]
     sel = p.add_mutually_exclusive_group()
-    sel.add_argument("--only", help="Run a single step by name.")
-    sel.add_argument("--from", dest="start", help="Start at this step.")
-    p.add_argument("--to", dest="stop", help="Stop after this step.")
+    sel.add_argument(
+        "--only", choices=step_names, help="Run a single step by name."
+    )
+    sel.add_argument(
+        "--from", dest="start", choices=step_names, help="Start at this step."
+    )
+    p.add_argument(
+        "--to", dest="stop", choices=step_names, help="Stop after this step."
+    )
 
     p.add_argument(
         "--list", action="store_true", help="List configured steps and exit."
     )
     p.add_argument("-v", "--verbose", action="store_true")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.only is not None and args.stop is not None:
+        p.error("--only cannot be combined with --to")
+    return args
 
 
 def _list_steps() -> None:
@@ -219,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         target=args.target,
         results_dir=args.results_dir,
         kali_host=args.kali_host,
+        wordlist=args.wordlist,
     )
     run_chain(ctx, only=args.only, start=args.start, stop=args.stop)
     return 0
