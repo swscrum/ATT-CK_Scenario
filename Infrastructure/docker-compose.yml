@@ -30,43 +30,29 @@ services:
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
     networks:
       - internal_net
+      - egress_net
     restart: unless-stopped
 
-  windows:
-    image: dockurr/windows
-    container_name: windows
+  ubuntu_workstation:
+    build: ./ubuntu_workstation
+    container_name: ubuntu_workstation
     ports:
-      - "8806:3389"
+      - "5901:5901"
     networks:
       - egress_net
       - internal_net
-    environment:
-      VERSION: "11l"
-      USERNAME: ${WINDOWS_USERNAME}
-      PASSWORD: ${WINDOWS_PASSWORD}
-      RAM_SIZE: "4G"
-      CPU_CORES: "2"
-      DISK_SIZE: "64G"
-    devices:
-      - /dev/kvm
-      - /dev/vhost-net
-    device_cgroup_rules:
-      - 'c *:* rwm'
-    cap_add:
-      - NET_ADMIN
-    stop_grace_period: 2m
-    volumes:
-      - windows_storage:/storage
     restart: unless-stopped
 
   kali:
-    image: kalilinux/kali-rolling
+    build: ./kali
     container_name: kali
     command: sleep infinity
     tty: true
     stdin_open: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ../Attack-chain:/Attack-chain
     networks:
       - public_net
     restart: unless-stopped

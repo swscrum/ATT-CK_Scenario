@@ -1,5 +1,4 @@
 # Basis-Image enthaelt  verwundbare Apache-Version (CVE-2021-41773)
-# Update auf 2.4.50 für unsere Reverse-Routing Ausnutzbarkeit (CVE-2021-42013)
 FROM httpd:2.4.50
 
 # Debian Buster ist End of life --> kein apt update geht --> kein cron installieren --> rip xd 
