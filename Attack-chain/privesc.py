@@ -8,7 +8,7 @@ import time
 
 # Wird später aus config.py importiert mit:
 # from config import KALI_HOST, PORT_ROOT, CLEANUP_SCRIPT
-KALI_HOST = "kali"       # Hostname/IP used both in the payload and (when appropriate) for binding
+KALI_HOST = "10.10.0.2"  # Static IP from compose IPAM; payload uses /dev/tcp/<ip>/<port>
 PORT_ROOT = 5555
 CLEANUP_SCRIPT = "/opt/cleanup.sh"
 
