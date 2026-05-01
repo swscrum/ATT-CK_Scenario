@@ -59,7 +59,7 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$PUBLIC_IF" ]; then
     iptables -P FORWARD DROP
     iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF -j ACCEPT
-    iptables -A FORWARD -i $PUBLIC_IF -o $INTERNAL_IF -j ACCEPT
+    iptables -A FORWARD -i $PUBLIC_IF -o $INTERNAL_IF -p tcp -d $APACHE_IP --dport 80 -j ACCEPT
 
     echo ""
     echo "=== Finale iptables Konfiguration ==="
