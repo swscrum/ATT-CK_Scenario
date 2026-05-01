@@ -23,7 +23,7 @@ log = logging.getLogger("chain")
 
 DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
-DEFAULT_KALI_HOST = "kali"
+DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
 
 
@@ -72,7 +72,7 @@ def _step_recon(ctx: Context) -> dict[str, Any]:
 def _step_privesc(ctx: Context) -> dict[str, Any]:
     from privesc import run as privesc_run
 
-    root_shell = privesc_run(ctx.state["www_shell"])
+    root_shell = privesc_run(ctx.state["www_shell"], kali_host=ctx.kali_host)
     if root_shell is None:
         raise RuntimeError("privesc returned no root shell")
     return {"root_shell": root_shell}

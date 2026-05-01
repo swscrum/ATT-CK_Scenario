@@ -6,11 +6,15 @@ services:
       - NET_ADMIN
     sysctls:
       - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.rp_filter=0
+      - net.ipv4.conf.default.rp_filter=0
     ports:
       - "80:80"
     networks:
-      - public_net
-      - internal_net
+      public_net:
+        ipv4_address: 10.10.0.3
+      internal_net:
+        ipv4_address: 10.30.0.4
     depends_on:
       - apache
     restart: unless-stopped
@@ -20,13 +24,16 @@ services:
     # wir brauchen einen eigenen build um Dinge im Container selbst zu configurieren und nicht fertige images per httpd:2.4.50
     # muss nur httpd:2.4.50 intern nutzen 
     container_name: apache
+    cap_add:
+      - NET_ADMIN
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
       - ./html:/usr/local/apache2/htdocs:ro
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
     networks:
-      - internal_net
-      - egress_net
+      internal_net:
+        ipv4_address: 10.30.0.2
+      egress_net: {}
     restart: unless-stopped
 
   ubuntu_workstation:
@@ -50,14 +57,25 @@ services:
     volumes:
       - ../Attack-chain:/Attack-chain
     networks:
-      - public_net
+      public_net:
+        ipv4_address: 10.10.0.2
     restart: unless-stopped
 
 networks:
   public_net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.0.0/24
   egress_net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 10.20.0.0/24
   internal_net:
     driver: bridge
-    internal: true
+    # internal: true entfernt - Docker blockiert sonst IP-Forwarding
+    # durch den Router-Container hindurch auf Host-Bridge-Ebene.
+    ipam:
+      config:
+        - subnet: 10.30.0.0/24
