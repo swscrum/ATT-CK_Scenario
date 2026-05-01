@@ -72,7 +72,7 @@ def _step_recon(ctx: Context) -> dict[str, Any]:
 def _step_privesc(ctx: Context) -> dict[str, Any]:
     from privesc import run as privesc_run
 
-    root_shell = privesc_run(ctx.state["www_shell"])
+    root_shell = privesc_run(ctx.state["www_shell"], kali_host=ctx.kali_host)
     if root_shell is None:
         raise RuntimeError("privesc returned no root shell")
     return {"root_shell": root_shell}
