@@ -13,7 +13,7 @@ Attack-chain/results/*
 # Python bytecode
 __pycache__/
 *.pyc
-
+Attack-chain/__pycache__/
 
 ########################
 # macOS

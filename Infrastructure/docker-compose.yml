@@ -42,8 +42,9 @@ services:
     ports:
       - "5901:5901"
     networks:
-      - egress_net
-      - internal_net
+      egress_net: {}
+      internal_net:
+        ipv4_address: 10.30.0.5
     restart: unless-stopped
 
   kali:
