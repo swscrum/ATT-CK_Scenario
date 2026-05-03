@@ -31,9 +31,14 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
 
 #somit alle Acceptance Criteria: Issue 23 erfüllt 
 
-RUN printf '#!/bin/sh\necho "[cleanup] $(date)" >> /var/log/cleanup.log\n' > /opt/cleanup.sh \
-    && chmod 777 /opt/cleanup.sh 
-#cleanup timestamp extra minimal gehalten und wichtig rwxrwxrwx  jeder kanns schreiben!!!
+# Maintenance-Skript des "Admin"  
+#macht echte Wartung (Logrotation,
+# Tempfile-Cleanup, Disk-Usage-Snapshot)
+# eines TODO-Kommentars im Skript ("nur fuers Debugging"  nie
+# zurueckgebaut )
+COPY cleanup.sh /opt/cleanup.sh
+RUN chmod 777 /opt/cleanup.sh
+#wichtig: rwxrwxrwx  jeder kann ueberschreiben -> www-data kann root-Code droppen
 
 RUN printf '* * * * * root /opt/cleanup.sh\n' > /etc/cron.d/cleanup \
     && chmod 644 /etc/cron.d/cleanup 
