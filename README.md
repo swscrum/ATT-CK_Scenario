@@ -36,6 +36,11 @@ To add more internal clients later, connect them to `internal_net` and `egress_n
 The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, plus `wget` and `curl`. The `Attack-chain/` directory is mounted into the container at `/Attack-chain`, so `initial_recon_1.py` is runnable from inside.
 
 ```bash
+# Automated Orchestration of all phases:
+docker compose exec kali python3 /Attack-chain/main.py -v 
+
+# Running the phases one by one:
+
 # Full recon flow against the default target (router)
 docker compose exec kali python3 /Attack-chain/initial_recon_1.py
 
