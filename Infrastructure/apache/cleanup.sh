@@ -55,5 +55,5 @@ find /tmp -maxdepth 1 -type f \
 # 4) Disk-Usage als Status-Snapshot fuers Monitoring ablegen
 df -h / > "$STATUS_FILE" 2>/dev/null
 
-# 5) Heartbeat - haelt bestehende Tests gruen, die nach Timestamps grepen
+# 5) Heartbeat - haelt bestehende Tests gruen, die nach Timestamps greppen
 echo "[cleanup] $(date)" >> "$LOGFILE"
