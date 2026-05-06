@@ -5,6 +5,7 @@
 *.env.*
 /.*ignore*
 */isos/*.iso
+.claude
 
 # Recon scan output
 Attack-chain/results/*
