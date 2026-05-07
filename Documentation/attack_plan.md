@@ -285,11 +285,3 @@ Each phase becomes a `Step(...)` in `CHAIN`, with proper `requires=` plumbing so
 4. **FreeIPA integration** — defer to phase 4 follow-up. The story explicitly supports a partial rollout, so adding it later is non-breaking.
 5. **Patient DB technology** — SQLite (simplest) vs. PostgreSQL container (most realistic). Demo richness vs. infrastructure cost.
 6. **Hardened workstations** — do they need to actually exist in the demo, or can phase 7 simulate the failed attempts against fictional addresses? Real containers are more honest but cost startup overhead.
-
-These are step-3 calls, not blockers for the plan.
-
-## Out of scope for this plan
-
-- The full pre-foothold reconnaissance phase (recon over the public internet) is documented in the existing `Attack-chain/Concepts/Recon_Scenarios.md` and `initial_recon_1.py`; not duplicated here.
-- The May 11 customer demo logistics — how the chain is presented, which phases get the spotlight — are not covered here. Story doc plus this attack plan are the inputs to that.
-- Detection rules / Sigma signatures / Wazuh policies — see `mappings.md` for technique-level detection notes; concrete rules are step-4 work.
