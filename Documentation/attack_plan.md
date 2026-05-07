@@ -10,7 +10,7 @@ The attacker is the same crew that breached Waystar Royco eighteen months ago (s
 |---|---|---|
 | A — Public-facing entry | 1–2 | Root on Apache (Waystar Connect webserver) |
 | B — Foothold expansion | 3–5 | Persistent, C2-enabled foothold on John Stravidis's workstation |
-| C — Internal recon | 6–8 | Map the Linux fleet, find Reiner Hermann breadcrumb |
+| C — Internal recon | 6–8 | Map the Linux fleet, find Reiner Hermann (returning employee) breadcrumb |
 | D — Deep lateral movement | 9–12 | Sysadmin (Hans Müller) shell via Reiner → spearphishing chain |
 | E — Objectives | 13–15 | Patient DB exfil + ransomware impact |
 
@@ -157,19 +157,19 @@ The point of two hardened boxes: shows that "the company *did* invest post-breac
 
 #### Phase 8 — Reiner Hermann breadcrumb
 
-Attacker pokes around John's workstation more carefully and finds artefacts of the previous user:
-- `/var/log/migration/2024-12-15-reiner-to-john.log` — explicit migration log naming both users
-- `/home/reiner.hermann.bak/` — old home dir parked "for audit purposes" by IT, never deleted
-- `/home/reiner.hermann.bak/.ssh/id_rsa` — Reiner's *personal* SSH key pair (not work-issued, didn't get rotated post-breach because IT only rotated the work keys)
+Attacker pokes around John's workstation more carefully and finds artefacts of the workstation's previous primary user, Reiner Hermann (see `scenario_story.md` for his medical-leave-and-return backstory):
+- `/var/log/migration/2024-12-15-reiner-to-john.log` — IT log naming both users, written when the box was reassigned to John during Reiner's medical leave
+- `/home/reiner.hermann.bak/` — Reiner's home directory preserved during his absence ("he's coming back, don't delete it"); never cleaned up after his return because by then John was on the box
+- `/home/reiner.hermann.bak/.ssh/id_rsa` — Reiner's *personal* SSH key pair. Medical leave isn't a security incident, so IT never treated his return as a re-onboarding; his personal keys were never rotated
 - Old `bash_history` showing Reiner SSHing to internal hosts
 
-Story payoff: the attacker recognises "Reiner Hermann" — they had his name from the prior breach. (Optional heavyweight version: Reiner *was* the previously-compromised account; he was fired in the aftermath, his workstation reissued to John.)
+Story payoff: the attacker recognises "Reiner Hermann" — they had his name from the prior breach.
 
 ### Group D — Deep lateral movement *(new)*
 
 #### Phase 9 — Lateral movement to Reiner's NEW workstation
 
-Reiner is still employed (or rehired post-breach) and is now on a new workstation. **His personal SSH key is authorized on the new box** — when migrating he copied his dotfiles (`~/.ssh/`) from his old box, which is the OPSEC failure that makes this work. Attacker uses the key from phase 8.
+Reiner returned from his six-month medical leave and was set up on a new workstation (his old one is now John's). **His personal SSH key is authorized on the new box** — when restoring his dotfiles to the new workstation on his return, he brought across his old `~/.ssh/` directory wholesale. The key in `/home/reiner.hermann.bak/.ssh/id_rsa` on John's box (phase 8) and the entry in `~reiner.hermann/.ssh/authorized_keys` on his new box are the same key. Attacker uses it.
 
 #### Phase 10 — Email mining
 
