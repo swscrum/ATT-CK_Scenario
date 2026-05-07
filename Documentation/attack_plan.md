@@ -9,7 +9,7 @@ The attacker is the same crew that breached Waystar Royco eighteen months ago (s
 | Group | Phases | Outcome |
 |---|---|---|
 | A — Public-facing entry | 1–2 | Root on Apache (Waystar Connect webserver) |
-| B — Foothold expansion | 3–5 | Persistent, C2-enabled foothold on John Stravidis's workstation |
+| B — Foothold expansion | 3–5 | Persistent, C2-enabled foothold on John Stravidis's (freelance webdev) workstation |
 | C — Internal recon | 6–8 | Map the Linux fleet, find Reiner Hermann (returning employee) breadcrumb |
 | D — Deep lateral movement | 9–12 | Sysadmin (Hans Müller) shell via Reiner → spearphishing chain |
 | E — Objectives | 13–15 | Patient DB exfil + ransomware impact |
