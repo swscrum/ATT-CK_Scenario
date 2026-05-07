@@ -16,32 +16,32 @@ The attacker is the same crew that breached Waystar Royco eighteen months ago (s
 
 **Hybrid TTP profile** (carried over from the story design): noisy at the edge (groups A–C are loud, signature-able, and meant to be detected), quiet from the foothold inward (groups D–E use encrypted channels, careful pacing, and clean persistence — the work for the EDR/behavioural side of the SOC training).
 
-## Pivot graph (host-level overview)
+## Chain summary
 
-```mermaid
-graph LR
-    A[Attacker]
-    Router[Router<br/>10.10.0.3 / 10.30.0.4]
-    Web[Apache<br/>Waystar Connect<br/>10.30.0.2]
-    J[John's WS<br/>john.stravidis<br/>10.30.0.5]
-    H1[Hardened WS #1]
-    H2[Hardened WS #2]
-    Rn[Reiner's WS<br/>reiner.hermann]
-    Hn[Sysadmin WS<br/>hans.mueller]
-    DB[(Patient DB)]
-    BK[(Backups)]
-
-    A -->|"1. CVE-2021-41773"| Router --> Web
-    Web -->|"4. SSH stolen deploy key"| J
-    J -.x|"7. SSH key-only"| H1
-    J -.x|"7. fail2ban"| H2
-    J -->|"9. Reiner's reused personal key"| Rn
-    Rn -->|"11. spearphish attachment"| Hn
-    Hn -->|"13. DB conn"| DB
-    Hn -->|"15. inhibit"| BK
-    A <-->|"5. encrypted C2 tunnel"| J
-    A <-->|"14. exfil over tunnel"| Hn
-```
+| Phase | Step | ATT&CK |
+|---|---|---|
+| Recon | (existing) external scanning | T1592, T1595 |
+| Recon | post-foothold network scan | T1018, T1046 |
+| Initial Access | (existing) CVE-2021-41773 | T1190 |
+| Execution | (existing) reverse shell | T1059.004 |
+| Privilege Escalation | (existing) cron + chmod 777 | T1053.003 |
+| Credential Access | deploy creds in files on apache | T1552.001 |
+| Lateral Movement | SSH to John | T1021.004, T1078 |
+| Persistence | authorized_keys + systemd user unit | T1098.004, T1543.002 |
+| Command & Control | encrypted reverse tunnel | T1572, T1071.001 |
+| Discovery | files, accounts, history on John's box | T1083, T1087, T1518 |
+| Lateral (failed) | brute force on hardened boxes | T1110 (detected/denied) |
+| Discovery | Reiner artefacts | T1083, T1087 |
+| Credential Access | Reiner's personal SSH key | T1552.004 |
+| Lateral Movement | SSH to Reiner | T1021.004, T1078 |
+| Collection | mail mining for sysadmin coords | T1114.001 |
+| Initial Access (phase 2) | spearphishing attachment to Hans | T1566.001 |
+| Execution | user opens attachment (sim) | T1204.002 |
+| Lateral / Privesc | sysadmin shell | T1078 |
+| Defense Evasion | inhibit backups before ransomware | T1490 |
+| Collection | DB + session notes | T1005, T1213 |
+| Exfiltration | over C2 tunnel | T1041 |
+| Impact | ransomware encryption | T1486 |
 
 ## Sequence diagram (UML)
 
