@@ -16,9 +16,19 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from rich.columns import Columns
+from rich.console import Console
+from rich.panel import Panel
+from rich.rule import Rule
+from rich.table import Table
+from rich.text import Text
+from rich import box
+
+console = Console(highlight=False)
 log = logging.getLogger("chain")
 
 DEFAULT_TARGET = "router"
@@ -26,15 +36,18 @@ DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
 
+STEP_META = {
+    "recon":   {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "cyan"},
+    "exploit": {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "yellow"},
+    "privesc": {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "red"},
+    "lateral": {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "magenta"},
+    "cleanup": {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "green"},
+}
+
 
 @dataclass
 class Context:
-    """State carried between chain steps.
-
-    ``state`` holds runtime objects that can't be passed via CLI flags —
-    sockets, parsed recon output, captured credentials. Steps read keys
-    declared in ``Step.requires`` and write keys via the dict they return.
-    """
+    """State carried between chain steps."""
 
     target: str = DEFAULT_TARGET
     results_dir: str = DEFAULT_RESULTS_DIR
@@ -53,29 +66,90 @@ class Step:
 
 
 # ---------------------------------------------------------------------------
-# Per-step adapters. Each one is the seam between the orchestrator's Context
-# and the module's native run() signature. Keep them small.
+# Rich helpers
 # ---------------------------------------------------------------------------
 
+def _print_banner(ctx: Context, steps: list[Step]) -> None:
+    title = Text("⛓  ATTACK CHAIN", style="bold white")
+    meta = (
+        f"[dim]Target:[/dim] [bold cyan]{ctx.target}[/bold cyan]   "
+        f"[dim]Kali:[/dim] [bold cyan]{ctx.kali_host}[/bold cyan]   "
+        f"[dim]Steps:[/dim] [bold white]{', '.join(s.name for s in steps)}[/bold white]"
+    )
+    console.print(Panel(meta, title=title, border_style="dim white", padding=(0, 2)))
+    console.print()
+
+
+def _print_step_header(step: Step, index: int, total: int) -> None:
+    meta = STEP_META.get(step.name, {})
+    color = meta.get("color", "white")
+    tactic = meta.get("tactic", "")
+    techniques = "  ".join(f"[dim]{t}[/dim]" for t in meta.get("techniques", []))
+
+    progress = f"[dim]({index}/{total})[/dim]"
+    header = (
+        f"[bold {color}]{step.name.upper()}[/bold {color}]  "
+        f"{progress}   [dim italic]{tactic}[/dim italic]   {techniques}"
+    )
+    console.print(Rule(header, style=color))
+    console.print()
+
+
+def _print_step_result(step: Step, elapsed: float, success: bool, error: str = "") -> None:
+    console.print()
+    meta = STEP_META.get(step.name, {})
+    color = meta.get("color", "white")
+    if success:
+        msg = f"[bold green]✓[/bold green]  [bold {color}]{step.name}[/bold {color}]  [green]completed[/green]  [dim]{elapsed:.1f}s[/dim]"
+    else:
+        msg = f"[bold red]✗[/bold red]  [bold {color}]{step.name}[/bold {color}]  [red]failed[/red]  [dim]{elapsed:.1f}s[/dim]  [red]{error}[/red]"
+    console.print(msg)
+    console.print()
+
+
+def _print_summary(results: list[dict]) -> None:
+    console.print(Rule("[bold white]CHAIN SUMMARY[/bold white]", style="dim white"))
+    console.print()
+
+    table = Table(box=box.SIMPLE, show_header=True, header_style="dim", padding=(0, 2))
+    table.add_column("Step",      style="bold white",  no_wrap=True)
+    table.add_column("Status",    no_wrap=True)
+    table.add_column("Time",      style="dim",         no_wrap=True)
+    table.add_column("Tactic",    style="dim italic")
+    table.add_column("Techniques",style="dim")
+
+    for r in results:
+        meta = STEP_META.get(r["name"], {})
+        color = meta.get("color", "white")
+        status = (
+            f"[green]✓ ok[/green]" if r["ok"]
+            else f"[red]✗ failed[/red]"
+        )
+        techniques = " · ".join(meta.get("techniques", []))
+        table.add_row(
+            f"[{color}]{r['name']}[/{color}]",
+            status,
+            f"{r['elapsed']:.1f}s",
+            meta.get("tactic", ""),
+            techniques,
+        )
+
+    console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# Per-step adapters
+# ---------------------------------------------------------------------------
 
 def _step_recon(ctx: Context) -> dict[str, Any]:
     from initial_recon_1 import run as recon_run
-
-    recon_run(
-        target=ctx.target,
-        results_dir=ctx.results_dir,
-        wordlist=ctx.wordlist,
-    )
+    recon_run(target=ctx.target, results_dir=ctx.results_dir, wordlist=ctx.wordlist)
     return {"recon_results": ctx.results_dir}
 
 
 def _step_exploit(ctx: Context) -> dict[str, Any]:
     from initial_access import get_www_shell
-
-    www_shell = get_www_shell(
-        target_ip=ctx.target,
-        kali_ip=ctx.kali_host,
-    )
+    www_shell = get_www_shell(target_ip=ctx.target, kali_ip=ctx.kali_host)
     if www_shell is None:
         raise RuntimeError("exploit returned no www-data shell")
     return {"www_shell": www_shell}
@@ -83,7 +157,6 @@ def _step_exploit(ctx: Context) -> dict[str, Any]:
 
 def _step_privesc(ctx: Context) -> dict[str, Any]:
     from privesc import run as privesc_run
-
     root_shell = privesc_run(ctx.state["www_shell"], kali_host=ctx.kali_host)
     if root_shell is None:
         raise RuntimeError("privesc returned no root shell")
@@ -96,37 +169,25 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
         if sock is not None:
             try:
                 sock.close()
-            except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+            except Exception as exc:
                 log.warning("failed to close %s: %s", key, exc)
-
     return _close
 
 
 # ---------------------------------------------------------------------------
-# Chain definition. Order matters; ``requires`` declares the data dependency
-# so a misconfigured chain fails pre-flight instead of mid-run.
+# Chain definition
 # ---------------------------------------------------------------------------
 
 CHAIN: list[Step] = [
     Step("recon", _step_recon),
-    Step(
-        "exploit",
-        _step_exploit,
-        teardown=_teardown_close_socket("www_shell"),
-    ),
-    Step(
-        "privesc",
-        _step_privesc,
-        requires=("www_shell",),
-        teardown=_teardown_close_socket("root_shell"),
-    ),
+    Step("exploit", _step_exploit, teardown=_teardown_close_socket("www_shell")),
+    Step("privesc", _step_privesc, requires=("www_shell",), teardown=_teardown_close_socket("root_shell")),
 ]
 
 
 # ---------------------------------------------------------------------------
 # Selection + execution
 # ---------------------------------------------------------------------------
-
 
 def _index_of(name: str, steps: list[Step]) -> int:
     for i, step in enumerate(steps):
@@ -136,13 +197,7 @@ def _index_of(name: str, steps: list[Step]) -> int:
     raise SystemExit(f"unknown step {name!r}; choose one of: {valid}")
 
 
-def _select(
-    steps: list[Step],
-    *,
-    only: str | None,
-    start: str | None,
-    stop: str | None,
-) -> list[Step]:
+def _select(steps, *, only, start, stop) -> list[Step]:
     if only is not None:
         return [steps[_index_of(only, steps)]]
     lo = _index_of(start, steps) if start else 0
@@ -152,54 +207,65 @@ def _select(
     return steps[lo:hi]
 
 
-def run_chain(
-    ctx: Context,
-    *,
-    only: str | None = None,
-    start: str | None = None,
-    stop: str | None = None,
-) -> Context:
+def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
     selected = _select(CHAIN, only=only, start=start, stop=stop)
+    _print_banner(ctx, selected)
+
+    results: list[dict] = []
     executed: list[Step] = []
+
     try:
-        for step in selected:
+        for i, step in enumerate(selected, 1):
             missing = [k for k in step.requires if k not in ctx.state]
             if missing:
                 msg = (
                     f"step {step.name!r} missing required state: {missing}. "
-                    "Run an earlier step that produces it, or pre-populate "
-                    "ctx.state when calling run_chain()."
+                    "Run an earlier step that produces it."
                 )
                 if step.optional:
                     log.warning(msg)
                     continue
                 raise RuntimeError(msg)
 
-            log.info("=== step: %s ===", step.name)
+            _print_step_header(step, i, len(selected))
+            t0 = time.perf_counter()
+            ok = True
+            err = ""
             try:
                 delta = step.run(ctx) or {}
-            except Exception as exc:  # noqa: BLE001 — surfaced to caller below
-                if step.optional:
-                    log.warning("optional step %s failed: %s", step.name, exc)
-                    continue
-                raise
+            except Exception as exc:
+                ok = False
+                err = str(exc)
+                if not step.optional:
+                    elapsed = time.perf_counter() - t0
+                    _print_step_result(step, elapsed, ok, err)
+                    results.append({"name": step.name, "ok": ok, "elapsed": elapsed})
+                    raise
+            elapsed = time.perf_counter() - t0
             ctx.state.update(delta)
             executed.append(step)
+            _print_step_result(step, elapsed, ok, err)
+            results.append({"name": step.name, "ok": ok, "elapsed": elapsed})
+            time.sleep(0.5)
+
     finally:
         for step in reversed(executed):
             if step.teardown is None:
                 continue
             try:
                 step.teardown(ctx)
-            except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+            except Exception as exc:
                 log.warning("teardown %s failed: %s", step.name, exc)
+
+        if results:
+            _print_summary(results)
+
     return ctx
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -210,20 +276,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
     step_names = [s.name for s in CHAIN]
     sel = p.add_mutually_exclusive_group()
-    sel.add_argument(
-        "--only", choices=step_names, help="Run a single step by name."
-    )
-    sel.add_argument(
-        "--from", dest="start", choices=step_names, help="Start at this step."
-    )
-    p.add_argument(
-        "--to", dest="stop", choices=step_names, help="Stop after this step."
-    )
-
-    p.add_argument(
-        "--list", action="store_true", help="List configured steps and exit."
-    )
+    sel.add_argument("--only", choices=step_names)
+    sel.add_argument("--from", dest="start", choices=step_names)
+    p.add_argument("--to", dest="stop", choices=step_names)
+    p.add_argument("--list", action="store_true")
     p.add_argument("-v", "--verbose", action="store_true")
+
     args = p.parse_args(argv)
     if args.only is not None and args.stop is not None:
         p.error("--only cannot be combined with --to")
@@ -231,17 +289,26 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _list_steps() -> None:
+    console.print(Rule("[dim]configured steps[/dim]", style="dim"))
     for step in CHAIN:
-        reqs = f" (requires: {', '.join(step.requires)})" if step.requires else ""
-        opt = " [optional]" if step.optional else ""
-        print(f"  {step.name}{opt}{reqs}")
+        meta = STEP_META.get(step.name, {})
+        color = meta.get("color", "white")
+        reqs = f"  [dim]requires: {', '.join(step.requires)}[/dim]" if step.requires else ""
+        opt = "  [dim][optional][/dim]" if step.optional else ""
+        techniques = "  ".join(f"[dim]{t}[/dim]" for t in meta.get("techniques", []))
+        console.print(
+            f"  [{color}]{step.name:<10}[/{color}]"
+            f"  [dim italic]{meta.get('tactic', ''):<35}[/dim italic]"
+            f"  {techniques}{reqs}{opt}"
+        )
+    console.print()
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="[%(name)s] %(message)s",
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="[dim][%(name)s][/dim] %(message)s",
     )
     if args.list:
         _list_steps()
