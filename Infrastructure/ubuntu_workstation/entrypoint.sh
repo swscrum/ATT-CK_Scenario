@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Clean any stale X server locks left behind by a previous container start
+# (matters when Docker restarts the container without recreating it — the
+# overlay /tmp can keep /tmp/.X1-lock around even though the X server is gone).
+rm -f /tmp/.X*-lock
+rm -rf /tmp/.X11-unix
+mkdir -p /tmp/.X11-unix
+chmod 1777 /tmp/.X11-unix
+
 # Start sshd in the background so the container has a remote shell.
 /usr/sbin/sshd
 
