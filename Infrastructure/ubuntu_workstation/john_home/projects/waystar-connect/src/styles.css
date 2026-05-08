@@ -1,0 +1,12 @@
+:root {
+  --brand: #2b6cb0;
+  --ink: #1a202c;
+  --bg: #f7fafc;
+}
+
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: system-ui, sans-serif; }
+
+main { max-width: 720px; margin: 4rem auto; padding: 1rem; }
+h1   { color: var(--brand); font-weight: 600; letter-spacing: -0.02em; }
+.cta { display: inline-block; background: var(--brand); color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; text-decoration: none; }
+.cta:hover { filter: brightness(1.1); }

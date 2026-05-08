@@ -1,0 +1,30 @@
+[user]
+	name = John Stravidis
+	email = john.stravidis@waystar-connect.dev
+
+[init]
+	defaultBranch = main
+
+[pull]
+	rebase = false
+
+[push]
+	default = simple
+	autoSetupRemote = true
+
+[core]
+	editor = vim
+	autocrlf = input
+
+[diff]
+	colorMoved = default
+
+[merge]
+	conflictstyle = zdiff3
+
+[alias]
+	st = status
+	co = checkout
+	br = branch
+	ci = commit
+	last = log -1 HEAD

@@ -20,9 +20,13 @@ services:
     restart: unless-stopped
 
   apache:
-    build: ./apache
-    # wir brauchen einen eigenen build um Dinge im Container selbst zu configurieren und nicht fertige images per httpd:2.4.50
-    # muss nur httpd:2.4.50 intern nutzen 
+    build:
+      context: .
+      dockerfile: apache/Dockerfile
+    # We need our own build so we can configure things inside the container,
+    # rather than using the prebuilt httpd:2.4.50 image directly. The image
+    # only has to USE httpd:2.4.50 internally as the FROM base.
+    # Build context is Infrastructure/ so apache/Dockerfile can also COPY from shared-lab-keys/.
     container_name: apache
     cap_add:
       - NET_ADMIN
@@ -37,7 +41,10 @@ services:
     restart: unless-stopped
 
   ubuntu_workstation:
-    build: ./ubuntu_workstation
+    build:
+      context: .
+      dockerfile: ubuntu_workstation/Dockerfile
+    # context is Infrastructure/ so ubuntu_workstation/Dockerfile can also COPY from shared-lab-keys/
     container_name: ubuntu_workstation
     ports:
       - "5901:5901"
@@ -75,8 +82,8 @@ networks:
         - subnet: 10.20.0.0/24
   internal_net:
     driver: bridge
-    # internal: true entfernt - Docker blockiert sonst IP-Forwarding
-    # durch den Router-Container hindurch auf Host-Bridge-Ebene.
+    # `internal: true` removed — Docker would otherwise block IP forwarding
+    # through the router container at the host bridge level.
     ipam:
       config:
         - subnet: 10.30.0.0/24
