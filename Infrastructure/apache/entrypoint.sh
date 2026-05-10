@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ================================
-#  UNSERE AUFGABE: Reverse-Routing
+#  Reverse-routing setup
 # ================================
 DEFAULT_ROUTER_IP="10.30.0.4"
 ROUTER_IP="${ROUTER_IP:-$DEFAULT_ROUTER_IP}"
@@ -15,24 +15,24 @@ if [ "$ROUTER_IP" = "$DEFAULT_ROUTER_IP" ]; then
             ROUTER_IP="$RESOLVED_ROUTER_IP"
             break
         fi
-        echo "Warte auf DNS-Auflösung für 'router' (Versuch $i/$RETRIES)..."
+        echo "Waiting for DNS resolution of 'router' (attempt $i/$RETRIES)..."
         sleep 2
     done
 fi
 
 if [ -n "$ROUTER_IP" ]; then
     if [ -n "$RESOLVED_ROUTER_IP" ]; then
-        echo "Füge Route zum Public Net (10.10.0.0/24) über Router ($ROUTER_IP) hinzu..."
+        echo "Adding route to public_net (10.10.0.0/24) via router ($ROUTER_IP)..."
     else
-        echo "DNS-Auflösung für 'router' fehlgeschlagen, verwende Fallback Router-IP ($ROUTER_IP)..."
+        echo "DNS resolution for 'router' failed, falling back to default router IP ($ROUTER_IP)..."
     fi
     ip route add 10.10.0.0/24 via "$ROUTER_IP" || true
 else
-    echo "ERROR: Konnte Router IP nicht finden, Reverse-Shell Routing könnte fehlschlagen."
+    echo "ERROR: could not determine router IP; reverse-shell routing may fail."
 fi
 
 # ================================
-#  TEAM-AUFGABE: CMD ausführen
+#  Hand off to the original CMD
 # ================================
-echo "Übergebe an das originale Startskript: $@"
+echo "Handing off to the original start script: $@"
 exec "$@"
