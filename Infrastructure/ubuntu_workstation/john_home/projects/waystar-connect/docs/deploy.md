@@ -12,23 +12,28 @@ cd ~/projects/waystar-connect
 git pull
 npm ci             # if package.json changed
 npm run build      # outputs to ./dist
-npm run deploy     # rsync to apache:/opt/waystar-connect/dist/
+npm run deploy     # rsync to apache:/usr/local/apache2/htdocs/
 ```
 
 The `npm run deploy` script just runs:
 ```
-rsync -avz --delete dist/ john.stravidis@apache:/opt/waystar-connect/dist/
+rsync -avz --delete dist/ john.stravidis@apache:/usr/local/apache2/htdocs/
 ```
 
 After the rsync, Apache picks up the new files automatically — there's no
-service restart involved (the htdocs directory is bind-mounted from the host
-through the Docker compose set-up; rsync writes through the same path).
+service restart involved (`/usr/local/apache2/htdocs` is Apache's active
+document root and is bind-mounted from `Infrastructure/html` in docker-compose).
 
 ## Rollback
 
-The previous bundle is kept at `apache:/opt/waystar-connect/dist.prev/` for
-two deploys; copy it back over `dist/` to roll forward to a known-good
-state. (TODO before v0.5: write a proper `rollback.sh`.)
+Keep a local copy before deploy if you need rollback:
+```sh
+cp -a dist dist.prev
+```
+Then restore with:
+```sh
+rsync -avz --delete dist.prev/ john.stravidis@apache:/usr/local/apache2/htdocs/
+```
 
 ## Known issue
 

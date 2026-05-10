@@ -17,12 +17,16 @@ RUN apt-get update \
         openssh-server \
         sudo \
         bash \
+        git \
         nano \
         less \
+        rsync \
         procps \
         iproute2 \
         iputils-ping \
         ca-certificates \
+        nodejs \
+        npm \
         xfce4 \
         xfce4-terminal \
         dbus-x11 \

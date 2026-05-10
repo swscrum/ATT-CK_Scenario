@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "vite build",
-    "deploy": "rsync -avz --delete dist/ john.stravidis@apache:/opt/waystar-connect/dist/"
+    "deploy": "rsync -avz --delete dist/ john.stravidis@apache:/usr/local/apache2/htdocs/"
   },
   "dependencies": {
     "vue": "3.4.21"

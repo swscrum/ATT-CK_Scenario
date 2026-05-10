@@ -30,7 +30,7 @@ services:
       - NET_ADMIN
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
-      - ./html:/usr/local/apache2/htdocs:ro
+      - ./html:/usr/local/apache2/htdocs
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
     networks:
       internal_net:
