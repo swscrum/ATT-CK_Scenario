@@ -28,12 +28,12 @@ RUN apt-get update \
         dbus-x11 \
         tigervnc-standalone-server \
     && rm -rf /var/lib/apt/lists/* \
-    # Remove the default `ubuntu` user that ships with ubuntu:24.04 — leaving
-    # it would mean a second account on the box, in the sudo group, with a
-    # locked password but a real shell. Story-wise the transition team would
-    # have removed it during onboarding. Doing it before useradd john also
-    # frees UID 1000 for john so he gets the conventional first-user UID.
-    && userdel -r ubuntu \
+    # Remove the `ubuntu` user if present — official ubuntu:24.04 images do
+    # not typically include it, so guard the deletion to keep builds
+    # reproducible across environments. Doing it before useradd john also
+    # frees UID 1000 for john so he gets the conventional first-user UID when
+    # that account exists.
+    && if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
     # Create john.stravidis as the primary (and only non-root) user.
     # Weak interim password "waystar2026!" was set by the transition team and
     # was meant to be reset before go-live — never was. Same negligence vector
