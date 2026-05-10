@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Allow reverse shells spawned on this host to reach kali — same route apache adds
+ip route add 10.10.0.0/24 via 10.30.0.4 || true
+
 # Clean any stale X server locks left behind by a previous container start
 # (matters when Docker restarts the container without recreating it — the
 # overlay /tmp can keep /tmp/.X1-lock around even though the X server is gone).

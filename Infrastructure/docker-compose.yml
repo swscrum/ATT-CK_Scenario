@@ -43,6 +43,8 @@ services:
       dockerfile: ubuntu_workstation/Dockerfile
     # context is Infrastructure/ so ubuntu_workstation/Dockerfile can also COPY from shared-lab-keys/
     container_name: ubuntu_workstation
+    cap_add:
+      - NET_ADMIN
     ports:
       - "5901:5901"
     networks:

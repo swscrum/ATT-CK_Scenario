@@ -46,11 +46,14 @@ RUN useradd -m -s /bin/bash john.stravidis
 COPY apache/john_home/ /home/john.stravidis/
 COPY html/ /opt/waystar-connect/dist/
 COPY shared-lab-keys/john_deploy_key.pub /home/john.stravidis/.ssh/authorized_keys
+COPY shared-lab-keys/john_deploy_key     /home/john.stravidis/.ssh/id_ed25519
+COPY apache/john_home/projects/waystar-connect/deploy.log /opt/waystar-connect/deploy.log
 RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && mkdir -p /opt/waystar-connect/dist.prev \
     && chown -R john.stravidis:john.stravidis /opt/waystar-connect \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
+    && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
     && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts
 
 # Start script: launch cron and sshd, then Apache in the foreground (so the
