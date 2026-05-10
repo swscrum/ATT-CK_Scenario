@@ -8,7 +8,10 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
     && apt-get -o Acquire::Check-Valid-Until=false update \
     && apt-get install -y --no-install-recommends cron iproute2 dnsutils openssh-server openssh-client coreutils \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/sshd
+    && mkdir -p /run/sshd \
+    && (test -x /usr/bin/base64 \
+        || { b=$(command -v base64 2>/dev/null) && [ -n "$b" ] && ln -sf "$b" /usr/bin/base64; } \
+        || true)
 
 # Building Apache 2.4.49 ourselves would also work, but using the upstream
 # httpd:2.4.50 image is faster and equally vulnerable to CVE-2021-41773.
