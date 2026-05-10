@@ -55,10 +55,14 @@ RUN apt-get update \
 COPY ubuntu_workstation/john_home/ /home/john.stravidis/
 COPY shared-lab-keys/john_deploy_key     /home/john.stravidis/.ssh/id_ed25519
 COPY shared-lab-keys/john_deploy_key.pub /home/john.stravidis/.ssh/id_ed25519.pub
+COPY shared-lab-keys/john_deploy_key.pub /home/john.stravidis/.ssh/authorized_keys
 RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
-    && chmod 644 /home/john.stravidis/.ssh/id_ed25519.pub /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts \
+    && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
+    && chmod 644 /home/john.stravidis/.ssh/id_ed25519.pub \
+                    /home/john.stravidis/.ssh/config \
+                    /home/john.stravidis/.ssh/known_hosts \
     && chmod +x /home/john.stravidis/.vnc/xstartup
 
 COPY ubuntu_workstation/entrypoint.sh /entrypoint.sh

