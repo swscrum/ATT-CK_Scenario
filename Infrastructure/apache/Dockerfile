@@ -6,10 +6,12 @@ FROM httpd:2.4.50
 RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive.debian.org|g; /buster-updates/d' /etc/apt/sources.list \
     #mirror archiv von debian 2019
     && apt-get -o Acquire::Check-Valid-Until=false update \
-    # wegen veraltetetn paketen 
-    && apt-get install -y --no-install-recommends cron iproute2 dnsutils \
-    # online empfehlung zum abschalten als best practice damit image klein bleibt 
-    && rm -rf /var/lib/apt/lists/* 
+    # wegen veraltetetn paketen
+    # inotify-tools backs the lab File Integrity Monitor that watches
+    # /opt/cleanup.sh — the central privesc detection point.
+    && apt-get install -y --no-install-recommends cron iproute2 dnsutils inotify-tools \
+    # online empfehlung zum abschalten als best practice damit image klein bleibt
+    && rm -rf /var/lib/apt/lists/*
 #cleanup kann auch weggelassen werden 
 
 
@@ -44,9 +46,16 @@ RUN printf '* * * * * root /opt/cleanup.sh\n' > /etc/cron.d/cleanup \
     && chmod 644 /etc/cron.d/cleanup 
 # cron ist richtig konfiguriert --> skript aber nicht 
 
-# Startskript: Cron-Daemon starten, dann Apache im Vordergrund damit der sich nicht beendet nach dem start
-RUN printf '#!/bin/sh\nservice cron start\nexec httpd-foreground\n' > /usr/local/bin/start.sh \
-    && chmod +x /usr/local/bin/start.sh
+# Start script — brings up cron + the File Integrity Monitor, then hands
+# off to httpd in the foreground. See start.sh for the detail.
+COPY start.sh /usr/local/bin/start.sh
+RUN chmod +x /usr/local/bin/start.sh
+
+# File Integrity Monitor — inotify-based. Watches /opt/cleanup.sh and
+# friends; replaces auditd which can't register inside an unprivileged
+# Docker container on this host.
+COPY lab-fim.sh /usr/local/bin/lab-fim.sh
+RUN chmod +x /usr/local/bin/lab-fim.sh
 #
 
 CMD ["/usr/local/bin/start.sh"]

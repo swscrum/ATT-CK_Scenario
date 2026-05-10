@@ -88,27 +88,41 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 
 ## Detection notes per technique
 
-For SOC training and customer SIEM/EDR demos, what *should* fire on each technique. Implementation of the actual detection pipeline is out of scope here (see `intern/Protokolle/Protokoll - 27.04.26.md:20` for the customer's persistent-log-volume ask, currently unimplemented).
+For SOC training and customer SIEM/EDR demos, what *should* fire on each technique. Implementation of the actual detection pipeline (Wazuh / Sigma / Suricata rules) is out of scope here. Persistent log volumes — the customer ask in `intern/Protokolle/Protokoll - 27.04.26.md:20` — landed in PR #58: every signal below now writes to a host-mounted file under `Infrastructure/logs/` so an external SIEM can ingest them.
 
-| Technique(s) | Detection source | Signature / behaviour |
-|---|---|---|
-| T1190 (CVE-2021-41773) | Apache access log + NIDS | URL pattern `cgi-bin/.%32%65/.../bin/sh` is unmistakeable; ETOPEN Suricata rules ship for this CVE |
-| T1059.004 reverse-shell payload | EDR (auditd execve) | `bash -i >& /dev/tcp/...` is a textbook signature |
-| T1053.003 cron tampering | auditd file watch on `/opt/cleanup.sh`; cron logs | content change of a script run as root every minute |
-| T1552.001 / .004 credential discovery | auditd file watch on `/root/.ssh/`, `/opt/waystar-connect/` | unusual reads from www-data / root after foothold |
-| T1021.004 SSH lateral | sshd auth.log | new login from apache→workstation IP, principal `john.stravidis`, no prior session pattern |
-| T1098.004 authorized_keys append | EDR file watch on `~/.ssh/authorized_keys` | append events outside normal user sessions |
-| T1543.002 systemd persistence | auditd file watch on `~/.config/systemd/user/` and `/etc/systemd/`; systemd journal | new unit creation / enable |
-| T1572 / T1071.001 C2 tunnel | NIDS + flow logs | long-lived outbound TLS / SSH to non-routable / unusual destination; periodic keepalive cadence |
-| T1555.003 browser cred dump | EDR | unusual process accessing browser profile DBs |
-| T1110.003 password spray (phase 7) | sshd auth.log + fail2ban | repeated auth failures from the same source IP across multiple accounts |
-| T1018 / T1046 internal scanning | NetFlow / NIDS | bursts of SYN to many hosts/ports on internal subnet originating from a non-scanner host |
-| T1114.001 mail collection | auditd file watch on `/var/mail/`, `~/Maildir/` | unusual reads of mail files outside the user's normal MUA process |
-| T1566.001 + T1204.002 spearphishing chain | mail server logs + EDR (process spawn) | mail with executable attachment; process spawn of attachment payload from mail-processor / MUA |
-| T1486 ransomware encryption | EDR (file syscalls) + filesystem audit | high-rate file rename + size-similar rewrites across many directories; ransom-note file pattern |
-| T1490 inhibit recovery | auditd | systemd timer/service disable; deletion of backup files |
+| Technique(s) | Detection source | Signature / behaviour | Lab log path (PR #58) |
+|---|---|---|---|
+| T1190 (CVE-2021-41773) | Apache access log + NIDS | URL pattern `cgi-bin/.%32%65/.../bin/sh` is unmistakeable; ETOPEN Suricata rules ship for this CVE | `logs/apache/access.log`, `logs/apache/forensic_log`; router NFLOG `FW-NEW: SRC=10.10.0.2 DST=10.30.0.2 DPT=80` in `logs/router/ulog-iptables.log` |
+| T1059.004 reverse-shell payload | EDR (auditd execve) | `bash -i >& /dev/tcp/...` is a textbook signature | router NFLOG `FW-NEW: SRC=10.30.0.2 DST=10.10.0.2 DPT={4444,5555}` in `logs/router/ulog-iptables.log` (apache calling back to kali) |
+| T1053.003 cron tampering | auditd file watch on `/opt/cleanup.sh`; cron logs | content change of a script run as root every minute | `logs/apache/lab-fim.log` line `tag=lab_fim path=/opt/cleanup.sh event=MODIFY` (inotify substitute for auditd — see implementation note below) |
+| T1552.001 / .004 credential discovery | auditd file watch on `/root/.ssh/`, `/opt/waystar-connect/` | unusual reads from www-data / root after foothold | not yet implemented (post-foothold phase) |
+| T1021.004 SSH lateral | sshd auth.log | new login from apache→workstation IP, principal `john.stravidis`, no prior session pattern | `logs/workstation/auth.log` (sshd `LogLevel VERBOSE` records key fingerprints) |
+| T1098.004 authorized_keys append | EDR file watch on `~/.ssh/authorized_keys` | append events outside normal user sessions | `logs/workstation/lab-fim.log` once `john.stravidis` user lands (lab-fim already watches `~john.stravidis/.ssh`) |
+| T1543.002 systemd persistence | auditd file watch on `~/.config/systemd/user/` and `/etc/systemd/`; systemd journal | new unit creation / enable | extend `Infrastructure/ubuntu_workstation/lab-fim.sh` watch list when this slice lands |
+| T1572 / T1071.001 C2 tunnel | NIDS + flow logs | long-lived outbound TLS / SSH to non-routable / unusual destination; periodic keepalive cadence | `logs/router/ulog-iptables.log` — every NEW flow is captured with full 5-tuple |
+| T1555.003 browser cred dump | EDR | unusual process accessing browser profile DBs | not yet implemented (post-foothold phase) |
+| T1110.003 password spray (phase 7) | sshd auth.log + fail2ban | repeated auth failures from the same source IP across multiple accounts | `logs/workstation/auth.log` |
+| T1018 / T1046 internal scanning | NetFlow / NIDS | bursts of SYN to many hosts/ports on internal subnet originating from a non-scanner host | `logs/router/ulog-iptables.log` (every SYN crosses FORWARD and gets NFLOG-tagged) |
+| T1114.001 mail collection | auditd file watch on `/var/mail/`, `~/Maildir/` | unusual reads of mail files outside the user's normal MUA process | `logs/workstation/lab-fim.log` (lab-fim watches `/var/mail`) |
+| T1566.001 + T1204.002 spearphishing chain | mail server logs + EDR (process spawn) | mail with executable attachment; process spawn of attachment payload from mail-processor / MUA | not yet implemented |
+| T1486 ransomware encryption | EDR (file syscalls) + filesystem audit | high-rate file rename + size-similar rewrites across many directories; ransom-note file pattern | not yet implemented |
+| T1490 inhibit recovery | auditd | systemd timer/service disable; deletion of backup files | not yet implemented |
 
 These are minimum-viable detection signals — in a fuller implementation each would map to a concrete Wazuh rule, Sigma rule, or Suricata signature. That mapping is step-4 work; this table is the input.
+
+### Ground-truth correlation
+
+Each chain run writes `Attack-chain/results/chain-<ISO8601>.json` — a per-step record with `started` / `ended` UTC timestamps, tactic + technique IDs, and ok/elapsed. SOC analysts can match each detection-tool alert against the corresponding step's window to verify coverage and measure detection latency.
+
+### Implementation note: auditd → inotify substitution
+
+The detection design above calls for `auditd` file-watches on the apache and workstation containers. In practice, the kernel audit subsystem refuses `audit_set_enabled` from inside an unprivileged Docker container on this host (and even with `privileged: true` + `seccomp=unconfined` + `apparmor=unconfined` it remains locked at boot). Rather than mandate a host-side `audit=1`/`audit=2` kernel-cmdline change, the lab uses `inotify-tools` to produce an equivalent SIEM-ingestible signal:
+
+```
+2026-05-10T14:49:12+0000 tag=lab_fim path=/opt/cleanup.sh event=MODIFY
+```
+
+Wazuh's File Integrity Monitoring module uses inotify under the hood when auditd isn't available, so this matches what a real Linux EDR sees. The watch lists live in `Infrastructure/{apache,ubuntu_workstation}/lab-fim.sh` — same paths an `auditctl -w` rule file would name.
 
 ## Coverage summary
 

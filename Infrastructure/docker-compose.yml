@@ -8,8 +8,10 @@ services:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.rp_filter=0
       - net.ipv4.conf.default.rp_filter=0
-    ports:
-      - "80:80"
+    # NOTE: host-side ports: ["80:80"] is intentionally omitted — Docker 29
+    # on this kernel breaks the userland-proxy NAT for published ports, and
+    # the attack chain runs entirely on internal Docker bridges anyway.
+    # If host access is needed, hit http://10.10.0.3/ (router bridge IP).
     volumes:
       # Persist router logs (rsyslog + iptables LOG land in /var/log).
       - ./logs/router:/var/log
@@ -44,16 +46,6 @@ services:
   ubuntu_workstation:
     build: ./ubuntu_workstation
     container_name: ubuntu_workstation
-    cap_add:
-      # Required so auditd can load rules into the kernel audit subsystem.
-      - AUDIT_CONTROL
-      - AUDIT_READ
-    security_opt:
-      # Docker's default seccomp + AppArmor profiles both block audit_*
-      # operations; auditd needs them to bind the netlink socket and set
-      # daemon state. Lab-only — do not copy into production.
-      - seccomp=unconfined
-      - apparmor=unconfined
     ports:
       - "5901:5901"
     volumes:

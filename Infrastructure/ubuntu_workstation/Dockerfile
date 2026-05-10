@@ -18,7 +18,7 @@ RUN apt-get update \
         dbus-x11 \
         tigervnc-standalone-server \
         rsyslog \
-        auditd \
+        inotify-tools \
     && rm -rf /var/lib/apt/lists/* \
     # LAB ONLY – intentional weak credentials for the attack-chain demo.
     # Do NOT use outside an isolated lab environment.
@@ -39,8 +39,11 @@ RUN apt-get update \
         > /root/.vnc/xstartup \
     && chmod +x /root/.vnc/xstartup
 
-# Audit rules loaded by entrypoint via `auditctl -R`.
-COPY audit.rules /etc/audit/rules.d/lab.rules
+# File integrity monitor — inotify watcher launched from entrypoint.
+# Replaces auditd, which fails to register with the kernel audit subsystem
+# inside Docker on this host (audit_enabled appears locked at boot).
+COPY lab-fim.sh /usr/local/bin/lab-fim.sh
+RUN chmod +x /usr/local/bin/lab-fim.sh
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

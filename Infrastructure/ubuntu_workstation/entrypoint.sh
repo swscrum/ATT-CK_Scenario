@@ -6,9 +6,6 @@ set -e
 # Restore the standard ubuntu ownership/permissions inside the container.
 chown root:syslog /var/log
 chmod 0775 /var/log
-mkdir -p /var/log/audit
-chown root:adm /var/log/audit
-chmod 0750 /var/log/audit
 
 # Start rsyslog so /var/log/{syslog,auth.log,kern.log} get written. /var/log
 # is bind-mounted to Infrastructure/logs/workstation on the host so SOC tools
@@ -17,20 +14,13 @@ chmod 0750 /var/log/audit
 rsyslogd \
     || echo "[entrypoint] rsyslogd failed to start"
 
-# auditd's default priority_boost=4 requires CAP_SYS_NICE which we don't
-# grant. Drop the boost so auditd can start under just AUDIT_CONTROL/READ.
-sed -i 's/^priority_boost.*/priority_boost = 0/' /etc/audit/auditd.conf
-
-# Start auditd. The kernel audit netlink socket is host-wide; in this lab the
-# host's auditd is inactive so the container can claim it. Requires
-# CAP_AUDIT_CONTROL plus seccomp=unconfined (set in docker-compose.yml) so
-# the audit_* syscalls aren't blocked by Docker's default seccomp profile.
-auditd \
-    || echo "[entrypoint] auditd failed to start"
-# Give auditd a beat to grab the netlink socket before loading rules.
-sleep 1
-auditctl -R /etc/audit/rules.d/lab.rules \
-    || echo "[entrypoint] auditctl rule load failed"
+# Start the lab file integrity monitor (inotify-based). Output goes to
+# /var/log/lab-fim.log on host. See lab-fim.sh for the watched paths and
+# the MITRE technique mapping.
+touch /var/log/lab-fim.log
+chmod 0644 /var/log/lab-fim.log
+nohup /usr/local/bin/lab-fim.sh >> /var/log/lab-fim.log 2>&1 &
+echo "[entrypoint] lab-fim watcher PID $!"
 
 # Start sshd in the background so the container has a remote shell.
 /usr/sbin/sshd
