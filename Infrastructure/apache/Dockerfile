@@ -6,7 +6,7 @@ FROM httpd:2.4.50
 # / openssh-server. (openssh-server is added so john.stravidis can deploy in.)
 RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive.debian.org|g; /buster-updates/d' /etc/apt/sources.list \
     && apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install -y --no-install-recommends cron iproute2 dnsutils openssh-server \
+    && apt-get install -y --no-install-recommends cron iproute2 dnsutils openssh-server openssh-client coreutils \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd
 

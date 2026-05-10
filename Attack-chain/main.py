@@ -196,6 +196,7 @@ def _step_lateral(ctx: Context) -> dict[str, Any]:
         workstation_port=ctx.state.get("workstation_port", 22),
         kali_host=ctx.kali_host,
         kali_port=ctx.state.get("lateral_port", 6666),
+        pivot_shell=ctx.state.get("root_shell"),
     )
 
     if not result.get("verification"):
