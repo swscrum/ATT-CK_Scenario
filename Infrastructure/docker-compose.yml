@@ -61,6 +61,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ../Attack-chain:/Attack-chain
+      - ./shared-lab-keys:/shared-lab-keys:ro
     networks:
       public_net:
         ipv4_address: 10.10.0.2

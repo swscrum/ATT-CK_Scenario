@@ -19,7 +19,6 @@ import logging
 import sys
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable
 
 from rich.columns import Columns
@@ -37,12 +36,7 @@ DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
-DEFAULT_DEPLOY_KEY_FILE = str(
-    Path(__file__).resolve().parent.parent
-    / "Infrastructure"
-    / "shared-lab-keys"
-    / "john_deploy_key"
-)
+DEFAULT_DEPLOY_KEY_FILE = "/shared-lab-keys/john_deploy_key"
 
 STEP_META = {
     "recon": {
