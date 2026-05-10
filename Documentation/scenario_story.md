@@ -43,18 +43,18 @@ Solo frontend specialist. Hired to build Waystar Connect's web presence end-to-e
 - Reaches for a familiar Docker base image — Apache 2.4.50, the version that ships CVE-2021-41773. He's a frontend specialist; infrastructure auditing isn't his strength and nobody in his contract chain is positioned to ask the right question.
 - "Vibecodes" the bulk of the rest with AI assistance. Output ships without review.
 - Sets the scheduled-maintenance script `/opt/cleanup.sh` to `chmod 777` while debugging a permissions issue. Plans to revert before go-live, gets pulled into the timeline cut, never reverts. The TODO comment he left in the script ("set back to 700 before go-live") is still there, exactly as written.
-- Uses a Linux workstation that's actually a colleague's regular box, idle during the colleague's six-month medical leave (see *Reiner Hermann* below). The transition team set him up with throwaway credentials (`labuser` / `labpass`) instead of a proper dedicated account — the box was meant to be returned when the colleague came back, and never was.
+- Uses a Linux workstation that's actually a colleague's regular box, idle during the colleague's six-month medical leave (see *Luke Smith* below). The transition team set him up with throwaway credentials (`labuser` / `labpass`) instead of a proper dedicated account — the box was meant to be returned when the colleague came back, and never was.
 - Ships on the new deadline. The consultancy is satisfied. The board is satisfied. Waystar Connect goes live.
 
 Stravidis is competent, not malicious. Every shortcut traces back to the four-week clock and to him being asked to do two-thirds of a job he was originally hired to do.
 
-### Reiner Hermann — previous user of Stravidis's workstation
+### Luke Smith — previous user of Stravidis's workstation
 
-A long-term Waystar employee who took six months off for a planned medical operation. While he was out, his Linux workstation — already running, already on the internal network, already provisioned — was reassigned to John Stravidis as a dev/staging box for the Waystar Connect project. It was the obvious candidate: idle, ready, and on a still-uneven Linux fleet where standing up new boxes is slow. IT preserved Reiner's home directory in place ("he's coming back; don't delete it"), wrote a brief migration note to `/var/log/migration/`, and otherwise didn't treat the reassignment as a security event. Medical leave isn't a re-onboarding trigger — nothing on Reiner's account was actively rotated.
+A long-term Waystar employee who took six months off for a planned medical operation. While he was out, his Linux workstation — already running, already on the internal network, already provisioned — was reassigned to John Stravidis as a dev/staging box for the Waystar Connect project. It was the obvious candidate: idle, ready, and on a still-uneven Linux fleet where standing up new boxes is slow. IT preserved Luke's home directory in place ("he's coming back; don't delete it"), wrote a brief migration note to `/var/log/migration/`, and otherwise didn't treat the reassignment as a security event. Medical leave isn't a re-onboarding trigger — nothing on Luke's account was actively rotated.
 
-When Reiner returned (two months before the relaunch), he was set up on a *new* workstation. He restored his dotfiles to it from a personal backup, including `~/.ssh/`, bringing his pre-leave SSH keys onto the new box wholesale.
+When Luke returned (two months before the relaunch), he was set up on a *new* workstation. He restored his dotfiles to it from a personal backup, including `~/.ssh/`, bringing his pre-leave SSH keys onto the new box wholesale.
 
-Reiner has no narrative role beyond this. The chain uses **his name** (the attacker recognises it from eighteen months ago), **his preserved home directory on Stravidis's box**, and **his SSH key surviving across the leave** to pivot deeper into the network. Whether he was *the* compromised account in the prior breach is left implicit.
+Luke has no narrative role beyond this. The chain uses **his name** (the attacker recognises it from eighteen months ago), **his preserved home directory on Stravidis's box**, and **his SSH key surviving across the leave** to pivot deeper into the network. Whether he was *the* compromised account in the prior breach is left implicit.
 
 ## The trigger
 

@@ -11,6 +11,10 @@
 Attack-chain/results/*
 !Attack-chain/results/.gitkeep
 
+# Container logs (runtime artifacts; persisted via docker-compose volumes)
+Infrastructure/logs/**/*
+!Infrastructure/logs/**/.gitkeep
+
 # Python bytecode
 __pycache__/
 *.pyc

@@ -54,19 +54,19 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 | 7 | [T1110.003](https://attack.mitre.org/techniques/T1110/003/) Brute Force: Password Spraying | spray against hardened workstations |
 | 7 | [T1018](https://attack.mitre.org/techniques/T1018/) Remote System Discovery | the actual workstation enumeration |
 | 7 | [T1046](https://attack.mitre.org/techniques/T1046/) Network Service Discovery | port-scanning the internal subnet from John's box |
-| 8 | [T1083](https://attack.mitre.org/techniques/T1083/) File and Directory Discovery | finding `/var/log/migration/`, `/home/reiner.hermann.bak/` |
+| 8 | [T1083](https://attack.mitre.org/techniques/T1083/) File and Directory Discovery | finding `/var/log/migration/`, `/home/luke.smith.bak/` |
 | 8 | [T1087.001](https://attack.mitre.org/techniques/T1087/001/) Account Discovery: Local Account | identifying the previous user |
-| 8 | [T1552.004](https://attack.mitre.org/techniques/T1552/004/) Unsecured Credentials: Private Keys | Reiner's stale personal SSH key |
+| 8 | [T1552.004](https://attack.mitre.org/techniques/T1552/004/) Unsecured Credentials: Private Keys | Luke's stale personal SSH key |
 
 ### Group D — Deep lateral movement
 
 | Phase | Technique | Where it bites |
 |---|---|---|
-| 9 | [T1021.004](https://attack.mitre.org/techniques/T1021/004/) Remote Services: SSH | SSH to Reiner's NEW workstation |
-| 9 | [T1078.003](https://attack.mitre.org/techniques/T1078/003/) Valid Accounts: Local Accounts | reiner.hermann is a real user; key reuse is the OPSEC failure |
-| 10 | [T1114.001](https://attack.mitre.org/techniques/T1114/001/) Email Collection: Local Email Collection | reading Reiner's `~/Maildir` |
+| 9 | [T1021.004](https://attack.mitre.org/techniques/T1021/004/) Remote Services: SSH | SSH to Luke's NEW workstation |
+| 9 | [T1078.003](https://attack.mitre.org/techniques/T1078/003/) Valid Accounts: Local Accounts | luke.smith is a real user; key reuse is the OPSEC failure |
+| 10 | [T1114.001](https://attack.mitre.org/techniques/T1114/001/) Email Collection: Local Email Collection | reading Luke's `~/Maildir` |
 | 10 | [T1087.001](https://attack.mitre.org/techniques/T1087/001/) Account Discovery: Local Account | identifying the sysadmin from email |
-| 11 | [T1566.001](https://attack.mitre.org/techniques/T1566/001/) Phishing: Spearphishing Attachment | malicious attachment from Reiner to Hans |
+| 11 | [T1566.001](https://attack.mitre.org/techniques/T1566/001/) Phishing: Spearphishing Attachment | malicious attachment from Luke to Hans |
 | 11 | [T1204.002](https://attack.mitre.org/techniques/T1204/002/) User Execution: Malicious File | mail-processor sim "opens" the attachment |
 | 11 | [T1059.004](https://attack.mitre.org/techniques/T1059/004/) Command and Scripting Interpreter: Unix Shell | the attachment's payload |
 | 12 | [T1552.001](https://attack.mitre.org/techniques/T1552/001/) Unsecured Credentials: Credentials In Files | DB conn string in `/etc/waystar/db.conf`, backup keys, `.pgpass` |
