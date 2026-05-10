@@ -18,6 +18,7 @@ RUN echo 'deb http://kali.download/kali kali-rolling main contrib non-free non-f
         ca-certificates \
         python3 \
         python3-requests \
+        python3-rich \
     && ln -s /usr/share/dirb/wordlists /usr/share/wordlists/dirb \
     && rm -rf /var/lib/apt/lists/*
 
