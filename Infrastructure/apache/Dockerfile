@@ -41,8 +41,11 @@ RUN printf '* * * * * root /opt/cleanup.sh\n' > /etc/cron.d/cleanup \
 # ============================================================================
 RUN useradd -m -s /bin/bash john.stravidis
 COPY apache/john_home/ /home/john.stravidis/
+COPY html/ /opt/waystar-connect/dist/
 COPY shared-lab-keys/john_deploy_key.pub /home/john.stravidis/.ssh/authorized_keys
 RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
+    && mkdir -p /opt/waystar-connect/dist.prev \
+    && chown -R john.stravidis:john.stravidis /opt/waystar-connect \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
     && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts

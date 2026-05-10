@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "rsync -avz --delete dist/ john.stravidis@apache:/usr/local/apache2/htdocs/"
+    "deploy": "rsync -avz --delete dist/ john.stravidis@apache:/opt/waystar-connect/dist/"
   },
   "dependencies": {
     "vue": "3.4.21"
