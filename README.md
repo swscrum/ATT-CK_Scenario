@@ -37,8 +37,8 @@ The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, pl
 
 ```bash
 # Option 1)
-#Automated Orchestration of all phases:
-docker compose exec kali python3 /Attack-chain/main.py -v 
+#Automated Orchestration of all phases and automated cleanup:
+tools/run.sh
 
 # Option 2)
 # Running the phases one by one:
