@@ -37,11 +37,11 @@ DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
 
 STEP_META = {
-    "recon":   {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "cyan"},
-    "exploit": {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "yellow"},
-    "privesc": {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "red"},
-    "lateral": {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "magenta"},
-    "cleanup": {"tactic": "TAxxxx · TBD", "techniques": ["Txxxx"],         "color": "green"},
+    "recon":   {"tactic": "TA0043 · Reconnaissance",       "techniques": ["T1595", "T1592"],     "color": "cyan"},
+    "exploit": {"tactic": "TA0001 · Initial Access",       "techniques": ["T1190", "T1059.004"], "color": "yellow"},
+    "privesc": {"tactic": "TA0004 · Privilege Escalation", "techniques": ["T1053.003", "T1068"], "color": "red"},
+    "lateral": {"tactic": "TA0008 · Lateral Movement",     "techniques": ["T1021.004", "T1078"], "color": "magenta"},
+    "cleanup": {"tactic": "operator hygiene",              "techniques": [],                     "color": "green"},
 }
 
 
