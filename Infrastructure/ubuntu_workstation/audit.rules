@@ -1,0 +1,21 @@
+# Workstation auditd rules — detection signals listed in Documentation/mappings.md
+# Loaded by `auditctl -R /etc/audit/rules.d/lab.rules` from entrypoint.
+
+# John's SSH key directory: writes here = key theft / persistence (T1098.004)
+-w /home/john.stravidis/.ssh -p wa -k ssh_keys
+
+# Bash history tampering (T1070.003 — Defense Evasion: Clear Linux/Mac Shell History)
+-w /home/john.stravidis/.bash_history -p wa -k history_tamper
+
+# Mailbox snooping (T1114.001 — Local Email Collection)
+-w /var/mail -p wa -k mail_access
+
+# Account file changes (T1136 — Create Account / T1098 — Account Manipulation)
+-w /etc/passwd  -p wa -k account_tamper
+-w /etc/shadow  -p wa -k account_tamper
+-w /etc/group   -p wa -k account_tamper
+-w /etc/sudoers -p wa -k account_tamper
+-w /etc/sudoers.d -p wa -k account_tamper
+
+# Sudo invocation tracing (T1548.003 — Abuse Elevation Control Mechanism)
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/sudo -k sudo_exec

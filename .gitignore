@@ -7,9 +7,13 @@
 */isos/*.iso
 .claude
 
-# Recon scan output
+# Recon scan output + attack-chain ground-truth JSON
 Attack-chain/results/*
 !Attack-chain/results/.gitkeep
+
+# Container logs (persisted via docker-compose volumes)
+Infrastructure/logs/**/*
+!Infrastructure/logs/**/.gitkeep
 
 # Python bytecode
 __pycache__/

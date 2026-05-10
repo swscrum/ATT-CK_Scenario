@@ -10,6 +10,9 @@ services:
       - net.ipv4.conf.default.rp_filter=0
     ports:
       - "80:80"
+    volumes:
+      # Persist router logs (rsyslog + iptables LOG land in /var/log).
+      - ./logs/router:/var/log
     networks:
       public_net:
         ipv4_address: 10.10.0.3
@@ -30,6 +33,8 @@ services:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
       - ./html:/usr/local/apache2/htdocs:ro
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
+      # Persist apache access/error logs (CustomLog + ErrorLog write here per httpd.conf).
+      - ./logs/apache:/usr/local/apache2/logs
     networks:
       internal_net:
         ipv4_address: 10.30.0.2
@@ -39,8 +44,21 @@ services:
   ubuntu_workstation:
     build: ./ubuntu_workstation
     container_name: ubuntu_workstation
+    cap_add:
+      # Required so auditd can load rules into the kernel audit subsystem.
+      - AUDIT_CONTROL
+      - AUDIT_READ
+    security_opt:
+      # Docker's default seccomp + AppArmor profiles both block audit_*
+      # operations; auditd needs them to bind the netlink socket and set
+      # daemon state. Lab-only — do not copy into production.
+      - seccomp=unconfined
+      - apparmor=unconfined
     ports:
       - "5901:5901"
+    volumes:
+      # Persist workstation logs (rsyslog + auditd land in /var/log; sshd VERBOSE → auth.log).
+      - ./logs/workstation:/var/log
     networks:
       egress_net: {}
       internal_net:
