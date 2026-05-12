@@ -50,7 +50,7 @@ services:
     ports:
       - "5901:5901"
     volumes:
-      # Persist workstation logs (rsyslog + auditd land in /var/log; sshd VERBOSE → auth.log).
+      # Persist workstation logs (rsyslog writes to /var/log; lab-fim watches via inotify; sshd VERBOSE → auth.log).
       - ./logs/workstation:/var/log
     networks:
       egress_net: {}
