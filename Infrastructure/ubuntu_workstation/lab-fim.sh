@@ -4,10 +4,10 @@
 # auditd in this lab because the kernel audit subsystem can't be enabled
 # from inside an unprivileged Docker container on this host.
 #
-# Each line ends up in /var/log/lab-fim.log (rsyslog also forwards it under
-# tag `lab-fim` to /var/log/syslog) so SOC analysts can write Sigma /
-# Wazuh-FIM rules against the same paths the auditd-based design called
-# out in Documentation/mappings.md.
+# This script writes event lines to stdout; in this lab, the entrypoint
+# redirects that output to /var/log/lab-fim.log so SOC analysts can write
+# Sigma / Wazuh-FIM rules against the same paths the auditd-based design
+# called out in Documentation/mappings.md.
 #
 # Watched paths map to MITRE techniques:
 #   ~/.ssh/                T1098.004 — SSH key persistence
