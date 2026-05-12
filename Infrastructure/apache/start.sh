@@ -9,8 +9,9 @@ set -e
 service cron start
 
 # Lab File Integrity Monitor — see lab-fim.sh for the watched paths.
-# Output goes to /var/log/lab-fim.log inside the container.
-nohup /usr/local/bin/lab-fim.sh >> /var/log/lab-fim.log 2>&1 &
+# Output goes to /usr/local/apache2/logs/lab-fim.log so it persists via
+# the apache logs bind mount.
+nohup /usr/local/bin/lab-fim.sh >> /usr/local/apache2/logs/lab-fim.log 2>&1 &
 echo "[start] lab-fim watcher PID $!"
 
 exec httpd-foreground
