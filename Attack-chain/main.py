@@ -115,6 +115,11 @@ def _iso_utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _sanitize_run_id(run_id: str) -> str:
+    """Strip characters unsafe for filenames/directory names (colons, hyphens)."""
+    return run_id.replace(":", "").replace("-", "")
+
+
 def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
     """Persist a structured per-run record for SIEM correlation.
 
@@ -124,15 +129,15 @@ def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
     """
     out_dir = Path(ctx.results_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    safe_run_id = run_id.replace(":", "")
-    out_path = out_dir / f"chain-{safe_run_id}.json"
+    sanitized = _sanitize_run_id(run_id)
+    out_path = out_dir / f"chain-{sanitized}.json"
     payload = {
         "run_id": run_id,
         "target": ctx.target,
         "kali": ctx.kali_host,
         "steps": results,
     }
-    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     log.info("wrote ground truth: %s", out_path)
 
 
@@ -256,9 +261,13 @@ def _result_entry(step: Step, *, ok: bool, started: str, ended: str,
 
 def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
     selected = _select(CHAIN, only=only, start=start, stop=stop)
-    _print_banner(ctx, selected)
 
     run_id = _iso_utc()
+    run_dir = Path(ctx.results_dir) / f"run-{_sanitize_run_id(run_id)}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    ctx.results_dir = str(run_dir)
+
+    _print_banner(ctx, selected)
     results: list[dict] = []
     executed: list[Step] = []
 

@@ -39,6 +39,10 @@ RUN apt-get update \
         > /root/.vnc/xstartup \
     && chmod +x /root/.vnc/xstartup
 
+# rsyslog drop-in: mirrors syslog + auth.log to /var/log/persist so the
+# host-persisted bind-mount captures them without chowning /var/log itself.
+COPY 40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
+
 # File integrity monitor — inotify watcher launched from entrypoint.
 # Replaces auditd, which fails to register with the kernel audit subsystem
 # inside Docker on this host (audit_enabled appears locked at boot).

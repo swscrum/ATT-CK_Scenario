@@ -50,8 +50,11 @@ services:
     ports:
       - "5901:5901"
     volumes:
-      # Persist workstation logs (rsyslog writes to /var/log; lab-fim watches via inotify; sshd VERBOSE → auth.log).
-      - ./logs/workstation:/var/log
+      # Persist workstation logs (rsyslog mirrors syslog + auth.log to
+      # /var/log/persist, and the inotify FIM watcher writes lab-fim.log
+      # there; sshd VERBOSE → auth.log). /var/log itself is NOT bind-mounted
+      # to avoid changing host directory ownership.
+      - ./logs/workstation:/var/log/persist
     networks:
       egress_net: {}
       internal_net:

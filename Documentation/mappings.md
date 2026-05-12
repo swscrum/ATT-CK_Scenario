@@ -112,7 +112,7 @@ These are minimum-viable detection signals — in a fuller implementation each w
 
 ### Ground-truth correlation
 
-Each chain run writes `Attack-chain/results/chain-<ISO8601>.json` — a per-step record with `started` / `ended` UTC timestamps, tactic + technique IDs, and ok/elapsed. SOC analysts can match each detection-tool alert against the corresponding step's window to verify coverage and measure detection latency.
+Each chain run creates a timestamped subdirectory `Attack-chain/results/run-<ISO8601>/` containing `chain-<ISO8601>.json` — a per-step record with `started` / `ended` UTC timestamps, tactic + technique IDs, and ok/elapsed. SOC analysts can match each detection-tool alert against the corresponding step's window to verify coverage and measure detection latency.
 
 ### Implementation note: auditd → inotify substitution
 
