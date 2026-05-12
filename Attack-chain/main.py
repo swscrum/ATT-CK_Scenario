@@ -14,10 +14,13 @@ Add a new step by:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 from rich.columns import Columns
@@ -105,6 +108,37 @@ def _print_step_result(step: Step, elapsed: float, success: bool, error: str = "
         msg = f"[bold red]✗[/bold red]  [bold {color}]{step.name}[/bold {color}]  [red]failed[/red]  [dim]{elapsed:.1f}s[/dim]  [red]{error}[/red]"
     console.print(msg)
     console.print()
+
+
+def _iso_utc() -> str:
+    """Return current UTC time as ISO 8601 with second precision (Z-suffixed)."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _sanitize_run_id(run_id: str) -> str:
+    """Strip characters unsafe for filenames/directory names (colons, hyphens)."""
+    return run_id.replace(":", "").replace("-", "")
+
+
+def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
+    """Persist a structured per-run record for SIEM correlation.
+
+    Writes ``<results_dir>/chain-<run_id>.json`` with per-step timestamps,
+    Tactic/Technique IDs and ok/elapsed. Blue-team can match these windows
+    against alerts fired in their SIEM/EDR.
+    """
+    out_dir = Path(ctx.results_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    sanitized = _sanitize_run_id(run_id)
+    out_path = out_dir / f"chain-{sanitized}.json"
+    payload = {
+        "run_id": run_id,
+        "target": ctx.target,
+        "kali": ctx.kali_host,
+        "steps": results,
+    }
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    log.info("wrote ground truth: %s", out_path)
 
 
 def _print_summary(results: list[dict]) -> None:
@@ -207,10 +241,33 @@ def _select(steps, *, only, start, stop) -> list[Step]:
     return steps[lo:hi]
 
 
+def _result_entry(step: Step, *, ok: bool, started: str, ended: str,
+                  elapsed: float, err: str = "") -> dict:
+    """Build one structured ground-truth record for a single step."""
+    meta = STEP_META.get(step.name, {})
+    entry = {
+        "name": step.name,
+        "ok": ok,
+        "started": started,
+        "ended": ended,
+        "elapsed": elapsed,
+        "tactic": meta.get("tactic", ""),
+        "techniques": meta.get("techniques", []),
+    }
+    if err:
+        entry["error"] = err
+    return entry
+
+
 def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
     selected = _select(CHAIN, only=only, start=start, stop=stop)
-    _print_banner(ctx, selected)
 
+    run_id = _iso_utc()
+    run_dir = Path(ctx.results_dir) / f"run-{_sanitize_run_id(run_id)}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    ctx.results_dir = str(run_dir)
+
+    _print_banner(ctx, selected)
     results: list[dict] = []
     executed: list[Step] = []
 
@@ -228,6 +285,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                 raise RuntimeError(msg)
 
             _print_step_header(step, i, len(selected))
+            started = _iso_utc()
             t0 = time.perf_counter()
             ok = True
             err = ""
@@ -238,14 +296,18 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                 err = str(exc)
                 if not step.optional:
                     elapsed = time.perf_counter() - t0
+                    ended = _iso_utc()
                     _print_step_result(step, elapsed, ok, err)
-                    results.append({"name": step.name, "ok": ok, "elapsed": elapsed})
+                    results.append(_result_entry(step, ok=ok, started=started,
+                                                 ended=ended, elapsed=elapsed, err=err))
                     raise
             elapsed = time.perf_counter() - t0
+            ended = _iso_utc()
             ctx.state.update(delta)
             executed.append(step)
             _print_step_result(step, elapsed, ok, err)
-            results.append({"name": step.name, "ok": ok, "elapsed": elapsed})
+            results.append(_result_entry(step, ok=ok, started=started,
+                                         ended=ended, elapsed=elapsed))
             time.sleep(0.5)
 
     finally:
@@ -259,6 +321,10 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
 
         if results:
             _print_summary(results)
+            try:
+                _write_ground_truth(ctx, run_id, results)
+            except Exception as exc:
+                log.warning("failed to write ground-truth JSON: %s", exc)
 
     return ctx
 

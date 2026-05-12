@@ -5,6 +5,12 @@ sysctl -w net.ipv4.ip_forward=1 2>/dev/null
 sysctl -w net.ipv4.conf.all.rp_filter=0 2>/dev/null
 sysctl -w net.ipv4.conf.default.rp_filter=0 2>/dev/null
 
+# Start ulogd2 in the background so NFLOG events from iptables get written
+# to /var/log/ulog-iptables.log (bind-mounted for SIEM ingest).
+mkdir -p /var/log
+ulogd -d -c /etc/ulogd.conf \
+    || echo "[entrypoint] ulogd failed to start"
+
 # Hole die IP des Apache-Containers
 APACHE_IP=""
 RETRIES=10
@@ -60,6 +66,14 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$PUBLIC_IF" ]; then
     iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF -j ACCEPT
     iptables -A FORWARD -i $PUBLIC_IF -o $INTERNAL_IF -p tcp -d $APACHE_IP --dport 80 -j ACCEPT
+
+    # 4. NFLOG: tap NEW flows at the head of FORWARD and unmatched drops at
+    #    the tail. ulogd2 catches both via group 1 and writes to
+    #    /var/log/ulog-iptables.log (bind-mounted to host for SIEM ingest).
+    iptables -I FORWARD 1 -m conntrack --ctstate NEW \
+        -j NFLOG --nflog-prefix "FW-NEW: " --nflog-group 1
+    iptables -A FORWARD \
+        -j NFLOG --nflog-prefix "FW-DROP: " --nflog-group 1
 
     echo ""
     echo "=== Finale iptables Konfiguration ==="

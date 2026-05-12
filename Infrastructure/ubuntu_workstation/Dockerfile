@@ -31,6 +31,8 @@ RUN apt-get update \
         xfce4-terminal \
         dbus-x11 \
         tigervnc-standalone-server \
+        rsyslog \
+        inotify-tools \
     && rm -rf /var/lib/apt/lists/* \
     # Remove the `ubuntu` user if present — official ubuntu:24.04 images do
     # not typically include it, so guard the deletion to keep builds

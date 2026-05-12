@@ -31,6 +31,8 @@ services:
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
+      # Persist apache access/error logs (CustomLog + ErrorLog write here per httpd.conf).
+      - ./logs/apache:/usr/local/apache2/logs
     networks:
       internal_net:
         ipv4_address: 10.30.0.2
@@ -45,6 +47,12 @@ services:
     container_name: ubuntu_workstation
     ports:
       - "5901:5901"
+    volumes:
+      # Persist workstation logs (rsyslog mirrors syslog + auth.log to
+      # /var/log/persist, and the inotify FIM watcher writes lab-fim.log
+      # there; sshd VERBOSE → auth.log). /var/log itself is NOT bind-mounted
+      # to avoid changing host directory ownership.
+      - ./logs/workstation:/var/log/persist
     networks:
       egress_net: {}
       internal_net:
