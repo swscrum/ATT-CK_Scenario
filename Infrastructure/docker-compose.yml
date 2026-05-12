@@ -8,18 +8,6 @@ services:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.rp_filter=0
       - net.ipv4.conf.default.rp_filter=0
-    # NOTE: host-side ports: ["80:80"] is intentionally omitted — Docker 29
-    # on this kernel breaks the userland-proxy NAT for published ports, and
-    # the attack chain runs entirely on internal Docker bridges anyway.
-    # Do not assume the host can reach http://10.10.0.3/ directly: on Docker
-    # Desktop (macOS/Windows), user-defined bridge IPs are typically not
-    # routable from the host. If host access is required, use a compose
-    # override/profile that publishes port 80 instead (for example:
-    # ports: ["80:80"]).
-    volumes:
-      # Persist router logs (ulogd2 writes NFLOG events under /var/log,
-      # including /var/log/ulog-iptables.log).
-      - ./logs/router:/var/log
     networks:
       public_net:
         ipv4_address: 10.10.0.3
@@ -30,15 +18,18 @@ services:
     restart: unless-stopped
 
   apache:
-    build: ./apache
-    # wir brauchen einen eigenen build um Dinge im Container selbst zu configurieren und nicht fertige images per httpd:2.4.50
-    # muss nur httpd:2.4.50 intern nutzen 
+    build:
+      context: .
+      dockerfile: apache/Dockerfile
+    # We need our own build so we can configure things inside the container,
+    # rather than using the prebuilt httpd:2.4.50 image directly. The image
+    # only has to USE httpd:2.4.50 internally as the FROM base.
+    # Build context is Infrastructure/ so apache/Dockerfile can also COPY from shared-lab-keys/.
     container_name: apache
     cap_add:
       - NET_ADMIN
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
-      - ./html:/usr/local/apache2/htdocs:ro
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
       # Persist apache access/error logs (CustomLog + ErrorLog write here per httpd.conf).
       - ./logs/apache:/usr/local/apache2/logs
@@ -49,7 +40,10 @@ services:
     restart: unless-stopped
 
   ubuntu_workstation:
-    build: ./ubuntu_workstation
+    build:
+      context: .
+      dockerfile: ubuntu_workstation/Dockerfile
+    # context is Infrastructure/ so ubuntu_workstation/Dockerfile can also COPY from shared-lab-keys/
     container_name: ubuntu_workstation
     ports:
       - "5901:5901"
@@ -93,8 +87,8 @@ networks:
         - subnet: 10.20.0.0/24
   internal_net:
     driver: bridge
-    # internal: true entfernt - Docker blockiert sonst IP-Forwarding
-    # durch den Router-Container hindurch auf Host-Bridge-Ebene.
+    # `internal: true` removed — Docker would otherwise block IP forwarding
+    # through the router container at the host bridge level.
     ipam:
       config:
         - subnet: 10.30.0.0/24

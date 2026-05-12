@@ -1,0 +1,12 @@
+[user]
+	name = John Stravidis
+	email = john.stravidis@waystar-connect.dev
+
+[init]
+	defaultBranch = main
+
+[pull]
+	rebase = false
+
+[core]
+	editor = vim

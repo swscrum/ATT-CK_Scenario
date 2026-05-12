@@ -11,7 +11,7 @@
 Attack-chain/results/*
 !Attack-chain/results/.gitkeep
 
-# Container logs (persisted via docker-compose volumes)
+# Container logs (runtime artifacts; persisted via docker-compose volumes)
 Infrastructure/logs/**/*
 !Infrastructure/logs/**/.gitkeep
 

@@ -10,8 +10,8 @@ The attacker is the same crew that breached Waystar Royco eighteen months ago (s
 |---|---|---|
 | A — Public-facing entry | 1–2 | Root on Apache (Waystar Connect webserver) |
 | B — Foothold expansion | 3–5 | Persistent, C2-enabled foothold on John Stravidis's (freelance webdev) workstation |
-| C — Internal recon | 6–8 | Map the Linux fleet, find Reiner Hermann (returning employee) breadcrumb |
-| D — Deep lateral movement | 9–12 | Sysadmin (Hans Müller) shell via Reiner → spearphishing chain |
+| C — Internal recon | 6–8 | Map the Linux fleet, find Luke Smith (returning employee) breadcrumb |
+| D — Deep lateral movement | 9–12 | Sysadmin (Hans Müller) shell via Luke → spearphishing chain |
 | E — Objectives | 13–15 | Patient DB exfil + ransomware impact |
 
 **Hybrid TTP profile** (carried over from the story design): noisy at the edge (groups A–C are loud, signature-able, and meant to be detected), quiet from the foothold inward (groups D–E use encrypted channels, careful pacing, and clean persistence — the work for the EDR/behavioural side of the SOC training).
@@ -31,9 +31,9 @@ The attacker is the same crew that breached Waystar Royco eighteen months ago (s
 | Command & Control | encrypted reverse tunnel | T1572, T1071.001 |
 | Discovery | files, accounts, history on John's box | T1083, T1087, T1518 |
 | Lateral (failed) | brute force on hardened boxes | T1110 (detected/denied) |
-| Discovery | Reiner artefacts | T1083, T1087 |
-| Credential Access | Reiner's personal SSH key | T1552.004 |
-| Lateral Movement | SSH to Reiner | T1021.004, T1078 |
+| Discovery | Luke artefacts | T1083, T1087 |
+| Credential Access | Luke's personal SSH key | T1552.004 |
+| Lateral Movement | SSH to Luke | T1021.004, T1078 |
 | Collection | mail mining for sysadmin coords | T1114.001 |
 | Initial Access (phase 2) | spearphishing attachment to Hans | T1566.001 |
 | Execution | user opens attachment (sim) | T1204.002 |
@@ -51,7 +51,7 @@ sequenceDiagram
     participant Web as Apache (Waystar Connect)
     participant J as John's WS
     participant H as Hardened WS (×2)
-    participant R as Reiner's WS
+    participant R as Luke's WS
     participant S as Sysadmin WS
 
     Note over Att,Web: Group A — Public-facing entry (already implemented)
@@ -72,12 +72,12 @@ sequenceDiagram
     Att->>J: 6. Dump browser creds, bash history, mail, recents
     Att->>H: 7. SSH attempts (password spray, john's key)
     H-->>Att: 7. auth failures + fail2ban (visible to SIEM later)
-    Att->>J: 8. Read /var/log/migration/, /home/reiner.hermann.bak/.ssh/
-    J-->>Att: 8. Reiner's old personal SSH key
+    Att->>J: 8. Read /var/log/migration/, /home/luke.smith.bak/.ssh/
+    J-->>Att: 8. Luke's old personal SSH key
 
     Note over Att,R: Group D — Deep lateral movement
-    Att->>R: 9. SSH with Reiner's personal key
-    R-->>Att: shell as reiner.hermann
+    Att->>R: 9. SSH with Luke's personal key
+    R-->>Att: shell as luke.smith
     Att->>R: 10. Read ~/Maildir
     R-->>Att: 10. emails identifying hans.mueller (sysadmin)
     Att->>R: 11. Compose + send spearphishing email to Hans
@@ -155,35 +155,35 @@ This phase is **deliberately noisy** — its purpose is to leave clean evidence 
 
 The point of two hardened boxes: shows that "the company *did* invest post-breach, but unevenly" — exactly the story's claim about the in-progress Linux transition.
 
-#### Phase 8 — Reiner Hermann breadcrumb
+#### Phase 8 — Luke Smith breadcrumb
 
-Attacker pokes around John's workstation more carefully and finds artefacts of the workstation's previous primary user, Reiner Hermann (see `scenario_story.md` for his medical-leave-and-return backstory):
-- `/var/log/migration/2024-12-15-reiner-to-john.log` — IT log naming both users, written when the box was reassigned to John during Reiner's medical leave
-- `/home/reiner.hermann.bak/` — Reiner's home directory preserved during his absence ("he's coming back, don't delete it"); never cleaned up after his return because by then John was on the box
-- `/home/reiner.hermann.bak/.ssh/id_rsa` — Reiner's *personal* SSH key pair. Medical leave isn't a security incident, so IT never treated his return as a re-onboarding; his personal keys were never rotated
-- Old `bash_history` showing Reiner SSHing to internal hosts
+Attacker pokes around John's workstation more carefully and finds artefacts of the workstation's previous primary user, Luke Smith (see `scenario_story.md` for his medical-leave-and-return backstory):
+- `/var/log/migration/2024-12-15-luke-to-john.log` — IT log naming both users, written when the box was reassigned to John during Luke's medical leave
+- `/home/luke.smith.bak/` — Luke's home directory preserved during his absence ("he's coming back, don't delete it"); never cleaned up after his return because by then John was on the box
+- `/home/luke.smith.bak/.ssh/id_rsa` — Luke's *personal* SSH key pair. Medical leave isn't a security incident, so IT never treated his return as a re-onboarding; his personal keys were never rotated
+- Old `bash_history` showing Luke SSHing to internal hosts
 
-Story payoff: the attacker recognises "Reiner Hermann" — they had his name from the prior breach.
+Story payoff: the attacker recognises "Luke Smith" — they had his name from the prior breach.
 
 ### Group D — Deep lateral movement *(new)*
 
-#### Phase 9 — Lateral movement to Reiner's NEW workstation
+#### Phase 9 — Lateral movement to Luke's NEW workstation
 
-Reiner returned from his six-month medical leave and was set up on a new workstation (his old one is now John's). **His personal SSH key is authorized on the new box** — when restoring his dotfiles to the new workstation on his return, he brought across his old `~/.ssh/` directory wholesale. The key in `/home/reiner.hermann.bak/.ssh/id_rsa` on John's box (phase 8) and the entry in `~reiner.hermann/.ssh/authorized_keys` on his new box are the same key. Attacker uses it.
+Luke returned from his six-month medical leave and was set up on a new workstation (his old one is now John's). **His personal SSH key is authorized on the new box** — when restoring his dotfiles to the new workstation on his return, he brought across his old `~/.ssh/` directory wholesale. The key in `/home/luke.smith.bak/.ssh/id_rsa` on John's box (phase 8) and the entry in `~luke.smith/.ssh/authorized_keys` on his new box are the same key. Attacker uses it.
 
 #### Phase 10 — Email mining
 
-Reiner's `~/Maildir` (or `/var/mail/reiner.hermann`) contains:
+Luke's `~/Maildir` (or `/var/mail/luke.smith`) contains:
 - An old thread with sysadmin **Hans Müller** (`hans.mueller@waystar-royco.example`) about a service-account password reset — exposes Hans's email and role
 - Calendar invites / chat backlog confirming Hans's identity
-- Possibly a thread where Hans asked Reiner for help, exposing that Reiner had break-glass dev access at one point
+- Possibly a thread where Hans asked Luke for help, exposing that Luke had break-glass dev access at one point
 
 #### Phase 11 — Spearphishing the sysadmin
 
 The chain's only "user simulation" beat. Two implementation choices (decision deferred to step 3):
 
 - **Option A (recommended)**: A `mail-processor` daemon runs on Hans's workstation that periodically polls his mailbox and "opens" attachments from senders in his contact list. The processor *is* the simulated user — defensible to mark out-of-scope for detection (we model user behaviour, not the user's decision). Demo lands as: attacker sends → ~30 s later sysadmin shell appears.
-- **Option B**: skip the phishing; Reiner's mail archive contains an old plaintext password Hans once emailed to him. Attacker reads → SSHes in. Simpler to implement; loses the phishing-detection beat.
+- **Option B**: skip the phishing; Luke's mail archive contains an old plaintext password Hans once emailed to him. Attacker reads → SSHes in. Simpler to implement; loses the phishing-detection beat.
 
 Either way, attacker gets a reverse shell as `hans.mueller`.
 
@@ -223,11 +223,11 @@ Items marked **NEW** are not in the lab today. Items in *italics* are configurat
 ### Containers
 - ✓ Existing: `kali` (attacker), `router`, `apache`, `ubuntu_workstation`
 - **NEW**: rename `ubuntu_workstation` → `john_ws` (or add a workstation service per role). The current single workstation becomes John's.
-- **NEW**: `reiner_ws` — Reiner's current workstation, on `internal_net`
+- **NEW**: `luke_ws` — Luke's current workstation, on `internal_net`
 - **NEW**: `hardened_ws_1`, `hardened_ws_2` — properly-hardened boxes that fail the lateral attempts (key-only, fail2ban)
 - **NEW**: `sysadmin_ws` — Hans Müller's box; mail-processor daemon; database client; backup-control reach
 - **NEW (optional, step 4 follow-up)**: `freeipa` — FreeIPA / SSSD domain controller, partial enrollment of the fleet (see `scenario_story.md` open items)
-- **NEW**: a small mail relay (or local sendmail with SSH-based delivery) connecting Reiner → Hans
+- **NEW**: a small mail relay (or local sendmail with SSH-based delivery) connecting Luke → Hans
 - **NEW**: a "patient DB" service (could be a SQLite in `/var/lib/waystar/db/patients.sqlite` on Hans's box, or a separate `postgres` container)
 
 ### Seeded files (per host)
@@ -238,14 +238,14 @@ Items marked **NEW** are not in the lab today. Items in *italics* are configurat
 - `/root/.deploy_config`
 
 **On John's workstation**:
-- `/var/log/migration/2024-12-15-reiner-to-john.log`
-- `/home/reiner.hermann.bak/.ssh/id_rsa` (Reiner's personal SSH key)
+- `/var/log/migration/2024-12-15-luke-to-john.log`
+- `/home/luke.smith.bak/.ssh/id_rsa` (Luke's personal SSH key)
 - Browser profile with stored creds
 - Plausible bash history, recent files, project tree
 
-**On Reiner's workstation**:
-- Reiner's personal SSH key in `~/.ssh/authorized_keys`
-- `/var/mail/reiner.hermann` with a seeded `Maildir` containing the Hans correspondence
+**On Luke's workstation**:
+- Luke's personal SSH key in `~/.ssh/authorized_keys`
+- `/var/mail/luke.smith` with a seeded `Maildir` containing the Hans correspondence
 - A trace amount of "still has dev access" evidence (sudo group + a residual SSH config)
 
 **On Hans's workstation**:
@@ -262,8 +262,8 @@ Items marked **NEW** are not in the lab today. Items in *italics* are configurat
 - `installation.py` — phase 5 (persistence + C2 tunnel setup)
 - `discovery_john.py` — phase 6
 - `failed_lateral.py` — phase 7 (the deliberate noise)
-- `reiner_breadcrumb.py` — phase 8
-- `lateral_to_reiner.py` — phase 9
+- `luke_breadcrumb.py` — phase 8
+- `lateral_to_luke.py` — phase 9
 - `mail_mining.py` — phase 10
 - `spearphish.py` — phase 11
 - `credential_harvest_sysadmin.py` — phase 12
