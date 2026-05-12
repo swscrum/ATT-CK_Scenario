@@ -231,6 +231,8 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
         print("    → check workstation can reach kali: route -n")
         print(f"    → check ssh works manually: ssh -i {STAGED_KEY_PATH} "
               f"{workstation_user}@{workstation_ip}")
+        send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
+        print(f"[+] Cleaned up {STAGED_KEY_PATH} from apache")
         return None
     finally:
         john_server.close()
