@@ -13,7 +13,8 @@ services:
     # the attack chain runs entirely on internal Docker bridges anyway.
     # If host access is needed, hit http://10.10.0.3/ (router bridge IP).
     volumes:
-      # Persist router logs (rsyslog + iptables LOG land in /var/log).
+      # Persist router logs (ulogd2 writes NFLOG events under /var/log,
+      # including /var/log/ulog-iptables.log).
       - ./logs/router:/var/log
     networks:
       public_net:
