@@ -11,7 +11,11 @@ services:
     # NOTE: host-side ports: ["80:80"] is intentionally omitted — Docker 29
     # on this kernel breaks the userland-proxy NAT for published ports, and
     # the attack chain runs entirely on internal Docker bridges anyway.
-    # If host access is needed, hit http://10.10.0.3/ (router bridge IP).
+    # Do not assume the host can reach http://10.10.0.3/ directly: on Docker
+    # Desktop (macOS/Windows), user-defined bridge IPs are typically not
+    # routable from the host. If host access is required, use a compose
+    # override/profile that publishes port 80 instead (for example:
+    # ports: ["80:80"]).
     volumes:
       # Persist router logs (ulogd2 writes NFLOG events under /var/log,
       # including /var/log/ulog-iptables.log).
