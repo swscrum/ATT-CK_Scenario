@@ -34,6 +34,7 @@ RUN apt-get update \
         rsyslog \
         inotify-tools \
         sqlite3 \
+        postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     # Remove the `ubuntu` user if present — official ubuntu:24.04 images do
     # not typically include it, so guard the deletion to keep builds

@@ -25,10 +25,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     status        TEXT
 );
 
+-- Synthetic therapist fixtures. Names are fictional and unrelated to any
+-- real Waystar staff (see ~/Documents/Useful contacts.md for the real org).
 INSERT INTO therapists (id, name, speciality) VALUES
-    (1, 'Dr. A. Kowalski', 'CBT'),
-    (2, 'Dr. M. Roy',      'Trauma'),
-    (3, 'Dr. S. Vance',    'Family');
+    (1, 'Dr. E. Brooks',  'CBT'),
+    (2, 'Dr. M. Halsey',  'Trauma'),
+    (3, 'Dr. J. Carter',  'Family');
 
 INSERT INTO patients (id, full_name, email, intake_date, therapist_id) VALUES
     (1, 'Test Patient One',   'test1@example.com', '2026-01-15', 1),
