@@ -103,6 +103,7 @@ def _stage_key_on_apache(root_shell, key_text):
 def _read_id(shell, timeout=10):
     """Send 'id' and return the response string."""
     send_command(shell, "id")
+    prev = shell.gettimeout()
     shell.settimeout(5)
     response = ""
     deadline = time.time() + timeout
@@ -115,6 +116,7 @@ def _read_id(shell, timeout=10):
                     break
         except socket.timeout:
             break
+    shell.settimeout(prev)
     return response
 
 
