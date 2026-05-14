@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ============================================================================
 #  John Stravidis — frontend freelancer building Waystar Connect.
 #  This workstation is his (he was set up here while the box's previous
-#  owner — Reiner Hermann — was on six months of medical leave).
+#  owner — Luke Smith — was on six months of medical leave).
 #  See Documentation/scenario_story.md for the full backstory.
 #
 #  LAB ONLY — intentionally weak credentials for the attack-chain demo.
