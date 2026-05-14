@@ -6,9 +6,12 @@ FROM httpd:2.4.50
 # / openssh-server. (openssh-server is added so john.stravidis can deploy in.)
 RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive.debian.org|g; /buster-updates/d' /etc/apt/sources.list \
     && apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install -y --no-install-recommends cron iproute2 dnsutils openssh-server \
+    && apt-get install -y --no-install-recommends cron iproute2 dnsutils openssh-server openssh-client coreutils \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/sshd
+    && mkdir -p /run/sshd \
+    && (test -x /usr/bin/base64 \
+        || { b=$(command -v base64 2>/dev/null) && [ -n "$b" ] && ln -sf "$b" /usr/bin/base64; } \
+        || true)
 
 # Building Apache 2.4.49 ourselves would also work, but using the upstream
 # httpd:2.4.50 image is faster and equally vulnerable to CVE-2021-41773.
@@ -43,11 +46,14 @@ RUN useradd -m -s /bin/bash john.stravidis
 COPY apache/john_home/ /home/john.stravidis/
 COPY html/ /opt/waystar-connect/dist/
 COPY shared-lab-keys/john_deploy_key.pub /home/john.stravidis/.ssh/authorized_keys
+COPY shared-lab-keys/john_deploy_key     /home/john.stravidis/.ssh/id_ed25519
+COPY apache/john_home/projects/waystar-connect/deploy.log /opt/waystar-connect/deploy.log
 RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && mkdir -p /opt/waystar-connect/dist.prev \
     && chown -R john.stravidis:john.stravidis /opt/waystar-connect \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
+    && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
     && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts
 
 # Start script: launch cron and sshd, then Apache in the foreground (so the
