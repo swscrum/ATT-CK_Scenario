@@ -33,6 +33,7 @@ RUN apt-get update \
         tigervnc-standalone-server \
         rsyslog \
         inotify-tools \
+        sqlite3 \
     && rm -rf /var/lib/apt/lists/* \
     # Remove the `ubuntu` user if present — official ubuntu:24.04 images do
     # not typically include it, so guard the deletion to keep builds
@@ -62,10 +63,17 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
+    && chmod 600 /home/john.stravidis/.pgpass \
     && chmod 644 /home/john.stravidis/.ssh/id_ed25519.pub \
                     /home/john.stravidis/.ssh/config \
                     /home/john.stravidis/.ssh/known_hosts \
-    && chmod +x /home/john.stravidis/.vnc/xstartup
+    && chmod +x /home/john.stravidis/.vnc/xstartup \
+    # Build john's local dev SQLite (frontend fixture, NOT real patient data).
+    # See seed_dev_db.sql next to the resulting dev.db for the schema.
+    && sqlite3 /home/john.stravidis/projects/waystar-connect/dev.db \
+         < /home/john.stravidis/projects/waystar-connect/seed_dev_db.sql \
+    && chown john.stravidis:john.stravidis \
+         /home/john.stravidis/projects/waystar-connect/dev.db
 
 COPY ubuntu_workstation/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
