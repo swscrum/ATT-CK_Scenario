@@ -4,9 +4,12 @@ FROM postgres:16
 #  db-internal — Waystar Royco internal patient database (PostgreSQL 16).
 #  Lives on internal_net only; no public exposure.
 #
-#  Users (created by init/01-schema.sql):
-#    waystar          — privileged owner (credentials on Hans's workstation)
-#    waystar-readonly — read-only (credentials breadcrumbed on John's box)
+#  Users:
+#    waystar          — privileged owner created by the official Postgres
+#                       entrypoint from POSTGRES_USER (credentials on Hans's
+#                       workstation)
+#    waystar-readonly — read-only, created by init/01-schema.sql
+#                       (credentials breadcrumbed on John's box)
 #
 #  LAB ONLY — intentionally weak credentials for the attack-chain demo.
 #  Do NOT use outside an isolated lab environment.
