@@ -27,7 +27,6 @@ RUN apt-get update \
         ca-certificates \
         nodejs \
         npm \
-        postgresql-client \
         xfce4 \
         xfce4-terminal \
         dbus-x11 \
