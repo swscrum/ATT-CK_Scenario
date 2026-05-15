@@ -87,7 +87,7 @@ services:
       - "-c"
       - "log_line_prefix=%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h "
       - "-c"
-      - "log_statement=mod"
+      - "log_statement=all"
     volumes:
       # Persist Postgres logs so the SIEM-readable trail survives container restarts.
       - ./logs/db:/var/log/postgres
