@@ -6,4 +6,8 @@ set -e
 mkdir -p /var/log/postgres
 chown -R postgres:postgres /var/log/postgres
 
+# Enforce no container egress: keep same-subnet traffic but remove the default
+# route before handing off to the official entrypoint.
+ip route del default || true
+
 exec docker-entrypoint.sh "$@"

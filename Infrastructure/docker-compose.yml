@@ -66,6 +66,8 @@ services:
       context: .
       dockerfile: db-internal/Dockerfile
     container_name: db-internal
+    cap_add:
+      - NET_ADMIN
     environment:
       # Privileged owner — credentials live on Hans's workstation (sysadmin_ws).
       # waystar-readonly (ChangeMe!2026) is breadcrumbed on John's workstation.

@@ -17,6 +17,10 @@ FROM postgres:16
 
 # The bind-mounted log directory lands as root-owned; this wrapper chowns it
 # before postgres drops from root to the postgres user.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends iproute2 \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY db-internal/entrypoint.sh /docker-entrypoint-wrapper.sh
 RUN chmod +x /docker-entrypoint-wrapper.sh
 
