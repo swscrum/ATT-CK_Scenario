@@ -27,6 +27,7 @@ RUN apt-get update \
         ca-certificates \
         nodejs \
         npm \
+        postgresql-client \
         xfce4 \
         xfce4-terminal \
         dbus-x11 \
@@ -65,6 +66,7 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && chmod 644 /home/john.stravidis/.ssh/id_ed25519.pub \
                     /home/john.stravidis/.ssh/config \
                     /home/john.stravidis/.ssh/known_hosts \
+    && chmod 600 /home/john.stravidis/.pgpass \
     && chmod +x /home/john.stravidis/.vnc/xstartup
 
 COPY ubuntu_workstation/entrypoint.sh /entrypoint.sh

@@ -28,4 +28,8 @@ sudo apt update
 sudo apt install -y vim less
 top
 df -h
+psql -h db-internal -U waystar-readonly -d waystar
+psql -h db-internal -U waystar-readonly waystar -c "\dt"
+psql -h db-internal -U waystar-readonly waystar -c "SELECT count(*) FROM patients;"
+psql -h db-internal -U waystar-readonly waystar -c "SELECT first_name, last_name, diagnosis FROM patients LIMIT 5;"
 exit
