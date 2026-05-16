@@ -128,26 +128,80 @@ function persistBooking(booking) {
   } catch (_) { /* ignore — non-persistent mode */ }
 }
 
+const submitError = ref('')
+const BOOKING_ENDPOINT = '/cgi-bin/book.py'
+
+async function postBooking(payload) {
+  const res = await fetch(BOOKING_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  let data = null
+  try { data = await res.json() } catch (_) { /* non-JSON */ }
+  return { res, data }
+}
+
 async function submit() {
+  submitError.value = ''
   if (!validate()) {
     const first = document.querySelector('[aria-invalid="true"]')
     if (first) first.focus()
     return
   }
   submitting.value = true
-  // Simulated network latency so the disabled state is visible.
-  await new Promise((r) => setTimeout(r, 600))
-  const booking = {
-    id: Date.now(),
+  const payload = {
     name: form.name.trim(),
     email: form.email.trim(),
     date: form.date,
     time: form.time,
     focus: form.focus,
-    notes: form.notes.trim(),
-    createdAt: new Date().toISOString()
+    notes: form.notes.trim()
+  }
+
+  let serverId = null
+  let serverRef = null
+  let serverCreatedAt = null
+  let serverReachable = true
+  try {
+    const { res, data } = await postBooking(payload)
+    if (res.status === 201 && data && data.ok) {
+      serverId = data.id
+      serverRef = data.reference
+      serverCreatedAt = data.created_at
+    } else if (res.status === 422 && data && data.errors) {
+      Object.keys(errors).forEach((k) => delete errors[k])
+      Object.assign(errors, data.errors)
+      submitting.value = false
+      const first = document.querySelector('[aria-invalid="true"]')
+      if (first) first.focus()
+      return
+    } else {
+      throw new Error(`booking_failed_${res.status}`)
+    }
+  } catch (err) {
+    serverReachable = false
+  }
+
+  const booking = {
+    id: serverId ?? Date.now(),
+    reference: serverRef ?? `WS-LOCAL-${String(Date.now()).slice(-6)}`,
+    name: payload.name,
+    email: payload.email,
+    date: payload.date,
+    time: payload.time,
+    focus: payload.focus,
+    notes: payload.notes,
+    createdAt: serverCreatedAt ?? new Date().toISOString()
   }
   persistBooking(booking)
+
+  if (!serverReachable) {
+    submitError.value = "We couldn't reach our booking system right now. Your request is saved locally — please try again in a moment."
+    submitting.value = false
+    return
+  }
+
   submitted.value = booking
   form.name = ''
   form.email = ''
@@ -463,6 +517,8 @@ function formatDate(iso) {
                   </span>
                 </button>
 
+                <p v-if="submitError" class="form-error" role="alert">{{ submitError }}</p>
+
                 <p class="form-fineprint">
                   By submitting, you agree to our terms and privacy notice. We'll never share your information.
                 </p>
@@ -483,7 +539,7 @@ function formatDate(iso) {
               </p>
               <dl class="success__details">
                 <div><dt>Focus</dt><dd>{{ submitted.focus }}</dd></div>
-                <div><dt>Reference</dt><dd>WS-{{ submitted.id.toString().slice(-6) }}</dd></div>
+                <div><dt>Reference</dt><dd>{{ submitted.reference }}</dd></div>
               </dl>
               <button class="btn btn--ghost" type="button" @click="bookAnother">Book another session</button>
             </div>
