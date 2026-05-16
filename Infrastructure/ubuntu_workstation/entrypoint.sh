@@ -33,6 +33,19 @@ mkdir -p /run/dbus
 dbus-daemon --system --fork 2>/dev/null \
     || echo "[entrypoint] dbus-daemon --system unavailable (non-fatal)"
 
+# Register a minimal org.freedesktop.login1 stub on the system bus.
+# xfce4-panel's clock plugin (libclock) probes this interface at startup to
+# subscribe to PrepareForSleep signals. Without it the panel logs:
+#   libclock-Message: logind not active
+#   libclock-WARNING: could not instantiate a sleep monitor
+# The stub is a no-op (the container never sleeps); it just makes the probe
+# succeed. Run in background; failures are non-fatal.
+python3 /usr/local/bin/logind-stub.py 2>/dev/null &
+# disown removes the stub from the shell's job table so that wait -n (used
+# at the end of this script to keep PID 1 alive on the VNC server) does not
+# pick it up and exit the container if the stub ever terminates.
+disown
+
 # Start sshd in the background so the container has a remote shell.
 /usr/sbin/sshd
 
@@ -59,12 +72,27 @@ runuser -u john.stravidis -- Xtigervnc :1 \
 #   address: org.a11y.Bus was not provided" dbind-WARNINGs from every XFCE
 #   component on startup. AT-SPI is unused in this container lab.
 sleep 2
+# Start the XFCE session.  dbus-launch --exit-with-session creates the
+# session D-Bus and ties its lifetime to the child process.  Instead of
+# launching xfce4-session directly, we pass a small shell fragment that:
+#   1. starts tumblerd in the background (it registers on the session bus
+#      immediately, before xfce4-session's components start)
+#   2. sleeps briefly so tumblerd is fully registered
+#   3. exec-replaces the shell with xfce4-session so the dbus session bus
+#      lifetime remains tied to xfce4-session
+#
+# Without the pre-start, xfdesktop calls tumbler's GetFlavors interface
+# before D-Bus has had time to auto-activate tumblerd, producing:
+#   xfdesktop WARNING: Thumbnailer failed calling GetFlavors
+#   GLib-GObject-CRITICAL: g_object_unref: assertion 'G_IS_OBJECT' failed
+TUMBLERD=/usr/lib/x86_64-linux-gnu/tumbler-1/tumblerd
 runuser -u john.stravidis -- \
     env DISPLAY=:1 \
         HOME=/home/john.stravidis \
         XDG_RUNTIME_DIR=/run/user/${JOHN_UID} \
         NO_AT_BRIDGE=1 \
-    dbus-launch --exit-with-session xfce4-session &
+    dbus-launch --exit-with-session \
+        sh -c "$TUMBLERD & sleep 1 && exec xfce4-session" &
 
 # Block PID 1 on the X server (foreground for Docker), so the container stays
 # alive as long as VNC is running.
