@@ -61,6 +61,43 @@ services:
         ipv4_address: 10.30.0.5
     restart: unless-stopped
 
+  db-internal:
+    build:
+      context: .
+      dockerfile: db-internal/Dockerfile
+    container_name: db-internal
+    cap_add:
+      - NET_ADMIN
+    environment:
+      # Privileged owner — credentials live on Hans's workstation (sysadmin_ws).
+      # waystar-readonly (ChangeMe!2026) is breadcrumbed on John's workstation.
+      POSTGRES_DB: waystar
+      POSTGRES_USER: waystar
+      POSTGRES_PASSWORD: "WaystarDB!Secure2024"
+    command:
+      - "postgres"
+      - "-c"
+      - "logging_collector=on"
+      - "-c"
+      - "log_directory=/var/log/postgres"
+      - "-c"
+      - "log_filename=postgresql-%Y-%m-%d.log"
+      - "-c"
+      - "log_connections=on"
+      - "-c"
+      - "log_disconnections=on"
+      - "-c"
+      - "log_line_prefix=%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h "
+      - "-c"
+      - "log_statement=all"
+    volumes:
+      # Persist Postgres logs so the SIEM-readable trail survives container restarts.
+      - ./logs/db:/var/log/postgres
+    networks:
+      internal_net:
+        ipv4_address: 10.30.0.6
+    restart: unless-stopped
+
   kali:
     build: ./kali
     container_name: kali
