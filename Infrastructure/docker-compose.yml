@@ -11,6 +11,8 @@ services:
     networks:
       public_net:
         ipv4_address: 10.10.0.3
+      dmz_net:
+        ipv4_address: 10.40.0.4
       internal_net:
         ipv4_address: 10.30.0.4
     depends_on:
@@ -34,9 +36,11 @@ services:
       # Persist apache access/error logs (CustomLog + ErrorLog write here per httpd.conf).
       - ./logs/apache:/usr/local/apache2/logs
     networks:
-      internal_net:
-        ipv4_address: 10.30.0.2
-      egress_net: {}
+      # Apache lives in the DMZ. The only public-facing service in the lab.
+      # Reachable from external (kali) only via the router's DNAT on :80, and
+      # from internal (workstation) only via explicit router FORWARD rules.
+      dmz_net:
+        ipv4_address: 10.40.0.2
     restart: unless-stopped
 
   ubuntu_workstation:
@@ -56,7 +60,6 @@ services:
       # to avoid changing host directory ownership.
       - ./logs/workstation:/var/log/persist
     networks:
-      egress_net: {}
       internal_net:
         ipv4_address: 10.30.0.5
     restart: unless-stopped
@@ -78,16 +81,21 @@ services:
     restart: unless-stopped
 
 networks:
+  # External zone — kali (attacker) and the router's outside leg.
   public_net:
     driver: bridge
     ipam:
       config:
         - subnet: 10.10.0.0/24
-  egress_net:
+  # DMZ — only apache lives here, plus the router's middle leg. External
+  # reaches apache only via the router's :80 DNAT. apache↔workstation traffic
+  # must now traverse the router (lateral SSH becomes loggable at L3).
+  dmz_net:
     driver: bridge
     ipam:
       config:
-        - subnet: 10.20.0.0/24
+        - subnet: 10.40.0.0/24
+  # Internal zone — workstations and the router's inside leg.
   internal_net:
     driver: bridge
     # `internal: true` removed — Docker would otherwise block IP forwarding
