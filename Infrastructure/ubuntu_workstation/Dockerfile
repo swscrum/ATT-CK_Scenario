@@ -29,13 +29,19 @@ RUN apt-get update \
         npm \
         xfce4 \
         xfce4-terminal \
+        dbus \
         dbus-x11 \
+        gnupg \
         tigervnc-standalone-server \
         rsyslog \
         inotify-tools \
         sqlite3 \
         postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
+    # pm-utils is not packaged for Ubuntu 24.04; provide a stub so xfce4-session
+    # doesn't log "No such file or directory" when probing power-management support.
+    && printf '#!/bin/sh\nexit 1\n' > /usr/bin/pm-is-supported \
+    && chmod +x /usr/bin/pm-is-supported \
     # Remove the `ubuntu` user if present — official ubuntu:24.04 images do
     # not typically include it, so guard the deletion to keep builds
     # reproducible across environments. Doing it before useradd john also

@@ -28,6 +28,13 @@ services:
     container_name: apache
     cap_add:
       - NET_ADMIN
+    # Port 80 is exposed here for host-browser convenience (localhost:80 → this
+    # container directly). Docker sorts networks alphabetically, so docker-proxy
+    # would connect to the router's internal_net IP and cause an eth1→eth1 hairpin
+    # that the router's FORWARD rules don't cover. The attack chain from Kali still
+    # goes through the router's iptables DNAT as intended.
+    ports:
+      - "80:80"
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
