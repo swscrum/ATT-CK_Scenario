@@ -82,6 +82,39 @@ trap cleanup EXIT
 # -------------------------------------------------------------------- run
 echo "[run.sh] ensuring lab is up..."
 docker compose up -d >/dev/null
-sleep 3
+
+# Wait for the lab to be fully wired before starting the chain. On a cold
+# `compose up -d` the router still needs to: resolve apache via DNS, configure
+# iptables (DNAT + FORWARD + NFLOG), start ulogd2; apache needs to add its
+# cross-zone routes; kali's embedded-DNS cache needs to populate. A flat
+# `sleep 3` is not enough on a cold start, so probe end-to-end reachability
+# instead. The probe succeeds once kali → router DNS resolves AND HTTP
+# returns a response (any status), which means the DNAT path is live.
+echo "[run.sh] waiting for lab readiness (kali → http://router/ via DNAT)..."
+ready=0
+for i in $(seq 1 60); do
+    # Probe components in order: (1) kali can resolve `router` via Docker's
+    # embedded DNS, (2) kali can complete a TCP+HTTP exchange with router's
+    # DNAT to apache. We accept any real HTTP status (200-599); a curl exit
+    # 0 means the connection succeeded and an HTTP response was returned.
+    if docker compose exec -T kali sh -c \
+        'getent hosts router >/dev/null && \
+         curl -s --max-time 2 -o /dev/null -w "%{http_code}" http://router/ 2>/dev/null \
+            | grep -qE "^[1-5][0-9][0-9]$"' \
+        ; then
+        echo "[run.sh] lab ready after ${i}s"
+        ready=1
+        break
+    fi
+    sleep 1
+done
+if [ "$ready" -ne 1 ]; then
+    echo "[run.sh] ERROR: lab did not become reachable within 60s." >&2
+    echo "[run.sh]        Likely causes:" >&2
+    echo "[run.sh]          - container images are stale; rerun with 'docker compose build'" >&2
+    echo "[run.sh]          - one of router/apache is crash-looping" >&2
+    echo "[run.sh]        Check 'docker compose logs router apache kali' before retrying." >&2
+    exit 1
+fi
 
 docker compose exec -T kali python3 /Attack-chain/main.py "${chain_args[@]}"
