@@ -195,13 +195,6 @@ async function submit() {
     createdAt: serverCreatedAt ?? new Date().toISOString()
   }
   persistBooking(booking)
-
-  if (!serverReachable) {
-    submitError.value = "We couldn't reach our booking system right now. Your request is saved locally — please try again in a moment."
-    submitting.value = false
-    return
-  }
-
   submitted.value = booking
   form.name = ''
   form.email = ''
@@ -210,6 +203,10 @@ async function submit() {
   form.focus = ''
   form.notes = ''
   submitting.value = false
+
+  if (!serverReachable) {
+    submitError.value = "We couldn't reach our booking system right now. Your request is saved locally — please try again in a moment."
+  }
 }
 
 function bookAnother() {
