@@ -40,6 +40,21 @@ DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
 
+# Pacing — controls how realistic the attacker-side dwells are.
+#   speed = realistic_seconds / wall_clock_seconds (higher → faster demo)
+#   noise / diurnal are not consumed yet; reserved for later slices.
+#
+# fast       — current dev behaviour, full chain in ~3 s
+# relative   — preserves attacker tempo, fits in ~30 min
+# realistic  — real-time (~12 h overnight); will additionally spawn noise
+#              daemons + run a diurnal timestamp rewriter when those land
+PACING_MODES: dict[str, dict[str, Any]] = {
+    "fast":      {"speed": 100_000, "noise": False, "diurnal": False},
+    "relative":  {"speed":      25, "noise": False, "diurnal": False},
+    "realistic": {"speed":       1, "noise": True,  "diurnal": True},
+}
+DEFAULT_PACING = "fast"
+
 STEP_META = {
     "recon": {
         "tactic": "TA0043 · Reconnaissance",
@@ -73,6 +88,12 @@ class Context:
     results_dir: str = DEFAULT_RESULTS_DIR
     kali_host: str = DEFAULT_KALI_HOST
     wordlist: str = DEFAULT_WORDLIST
+    # Pacing — set from PACING_MODES in main(). pacing_speed is the divisor
+    # step modules apply to their attacker-decided sleeps (think-time,
+    # rate-limits). Infrastructure-bound sleeps (cron firing window, mail
+    # processor delay, SSH handshake) MUST NOT use this — they're physical.
+    pacing: str = DEFAULT_PACING
+    pacing_speed: float = float(PACING_MODES[DEFAULT_PACING]["speed"])
     state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -83,6 +104,11 @@ class Step:
     requires: tuple[str, ...] = ()
     optional: bool = False
     teardown: Callable[[Context], None] | None = None
+    # Realistic seconds of attacker idle BEFORE this step. Scaled by
+    # ctx.pacing_speed at run time. 0 means "fire immediately after the
+    # previous step." Recon is naturally 0; later phases reflect typical
+    # APT pacing (10s of minutes to hours between distinct moves).
+    dwell_before: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +121,8 @@ def _print_banner(ctx: Context, steps: list[Step]) -> None:
     meta = (
         f"[dim]Target:[/dim] [bold cyan]{ctx.target}[/bold cyan]   "
         f"[dim]Kali:[/dim] [bold cyan]{ctx.kali_host}[/bold cyan]   "
+        f"[dim]Pacing:[/dim] [bold cyan]{ctx.pacing}[/bold cyan] "
+        f"[dim](speed {ctx.pacing_speed:g}×)[/dim]   "
         f"[dim]Steps:[/dim] [bold white]{', '.join(s.name for s in steps)}[/bold white]"
     )
     console.print(Panel(meta, title=title, border_style="dim white", padding=(0, 2)))
@@ -155,6 +183,8 @@ def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
         "run_id": run_id,
         "target": ctx.target,
         "kali": ctx.kali_host,
+        "pacing": ctx.pacing,
+        "pacing_speed": ctx.pacing_speed,
         "steps": results,
     }
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -247,20 +277,19 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
 # ---------------------------------------------------------------------------
 
 CHAIN: list[Step] = [
-    Step("recon", _step_recon),
-    Step("exploit", _step_exploit, teardown=_teardown_close_socket("www_shell")),
-    Step(
-        "privesc",
-        _step_privesc,
-        requires=("www_shell",),
-        teardown=_teardown_close_socket("root_shell"),
-    ),
-    Step(
-        "lateral",
-        _step_lateral,
-        requires=("root_shell",),
-        teardown=_teardown_close_socket("john_shell"),
-    ),
+    # dwell_before is in REALISTIC seconds. Scaled by pacing_speed at run time:
+    #   fast      → divided by 100 000 (≈ no wait)
+    #   relative  → divided by      25 (15 min → ~36 s)
+    #   realistic → divided by       1 (the real wait)
+    Step("recon", _step_recon, dwell_before=0),
+    Step("exploit", _step_exploit, dwell_before=15 * 60,
+         teardown=_teardown_close_socket("www_shell")),
+    Step("privesc", _step_privesc, dwell_before=30 * 60,
+         requires=("www_shell",),
+         teardown=_teardown_close_socket("root_shell")),
+    Step("lateral", _step_lateral, dwell_before=2 * 3600,
+         requires=("root_shell",),
+         teardown=_teardown_close_socket("john_shell")),
 ]
 
 
@@ -330,6 +359,20 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                     continue
                 raise RuntimeError(msg)
 
+            # Attacker-side dwell before firing this step. Honest:
+            #   wall_clock = step.dwell_before / ctx.pacing_speed
+            # For fast mode the divisor is so large the sleep rounds to zero.
+            wait = step.dwell_before / ctx.pacing_speed
+            if wait >= 0.5:
+                console.print(
+                    f"[dim]· dwell {wait:.1f}s "
+                    f"(realistic {step.dwell_before // 60} min, "
+                    f"pacing={ctx.pacing}, speed={ctx.pacing_speed:g}×)[/dim]"
+                )
+                time.sleep(wait)
+            elif wait > 0:
+                time.sleep(wait)
+
             _print_step_header(step, i, len(selected))
             started = _iso_utc()
             t0 = time.perf_counter()
@@ -354,7 +397,8 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             _print_step_result(step, elapsed, ok, err)
             results.append(_result_entry(step, ok=ok, started=started,
                                          ended=ended, elapsed=elapsed))
-            time.sleep(0.5)
+            # No trailing cosmetic sleep — dwell_before of the NEXT step
+            # handles inter-step pacing now.
 
     finally:
         for step in reversed(executed):
@@ -386,6 +430,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--results-dir", default=DEFAULT_RESULTS_DIR)
     p.add_argument("--kali-host", default=DEFAULT_KALI_HOST)
     p.add_argument("--wordlist", default=DEFAULT_WORDLIST)
+    p.add_argument(
+        "--pacing",
+        choices=list(PACING_MODES),
+        default=DEFAULT_PACING,
+        help=(
+            "How realistically attacker-chosen dwells are paced. "
+            "fast = instant (dev/CI); "
+            "relative = compressed but ordered (live demo, ~30 min); "
+            "realistic = real-time (overnight SIEM training, ~12 h)."
+        ),
+    )
 
     step_names = [s.name for s in CHAIN]
     sel = p.add_mutually_exclusive_group()
@@ -431,11 +486,14 @@ def main(argv: list[str] | None = None) -> int:
         _list_steps()
         return 0
 
+    pacing_cfg = PACING_MODES[args.pacing]
     ctx = Context(
         target=args.target,
         results_dir=args.results_dir,
         kali_host=args.kali_host,
         wordlist=args.wordlist,
+        pacing=args.pacing,
+        pacing_speed=float(pacing_cfg["speed"]),
     )
     run_chain(ctx, only=args.only, start=args.start, stop=args.stop)
     return 0
