@@ -506,7 +506,10 @@ function formatDate(iso) {
                     v-model="form.notes"
                     rows="3"
                     placeholder="Share anything you'd like your therapist to know in advance."
+                    :aria-invalid="errors.notes ? 'true' : 'false'"
+                    :aria-describedby="errors.notes ? 'err-notes' : null"
                   ></textarea>
+                  <p v-if="errors.notes" id="err-notes" class="field__error">{{ errors.notes }}</p>
                 </div>
 
                 <button class="btn btn--primary btn--lg btn--block" type="submit" :disabled="submitting">
