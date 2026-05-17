@@ -1,0 +1,3 @@
+# Container-Runtime-Artefakte (postgres/apache/etc. schreiben hier rein,
+# z.T. mit Container-User-Permissions die der Host nicht lesen kann)
+logs/
