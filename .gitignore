@@ -87,3 +87,16 @@ $RECYCLE.BIN/
 
 # NFS files
 .nfs*
+
+
+########################
+# JS / Node (workstation lab projects)
+########################
+**/node_modules/
+**/.vite/
+
+# npm/yarn/pnpm debug logs (NICHT *.log global — Lab nutzt .log als Artefakt)
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
