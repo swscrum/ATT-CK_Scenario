@@ -84,6 +84,9 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PU
     # subnet — the central SOC-training win of this segmentation slice.
     iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 22 -j ACCEPT
 
+    # DMZ → Internal: apache's booking CGI talks to db-internal on Postgres.
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 5432 -j ACCEPT
+
     # Internal → External: workstation outbound (future C2 / phases 5+).
     iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF   -j ACCEPT
 

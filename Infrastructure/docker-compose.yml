@@ -41,6 +41,11 @@ services:
       # from internal (workstation) only via explicit router FORWARD rules.
       dmz_net:
         ipv4_address: 10.40.0.2
+    # db-internal sits in internal_net (10.30.0.6). With apache in dmz_net,
+    # Docker's embedded DNS no longer resolves `db-internal` here — but the
+    # booking CGI (cgi-bin/book.py) connects via PGHOST=db-internal.
+    extra_hosts:
+      - "db-internal:10.30.0.6"
     restart: unless-stopped
 
   ubuntu_workstation:
