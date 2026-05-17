@@ -17,8 +17,19 @@ from pathlib import Path
 DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
+DEFAULT_PACING = "fast"
 
 EXT_LIST = [".php", ".html", ".txt", ".bak", ".sh", ".cgi", ".old"]
+
+# Per-pacing scan profiles. Only `realistic` slows scans down — `fast` and
+# `relative` keep scans fast because the user-visible realism in those modes
+# comes from inter-phase dwell, not intra-phase pacing.
+SCAN_PROFILES = {
+    "fast":      {"nmap_T": "-T4", "gobuster_extra": [],            "ffuf_extra": []},
+    "relative":  {"nmap_T": "-T4", "gobuster_extra": [],            "ffuf_extra": []},
+    "realistic": {"nmap_T": "-T2", "gobuster_extra": ["--delay", "100ms", "-t", "5"],
+                                                                     "ffuf_extra": ["-rate", "30"]},
+}
 
 
 def _header(num: int, name: str) -> None:
@@ -36,14 +47,15 @@ def _run(cmd: list[str], *, check: bool = True) -> int:
     return proc.returncode
 
 
-def phase_nmap_full(target: str, results_dir: Path) -> Path:
-    _header(1, f"nmap full TCP scan ({target})")
+def phase_nmap_full(target: str, results_dir: Path, *, pacing: str = DEFAULT_PACING) -> Path:
+    _header(1, f"nmap full TCP scan ({target}, pacing={pacing})")
     out = results_dir / "nmap-fullscan.txt"
-    _run(["nmap", "-Pn", "-sS", "-p-", target, "-oN", str(out)])
+    profile = SCAN_PROFILES.get(pacing, SCAN_PROFILES[DEFAULT_PACING])
+    _run(["nmap", "-Pn", "-sS", profile["nmap_T"], "-p-", target, "-oN", str(out)])
     return out
 
 
-def phase_nmap_services(target: str, results_dir: Path) -> Path:
+def phase_nmap_services(target: str, results_dir: Path, *, pacing: str = DEFAULT_PACING) -> Path:
     _header(2, "nmap version + default scripts on open ports")
     out = results_dir / "nmap-services.txt"
     fullscan = results_dir / "nmap-fullscan.txt"
@@ -62,22 +74,25 @@ def phase_nmap_services(target: str, results_dir: Path) -> Path:
 
     port_list = ",".join(ports)
     print(f"Open ports: {port_list}")
+    profile = SCAN_PROFILES.get(pacing, SCAN_PROFILES[DEFAULT_PACING])
     _run(
         [
-            "nmap", "-Pn", "-sS", "-sV", "-sC",
+            "nmap", "-Pn", "-sS", "-sV", "-sC", profile["nmap_T"],
             "-p", port_list, target, "-oN", str(out),
         ]
     )
     return out
 
 
-def phase_gobuster(target: str, results_dir: Path, wordlist: Path) -> Path:
+def phase_gobuster(target: str, results_dir: Path, wordlist: Path,
+                   *, pacing: str = DEFAULT_PACING) -> Path:
     _header(3, "gobuster directory enumeration")
     out = results_dir / "gobuster.txt"
     if not wordlist.exists():
         print(f"Wordlist {wordlist} not found — skipping.")
         out.write_text("")
         return out
+    profile = SCAN_PROFILES.get(pacing, SCAN_PROFILES[DEFAULT_PACING])
     _run(
         [
             "gobuster", "dir",
@@ -85,16 +100,18 @@ def phase_gobuster(target: str, results_dir: Path, wordlist: Path) -> Path:
             "-w", str(wordlist),
             "-o", str(out),
             "-q",
+            *profile["gobuster_extra"],
         ]
     )
     return out
 
 
-def phase_ffuf(target: str, results_dir: Path) -> Path:
+def phase_ffuf(target: str, results_dir: Path, *, pacing: str = DEFAULT_PACING) -> Path:
     _header(4, "ffuf extension fuzz")
     out = results_dir / "ffuf.json"
     ext_file = results_dir / ".web-extensions.txt"
     ext_file.write_text("\n".join(EXT_LIST) + "\n")
+    profile = SCAN_PROFILES.get(pacing, SCAN_PROFILES[DEFAULT_PACING])
     # ffuf can exit non-zero when no matches are found — don't make it fatal.
     _run(
         [
@@ -104,13 +121,16 @@ def phase_ffuf(target: str, results_dir: Path) -> Path:
             "-o", str(out),
             "-of", "json",
             "-s",
+            *profile["ffuf_extra"],
         ],
         check=False,
     )
     return out
 
 
-def phase_nikto(target: str, results_dir: Path) -> Path:
+def phase_nikto(target: str, results_dir: Path, *, pacing: str = DEFAULT_PACING) -> Path:
+    # nikto doesn't have a clean rate-limit knob; pacing is ignored here
+    # but kept in the signature so the caller can pass it uniformly.
     _header(5, "nikto vulnerability scan")
     # nikto's -o auto-appends a format extension; pass the basename without
     # .txt and force -Format txt so the result lands at nikto.txt.
@@ -144,10 +164,18 @@ def run(
     results_dir: str | os.PathLike[str] = DEFAULT_RESULTS_DIR,
     wordlist: str | os.PathLike[str] = DEFAULT_WORDLIST,
     phase: str | None = None,
+    *,
+    pacing: str = DEFAULT_PACING,
 ) -> None:
     """Run the recon flow. If phase is None, run all phases in order.
 
     Designed to be called from Attack-chain/main.py.
+
+    Pacing controls scan-tool timing:
+      fast / relative — aggressive flags (current behavior, ~12 s scan)
+      realistic       — slow flags (nmap -T2, gobuster --delay, ffuf -rate 30),
+                        producing the kind of low-and-slow probe pattern a real
+                        SOC would see (~15 min scan).
     """
     results = Path(results_dir)
     results.mkdir(parents=True, exist_ok=True)
@@ -156,9 +184,9 @@ def run(
     def call(name: str) -> None:
         fn = PHASES[name]
         if name == "gobuster":
-            fn(target, results, wl)
+            fn(target, results, wl, pacing=pacing)
         else:
-            fn(target, results)
+            fn(target, results, pacing=pacing)
 
     if phase is not None:
         if phase not in PHASES:
@@ -197,6 +225,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         choices=list(PHASES),
         help="Run a single phase instead of the full flow.",
     )
+    p.add_argument(
+        "--pacing",
+        choices=list(SCAN_PROFILES),
+        default=DEFAULT_PACING,
+        help="Scan-tool timing profile (fast/relative aggressive, realistic stealthy).",
+    )
     return p.parse_args(argv)
 
 
@@ -207,4 +241,5 @@ if __name__ == "__main__":
         results_dir=args.results_dir,
         wordlist=args.wordlist,
         phase=args.phase,
+        pacing=args.pacing,
     )

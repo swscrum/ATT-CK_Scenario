@@ -226,7 +226,12 @@ def _print_summary(results: list[dict]) -> None:
 def _step_recon(ctx: Context) -> dict[str, Any]:
     from initial_recon_1 import run as recon_run
 
-    recon_run(target=ctx.target, results_dir=ctx.results_dir, wordlist=ctx.wordlist)
+    recon_run(
+        target=ctx.target,
+        results_dir=ctx.results_dir,
+        wordlist=ctx.wordlist,
+        pacing=ctx.pacing,
+    )
     return {"recon_results": ctx.results_dir}
 
 
@@ -254,6 +259,7 @@ def _step_lateral(ctx: Context) -> dict[str, Any]:
     john_shell = lateral_run(
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
+        pacing_speed=ctx.pacing_speed,
     )
     if john_shell is None:
         raise RuntimeError("lateral movement returned no john.stravidis shell")
@@ -346,6 +352,16 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
     results: list[dict] = []
     executed: list[Step] = []
 
+    # Background noise — only in realistic pacing. Threads run for the full
+    # chain duration and are stopped in the finally block below.
+    noise_stop_event = None
+    noise_threads: list = []
+    if PACING_MODES[ctx.pacing].get("noise"):
+        import noise as _noise
+        noise_stop_event, noise_threads = _noise.start(
+            target=ctx.target, speed=ctx.pacing_speed, log=log,
+        )
+
     try:
         for i, step in enumerate(selected, 1):
             missing = [k for k in step.requires if k not in ctx.state]
@@ -401,6 +417,12 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             # handles inter-step pacing now.
 
     finally:
+        # Stop the noise pool before teardown so daemons don't keep hitting
+        # apache while teardown is closing its socket from earlier steps.
+        if noise_stop_event is not None:
+            import noise as _noise
+            _noise.stop(noise_stop_event, noise_threads, log)
+
         for step in reversed(executed):
             if step.teardown is None:
                 continue

