@@ -30,13 +30,14 @@ def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     try:
         bus = dbus.SystemBus()
-        dbus.service.BusName("org.freedesktop.login1", bus)
-        LogindManager(bus, "/org/freedesktop/login1")
+        bus_name = dbus.service.BusName("org.freedesktop.login1", bus)
+        manager = LogindManager(bus, "/org/freedesktop/login1")
     except dbus.DBusException as exc:
         print(f"[logind-stub] could not register on system bus: {exc}",
               file=sys.stderr)
         sys.exit(1)
-    GLib.MainLoop().run()
+    loop = GLib.MainLoop()
+    loop.run()
 
 
 if __name__ == "__main__":
