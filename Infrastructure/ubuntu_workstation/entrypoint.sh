@@ -1,8 +1,11 @@
 #!/bin/bash
 set -e
 
-# Allow reverse shells spawned on this host to reach kali — same route apache adds
+# Cross-zone routes via the router (10.30.0.4 is its internal_net leg):
+#   - 10.10.0.0/24 (External) — reverse shells from this host to kali
+#   - 10.40.0.0/24 (DMZ)      — deploy path to apache (rsync john.stravidis@apache:...)
 ip route add 10.10.0.0/24 via 10.30.0.4 || true
+ip route add 10.40.0.0/24 via 10.30.0.4 || true
 
 # Clean any stale X server locks left behind by a previous container start
 # (matters when Docker restarts the container without recreating it — the
