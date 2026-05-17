@@ -31,12 +31,13 @@ ssh labuser@<ubuntu_workstation-IP>
 `db-internal` runs PostgreSQL 16 on `internal_net` (10.30.0.6) with no outbound connectivity.
 
 **Database:** `waystar`  
-**Tables:** `patients` (80 records), `session_notes` (~100 records of fictional therapy sessions)
+**Tables:** `patients` (80 records), `session_notes` (~100 records of fictional therapy sessions), `appointments` (inbound booking requests from the public-facing site; filled at runtime by the waystar-connect web form)
 
 | User | Password | Access |
 |---|---|---|
 | `waystar` | *(privileged; stored on Hans's workstation)* | Full owner |
-| `waystar-readonly` | `ChangeMe!2026` | SELECT only — breadcrumbed in John's `~/.pgpass` |
+| `waystar-readonly` | `ChangeMe!2026` | SELECT on all tables — breadcrumbed in John's `~/.pgpass` |
+| `waystar-app` | `AppBooking!2026` | INSERT on `appointments` only (no patient data); used by the apache booking endpoint, stored in `apache:/etc/waystar/db.env` |
 
 **Connecting from the workstation:**
 ```bash
@@ -44,9 +45,12 @@ ssh labuser@<ubuntu_workstation-IP>
 psql -h db-internal -U waystar-readonly -d waystar
 ```
 
+**Public-facing booking endpoint:**
+The Waystar Connect site (served by `apache`) ships a Python CGI at `/cgi-bin/book.py`. It accepts a JSON booking payload, validates it server-side, and inserts a row into `appointments` as `waystar-app`. Patient data is **not** exposed through this surface — a compromised webserver lands on a least-privilege account.
+
 **Logs** are written to `Infrastructure/logs/db/postgresql-YYYY-MM-DD.log` and persist across container restarts. Connection attempts, failed authentications, and data-modification statements are all logged — useful for SIEM/NIDS demo scenarios.
 
-**Attack-chain role:** John's bash history and `~/.pgpass` breadcrumb the existence of this host (Phase 6 discovery). Phase 12 harvests the `waystar` privileged credentials from Hans's sysadmin workstation. Phase 13 exfiltrates the patient records via `pg_dump`.
+**Attack-chain role:** John's bash history and `~/.pgpass` breadcrumb the existence of this host (Phase 6 discovery). Phase 12 harvests the `waystar` privileged credentials from Hans's sysadmin workstation. Phase 13 exfiltrates the patient records via `pg_dump`. The `waystar-app` credentials on apache are an *additional* lateral surface but only reach `appointments`.
 
 ## Prerequisites
 

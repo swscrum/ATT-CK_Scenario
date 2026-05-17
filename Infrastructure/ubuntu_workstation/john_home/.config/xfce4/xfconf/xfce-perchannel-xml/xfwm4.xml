@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <!--
+      Compositing is disabled because:
+        1. TigerVNC has no hardware 3-D, so compositing effects are purely
+           CPU-rendered and add no value in this container lab.
+        2. With compositing on, xfwm4 conflicts with Xtigervnc's own
+           damage-tracking and logs "Another compositing manager is running
+           on screen 0" on every boot.
+    -->
+    <property name="use_compositing" type="bool" value="false"/>
+  </property>
+</channel>
