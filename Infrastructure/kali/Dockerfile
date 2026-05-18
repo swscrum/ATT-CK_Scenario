@@ -17,6 +17,8 @@ RUN echo 'deb http://kali.download/kali kali-rolling main contrib non-free non-f
     curl \
     ca-certificates \
     openssh-client \
+    iproute2 \
+    iputils-ping \
     python3 \
     python3-requests \
     python3-rich \

@@ -122,7 +122,27 @@ services:
   kali:
     build: ./kali
     container_name: kali
-    command: sleep infinity
+    cap_add:
+      # NET_ADMIN lets kali modify its own routing table at startup so
+      # 10.30.0.0/24 + 10.40.0.0/24 traffic is sent to the router instead
+      # of Docker's bridge gateway. Realistic — an attacker has admin on
+      # their own host.
+      - NET_ADMIN
+    # Add static routes so kali (the attacker host) can reach DMZ + Internal
+    # via the router. Without this, kali's default gateway is Docker's
+    # public_net bridge (10.10.0.1), which doesn't know about 10.30.0.0/24
+    # or 10.40.0.0/24 — packets to those subnets get dropped before they
+    # ever reach the router's iptables FORWARD chain. In a real network,
+    # an attacker on the firewall's external interface would have these
+    # routes implicitly (default-gw points at the firewall); the lab
+    # models that explicitly so the External→Internal rules are exercisable
+    # from kali instead of needing a separate scanner container.
+    command: >
+      sh -c "
+        ip route add 10.30.0.0/24 via 10.10.0.3 || true ;
+        ip route add 10.40.0.0/24 via 10.10.0.3 || true ;
+        exec sleep infinity
+      "
     tty: true
     stdin_open: true
     extra_hosts:
