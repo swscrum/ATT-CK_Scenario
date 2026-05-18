@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Pre-configured xfce4-desktop settings for the container lab.
+
+  show-thumbnails=false prevents xfdesktop from calling the tumbler D-Bus
+  thumbnailer at startup. Without it, xfdesktop 4.18.1 creates a GDBusProxy
+  for tumblerd during session start, hits a race condition where the proxy
+  isn't fully connected yet, and logs:
+
+    xfdesktop WARNING: Thumbnailer failed calling GetFlavors
+    GLib-GObject-CRITICAL: g_object_unref: assertion 'G_IS_OBJECT' failed
+
+  Desktop icon thumbnails provide no value in a VNC container lab, so
+  disabling them is the right default regardless.
+-->
+<channel name="xfce4-desktop" version="1.0">
+  <property name="desktop-icons" type="empty">
+    <!--
+      style=0 disables the desktop icon view entirely. This prevents
+      xfdesktop 4.18.1 from initialising its icon/thumbnailer subsystem,
+      which contains a race-condition bug that logs:
+        GLib-GObject-CRITICAL: g_object_unref: assertion 'G_IS_OBJECT' failed
+      The lab scenario has no files on John's Desktop, so icon view adds
+      no value and disabling it is the right default for a VNC container.
+    -->
+    <property name="style"          type="int"  value="0"/>
+    <property name="show-thumbnails" type="bool" value="false"/>
+  </property>
+</channel>

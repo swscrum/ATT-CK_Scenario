@@ -6,7 +6,9 @@ FROM httpd:2.4.50
 # / openssh-server. (openssh-server is added so john.stravidis can deploy in.)
 RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive.debian.org|g; /buster-updates/d' /etc/apt/sources.list \
     && apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install -y --no-install-recommends cron iproute2 dnsutils openssh-server openssh-client coreutils \
+    && apt-get install -y --no-install-recommends \
+        cron iproute2 dnsutils openssh-server openssh-client coreutils \
+        python3 python3-psycopg2 \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
@@ -55,6 +57,24 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
     && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
     && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts
+
+# ============================================================================
+#  Waystar Connect DB credentials for the booking-form CGI.
+# ----------------------------------------------------------------------------
+#  /etc/waystar/db.env holds the `waystar-app` Postgres credentials used by
+#  cgi-bin/book.py to insert into the appointments table on db-internal.
+#  File is mode 0640 (root:www-data) — readable by the Apache worker, not
+#  world-readable. NOTE: an attacker who lands a www-data shell via
+#  CVE-2021-41773 can still read it, which is the intended scenario surface.
+# ============================================================================
+RUN mkdir -p /etc/waystar \
+    && printf 'PGHOST=db-internal\nPGPORT=5432\nPGDATABASE=waystar\nPGUSER=waystar-app\nPGPASSWORD=AppBooking!2026\n' \
+         > /etc/waystar/db.env \
+    && chown root:www-data /etc/waystar/db.env \
+    && chmod 640 /etc/waystar/db.env
+
+# NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
+# +x bit on book.py is preserved from the host filesystem; no chmod here.
 
 # Start script: launch cron and sshd, then Apache in the foreground (so the
 # container doesn't exit immediately after start).

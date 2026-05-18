@@ -2,7 +2,7 @@
 
 This project is about an custom attack scenario to showcase IT security demonstrations.
 
-Currently, it consists of an attacker client (Kali Linux), a router container that simulates the edge of the network, a victim webserver, and a victim Ubuntu workstation with an XFCE desktop. The webserver and the workstation share an internal docker network. The workstation also uses an egress network so it can communicate outward. The router connects the internal network to the public side and forwards only port 80 to the webserver.
+Currently, it consists of an attacker client (Kali Linux), a router container that simulates the edge of the network, a victim webserver, a victim Ubuntu workstation with an XFCE desktop, and an internal PostgreSQL database server (`db-internal`). The webserver, workstation, and database share an internal docker network. The workstation also uses an egress network so it can communicate outward. The router connects the internal network to the public side and forwards only port 80 to the webserver.
 
 ## Network topology
 
@@ -15,6 +15,42 @@ The Ubuntu workstation exposes its desktop on host port 5901 — connect with an
 ```bash
 ssh labuser@<ubuntu_workstation-IP>
 ```
+
+## Services
+
+| Container | Image | Network | Purpose |
+|---|---|---|---|
+| `router` | Ubuntu 22.04 | `public_net` + `internal_net` | Edge router; forwards port 80 to apache |
+| `apache` | httpd:2.4.50 (vulnerable) | `internal_net` + `egress_net` | Waystar Connect webserver; CVE-2021-41773 target |
+| `ubuntu_workstation` | Ubuntu 24.04 | `internal_net` + `egress_net` | John Stravidis's dev workstation (VNC on port 5901) |
+| `db-internal` | postgres:16 | `internal_net` only | Waystar Royco patient database; Phase 12–13 target |
+| `kali` | kali-rolling | `public_net` | Attacker machine |
+
+## db-internal — patient database
+
+`db-internal` runs PostgreSQL 16 on `internal_net` (10.30.0.6) with no outbound connectivity.
+
+**Database:** `waystar`  
+**Tables:** `patients` (80 records), `session_notes` (~100 records of fictional therapy sessions), `appointments` (inbound booking requests from the public-facing site; filled at runtime by the waystar-connect web form)
+
+| User | Password | Access |
+|---|---|---|
+| `waystar` | *(privileged; stored on Hans's workstation)* | Full owner |
+| `waystar-readonly` | `ChangeMe!2026` | SELECT on all tables — breadcrumbed in John's `~/.pgpass` |
+| `waystar-app` | `AppBooking!2026` | INSERT on `appointments` only (no patient data); used by the apache booking endpoint, stored in `apache:/etc/waystar/db.env` |
+
+**Connecting from the workstation:**
+```bash
+# Credentials are picked up automatically from ~/.pgpass
+psql -h db-internal -U waystar-readonly -d waystar
+```
+
+**Public-facing booking endpoint:**
+The Waystar Connect site (served by `apache`) ships a Python CGI at `/cgi-bin/book.py`. It accepts a JSON booking payload, validates it server-side, and inserts a row into `appointments` as `waystar-app`. Patient data is **not** exposed through this surface — a compromised webserver lands on a least-privilege account.
+
+**Logs** are written to `Infrastructure/logs/db/postgresql-YYYY-MM-DD.log` and persist across container restarts. Connection attempts, failed authentications, and data-modification statements are all logged — useful for SIEM/NIDS demo scenarios.
+
+**Attack-chain role:** John's bash history and `~/.pgpass` breadcrumb the existence of this host (Phase 6 discovery). Phase 12 harvests the `waystar` privileged credentials from Hans's sysadmin workstation. Phase 13 exfiltrates the patient records via `pg_dump`. The `waystar-app` credentials on apache are an *additional* lateral surface but only reach `appointments`.
 
 ## Prerequisites
 
