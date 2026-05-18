@@ -6,7 +6,9 @@ FROM httpd:2.4.50
 # / openssh-server. (openssh-server is added so john.stravidis can deploy in.)
 RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive.debian.org|g; /buster-updates/d' /etc/apt/sources.list \
     && apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install -y --no-install-recommends cron iproute2 dnsutils openssh-server openssh-client coreutils \
+    && apt-get install -y --no-install-recommends \
+        cron iproute2 dnsutils openssh-server openssh-client coreutils \
+        inotify-tools \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
@@ -56,10 +58,15 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
     && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts
 
-# Start script: launch cron and sshd, then Apache in the foreground (so the
-# container doesn't exit immediately after start).
-RUN printf '#!/bin/sh\nservice cron start\nservice ssh start\nexec httpd-foreground\n' > /usr/local/bin/start.sh \
-    && chmod +x /usr/local/bin/start.sh
+# Start script: launches cron + sshd, then the inotify-based File Integrity
+# Monitor that watches /opt/cleanup.sh (the privesc tripwire), then hands
+# off to Apache in the foreground. The watcher's output lands in
+# /usr/local/apache2/logs/lab-fim.log, which is bind-mounted to the host
+# so a SIEM agent can ingest it — the central detection signal for
+# T1053.003 + T1068.
+COPY apache/start.sh   /usr/local/bin/start.sh
+COPY apache/lab-fim.sh /usr/local/bin/lab-fim.sh
+RUN chmod +x /usr/local/bin/start.sh /usr/local/bin/lab-fim.sh
 
 CMD ["/usr/local/bin/start.sh"]
 

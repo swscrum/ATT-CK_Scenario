@@ -8,6 +8,12 @@ services:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.rp_filter=0
       - net.ipv4.conf.default.rp_filter=0
+    volumes:
+      # Persist router logs (ulogd2 writes NFLOG packet captures to
+      # /var/log/ulog-iptables.log; rsyslog/kernel events also land in
+      # /var/log/kern.log when populated). Direct /var/log mount matches
+      # how a real edge firewall ships its logs off-box.
+      - ./logs/router:/var/log
     networks:
       public_net:
         ipv4_address: 10.10.0.3
@@ -50,11 +56,12 @@ services:
     ports:
       - "5901:5901"
     volumes:
-      # Persist workstation logs (rsyslog mirrors syslog + auth.log to
-      # /var/log/persist, and the inotify FIM watcher writes lab-fim.log
-      # there; sshd VERBOSE → auth.log). /var/log itself is NOT bind-mounted
-      # to avoid changing host directory ownership.
-      - ./logs/workstation:/var/log/persist
+      # Persist workstation logs. Direct /var/log bind mount — same shape
+      # a real production Ubuntu host would have. rsyslog writes
+      # syslog/auth.log/kern.log here; the inotify FIM watcher writes
+      # lab-fim.log here. The entrypoint chowns the dir to root:syslog
+      # so rsyslog can drop files normally.
+      - ./logs/workstation:/var/log
     networks:
       egress_net: {}
       internal_net:

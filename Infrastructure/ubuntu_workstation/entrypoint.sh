@@ -12,6 +12,34 @@ rm -rf /tmp/.X11-unix
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
 
+# /var/log is bind-mounted from the host (./logs/workstation on host); the
+# mount inherits host ownership (uid 1000), so we restore the standard
+# Ubuntu root:syslog ownership before rsyslog tries to write. /var/log/audit
+# is set up in advance for any future auditd plugin even though the lab
+# currently uses inotify for FIM.
+chown root:syslog /var/log
+chmod 0775 /var/log
+mkdir -p /var/log/audit
+chown root:adm /var/log/audit
+chmod 0750 /var/log/audit
+
+# Start the real Linux logging daemon so /var/log/{syslog,auth.log,kern.log}
+# populate the way they would on a production Ubuntu box. Ubuntu 24.04 ships
+# systemd-only unit files inside the image, so we invoke the binary directly.
+rsyslogd \
+    || echo "[entrypoint] rsyslogd failed to start"
+
+# inotify-based File Integrity Monitor. Writes one structured line per
+# filesystem event on the watched paths (john's ~/.ssh, ~/.bash_history,
+# /var/mail, /etc/{passwd,shadow,sudoers,…}) to /var/log/lab-fim.log.
+# Stands in for auditd, which can't register with the kernel audit
+# subsystem inside this Docker host. Wazuh-FIM uses inotify the same way
+# when auditd is unavailable, so the SIEM-side experience matches a real
+# Linux EDR.
+touch /var/log/lab-fim.log && chmod 0644 /var/log/lab-fim.log
+nohup /usr/local/bin/lab-fim.sh >> /var/log/lab-fim.log 2>&1 &
+echo "[entrypoint] lab-fim watcher PID $!"
+
 # Start sshd in the background so the container has a remote shell.
 /usr/sbin/sshd
 

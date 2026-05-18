@@ -73,6 +73,21 @@ cleanup() {
         echo "[run.sh] --keep-up: lab still running. Tear down later with: docker compose down"
     fi
 
+    # Snapshot rotation — keep the most recent 5 run-* directories, prune
+    # older ones. Real-prod log pipelines age/rotate; this is the lab
+    # equivalent. Some files inside the snapshot are root-owned (docker cp
+    # preserves uid/gid), so use a throwaway container with the dir mounted
+    # to do the deletion without needing host sudo.
+    KEEP=5
+    old_dirs=$(ls -1dt "$PWD/logs"/run-* 2>/dev/null | tail -n +$((KEEP + 1)))
+    if [ -n "$old_dirs" ]; then
+        count=$(echo "$old_dirs" | wc -l)
+        echo "[run.sh] pruning $count old snapshot(s) (keeping last $KEEP)"
+        docker run --rm -v "$PWD/logs:/L" ubuntu:22.04 sh -c \
+            "cd /L && rm -rf $(echo "$old_dirs" | xargs -n1 basename | tr '\n' ' ')" \
+            2>/dev/null || true
+    fi
+
     echo "[run.sh] inspect:"
     echo "  $RUN_DIR/"
     echo "  $(cd .. && pwd)/Attack-chain/results/"
