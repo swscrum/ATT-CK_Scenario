@@ -74,25 +74,80 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PU
     # External → DMZ: only the CVE-2021-41773 attack path (HTTP to apache).
     iptables -A FORWARD -i $PUBLIC_IF   -o $DMZ_IF      -p tcp -d $APACHE_IP --dport 80 -j ACCEPT
 
+    # External → Internal: realistic perimeter posture. The current attack
+    # chain pivots in via apache (External → DMZ → Internal) and does NOT
+    # need a direct External → Internal path. A real edge firewall would
+    # still WRITE explicit rules covering this direction so the SOC has
+    # named-prefix log entries for the most common probe types instead of
+    # everything collapsing into the generic FW-DROP tail rule.
+    #
+    # ICMP echo is left open — common operational convenience in many real
+    # networks (helps admins debug, also helps attackers map; visible to
+    # SOC via the head FW-NEW NFLOG either way).
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF \
+        -p icmp --icmp-type echo-request -j ACCEPT
+    # Common scanned ports — tag with named NFLOG prefixes so SOC training
+    # rules can fire on specifically "external-to-internal probe of X"
+    # rather than the generic tail FW-DROP. Each rule is non-terminating
+    # (NFLOG continues the chain); the explicit DROP below ends the chain.
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 22 \
+        -j NFLOG --nflog-prefix "FW-EXT-PROBE-SSH: "   --nflog-group 1
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 3389 \
+        -j NFLOG --nflog-prefix "FW-EXT-PROBE-RDP: "   --nflog-group 1
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 5432 \
+        -j NFLOG --nflog-prefix "FW-EXT-PROBE-DB: "    --nflog-group 1
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 5901 \
+        -j NFLOG --nflog-prefix "FW-EXT-PROBE-VNC: "   --nflog-group 1
+    # Explicit DROP for everything else External → Internal. Catches the
+    # remaining probes (other ports, UDP, weird protocols) AND makes the
+    # firewall intent visible in `iptables -nvL` packet counters.
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -j DROP
+
     # DMZ → External: lets apache's reverse shells dial back to kali
     # (Phase 2 :4444 www-data callback and Phase 3 :5555 root callback).
     iptables -A FORWARD -i $DMZ_IF      -o $PUBLIC_IF   -j ACCEPT
 
-    # DMZ → Internal: only SSH. This is the Phase 4 lateral movement
-    # (apache → john.stravidis@workstation). Now traverses the router and
-    # gets logged at the network layer instead of bypassing it via a shared
-    # subnet — the central SOC-training win of this segmentation slice.
-    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 22 -j ACCEPT
-
-    # DMZ → Internal: apache's booking CGI talks to db-internal on Postgres.
-    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 5432 -j ACCEPT
+    # DMZ → Internal: permissive baseline. One rule per service so each
+    # port shows up with its own packet counter in `iptables -nvL` (handy
+    # for ops + SOC training). Tighten by deleting specific lines as the
+    # chain matures and named detections need cleaner signal.
+    #     22       SSH       — Phase 4 lateral (apache → workstation)
+    #     53       DNS       — name resolution (TCP + UDP)
+    #     80/443   HTTP/S    — web (intranet API, internal admin panels)
+    #     3389     RDP       — Windows remote desktop
+    #     1433/3306/5432/27017  — MSSQL / MySQL / Postgres / MongoDB
+    #                           Postgres covers the existing booking-CGI path.
+    #     5900-5901 VNC       — covers canonical :5900 and the lab's :5901
+    #     icmp     ping      — ops debugging
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p icmp --icmp-type echo-request -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 22        -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 53        -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p udp --dport 53        -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 80        -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 443       -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 3389      -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 1433      -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 3306      -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 5432      -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 27017     -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 5900:5901 -j ACCEPT
 
     # Internal → External: workstation outbound (future C2 / phases 5+).
     iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF   -j ACCEPT
 
-    # Internal → DMZ: SSH-only deploy path (e.g. john pushing from his
-    # workstation back to apache).
-    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 22 -j ACCEPT
+    # Internal → DMZ: symmetric mirror of the DMZ → Internal block above.
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p icmp --icmp-type echo-request -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 22        -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 53        -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p udp --dport 53        -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 80        -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 443       -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 3389      -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 1433      -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 3306      -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 5432      -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 27017     -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 5900:5901 -j ACCEPT
 
     # 4. NFLOG: tap NEW flows at the head of FORWARD and unmatched drops at
     #    the tail. ulogd2 catches both via group 1 and writes to
