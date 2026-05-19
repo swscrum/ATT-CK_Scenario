@@ -8,6 +8,7 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
     && apt-get -o Acquire::Check-Valid-Until=false update \
     && apt-get install -y --no-install-recommends \
         cron iproute2 dnsutils openssh-server openssh-client coreutils \
+        rsync \
         python3 python3-psycopg2 \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
