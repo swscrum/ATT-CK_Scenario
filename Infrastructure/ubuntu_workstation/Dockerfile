@@ -90,7 +90,10 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && sqlite3 /home/john.stravidis/projects/waystar-connect/dev.db \
          < /home/john.stravidis/projects/waystar-connect/seed_dev_db.sql \
     && chown john.stravidis:john.stravidis \
-         /home/john.stravidis/projects/waystar-connect/dev.db
+         /home/john.stravidis/projects/waystar-connect/dev.db \
+    && cd /home/john.stravidis/projects/waystar-connect \
+    && npm install \
+    && chown -R john.stravidis:john.stravidis node_modules
 
 COPY ubuntu_workstation/logind-stub.py /usr/local/bin/logind-stub.py
 # D-Bus policy that allows root to own org.freedesktop.login1 (the logind stub).
