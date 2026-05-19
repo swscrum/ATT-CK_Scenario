@@ -8,6 +8,7 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
     && apt-get -o Acquire::Check-Valid-Until=false update \
     && apt-get install -y --no-install-recommends \
         cron iproute2 dnsutils openssh-server openssh-client coreutils \
+        rsync \
         python3 python3-psycopg2 \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
@@ -46,7 +47,7 @@ RUN printf '* * * * * root /opt/cleanup.sh\n' > /etc/cron.d/cleanup \
 # ============================================================================
 RUN useradd -m -s /bin/bash john.stravidis
 COPY apache/john_home/ /home/john.stravidis/
-COPY html/ /opt/waystar-connect/dist/
+COPY apache/dist/ /opt/waystar-connect/dist/
 COPY shared-lab-keys/john_deploy_key.pub /home/john.stravidis/.ssh/authorized_keys
 COPY shared-lab-keys/john_deploy_key     /home/john.stravidis/.ssh/id_ed25519
 COPY apache/john_home/projects/waystar-connect/deploy.log /opt/waystar-connect/deploy.log
