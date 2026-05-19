@@ -73,6 +73,23 @@ RUN mkdir -p /etc/waystar \
     && chown root:www-data /etc/waystar/db.env \
     && chmod 640 /etc/waystar/db.env
 
+# ============================================================================
+#  vinzenz.fedora — sysadmin's named account on this host.
+#  Vinzenz SSHes in from his workstation (10.30.0.8) using the shared
+#  vincent_admin_key keypair. He has sudo. This is the sysadmin reach the
+#  attack chain pivots to once the attacker compromises Vinzenz's box.
+# ============================================================================
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends sudo \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -s /bin/bash -G sudo vinzenz.fedora \
+    && echo 'vinzenz.fedora:VinzenzAdmin!2026' | chpasswd \
+    && mkdir -p /home/vinzenz.fedora/.ssh
+COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_keys
+RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
+    && chmod 700 /home/vinzenz.fedora/.ssh \
+    && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
+
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
 

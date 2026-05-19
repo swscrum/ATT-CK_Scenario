@@ -68,6 +68,38 @@ services:
         ipv4_address: 10.30.0.5
     restart: unless-stopped
 
+  luke_ws:
+    build:
+      context: .
+      dockerfile: luke_ws/Dockerfile
+    container_name: luke_ws
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      # Mirror of the workstation logging pattern. rsyslog inside the
+      # container writes /var/log/syslog + /var/log/auth.log as usual;
+      # 40-lab-persist.conf duplicates them to /var/log/persist which
+      # is bind-mounted here so the SOC can ingest.
+      - ./logs/luke_ws:/var/log/persist
+    networks:
+      internal_net:
+        ipv4_address: 10.30.0.7
+    restart: unless-stopped
+
+  vinzenz_ws:
+    build:
+      context: .
+      dockerfile: vinzenz_ws/Dockerfile
+    container_name: vinzenz_ws
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./logs/vinzenz_ws:/var/log/persist
+    networks:
+      internal_net:
+        ipv4_address: 10.30.0.8
+    restart: unless-stopped
+
   db-internal:
     build:
       context: .
@@ -76,7 +108,7 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
-      # Privileged owner — credentials live on Hans's workstation (sysadmin_ws).
+      # Privileged owner — credentials live on Vinzenz's workstation (vinzenz_ws).
       # waystar-readonly (ChangeMe!2026) is breadcrumbed on John's workstation.
       POSTGRES_DB: waystar
       POSTGRES_USER: waystar
@@ -108,6 +140,11 @@ services:
   kali:
     build: ./kali
     container_name: kali
+    cap_add:
+      # nmap's binary has file caps (cap_net_admin=eip); Linux requires
+      # the container bounding set to include them or `exec` fails with
+      # EPERM. Docker's default set doesn't include NET_ADMIN.
+      - NET_ADMIN
     command: sleep infinity
     tty: true
     stdin_open: true

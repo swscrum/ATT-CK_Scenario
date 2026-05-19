@@ -1,0 +1,5 @@
+[user]
+    name = Vinzenz Fedora
+    email = vinzenz.fedora@waystar.local
+[init]
+    defaultBranch = main
