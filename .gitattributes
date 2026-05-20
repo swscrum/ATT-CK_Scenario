@@ -1,0 +1,66 @@
+# ============================================================================
+# Force LF line endings for all text files, regardless of OS.
+#
+# Without this, Windows users with the default `core.autocrlf=true` get
+# CRLF in their working tree. Shell scripts and Dockerfile entrypoints
+# then carry a `\r` in their shebang line, and Linux containers crash
+# with `exec /entrypoint.sh: no such file or directory`.
+#
+# This file overrides any client-side autocrlf setting for files in the
+# repo, so the working tree always matches what's committed (LF).
+# ============================================================================
+
+# Default for any text file Git can auto-detect: text, LF.
+* text=auto eol=lf
+
+# Explicit rules for everything that ends up inside a Linux container
+# or is parsed by a Linux tool — belt + braces over the catch-all above.
+
+# Shell scripts — the primary breakage point flagged by the PR comment.
+*.sh         text eol=lf
+*.bash       text eol=lf
+
+# Container build / runtime configuration.
+Dockerfile   text eol=lf
+*.dockerfile text eol=lf
+*.conf       text eol=lf
+*.cfg        text eol=lf
+*.ini        text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.json       text eol=lf
+*.toml       text eol=lf
+*.env        text eol=lf
+
+# Source / documentation read by container processes.
+*.py         text eol=lf
+*.js         text eol=lf
+*.css        text eol=lf
+*.html       text eol=lf
+*.md         text eol=lf
+*.sql        text eol=lf
+
+# SSH keys + cert material — must stay LF or OpenSSH rejects them.
+*.pem        text eol=lf
+*.key        text eol=lf
+*.pub        text eol=lf
+id_ed25519   text eol=lf
+id_rsa       text eol=lf
+
+# Known binaries — Git's auto-detection usually handles these, but
+# being explicit keeps `git diff` clean and avoids accidental
+# normalization.
+*.gz         binary
+*.tar        binary
+*.zip        binary
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.ico        binary
+*.pdf        binary
+*.iso        binary
+*.db         binary
+*.sqlite     binary
+*.sqlite3    binary
+*.so         binary
