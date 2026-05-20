@@ -87,3 +87,19 @@ $RECYCLE.BIN/
 
 # NFS files
 .nfs*
+
+
+########################
+# JS / Node (workstation lab projects)
+########################
+**/node_modules/
+**/.vite/
+
+# Workstation-Build (identisch zu Infrastructure/html/, das die produktive Quelle ist)
+Infrastructure/ubuntu_workstation/john_home/projects/waystar-connect/dist/
+
+# npm/yarn/pnpm debug logs (NICHT *.log global — Lab nutzt .log als Artefakt)
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
