@@ -284,6 +284,42 @@ In strict order (this matters for realism — backups go first):
 
 Items marked **NEW** are not in the lab today. Items in *italics* are configuration changes to existing components.
 
+### Network zones
+
+Three-tier segmentation enforced by the `router` container's iptables FORWARD
+chain. All cross-zone traffic must traverse the router, where it gets a
+NFLOG line in `Infrastructure/logs/router/ulog-iptables.log`.
+
+```
+                ┌──── public_net  10.10.0.0/24 ────┐
+                │                                   │
+            [kali]                            [router]
+            10.10.0.2          public_if .10.10.0.3 │
+                                  dmz_if  10.40.0.4 │
+                              internal_if 10.30.0.4 │
+                                                    │
+                ┌──── dmz_net     10.40.0.0/24 ─────┤
+                │                                   │
+            [apache]                                │
+            10.40.0.2                               │
+                                                    │
+                ┌──── internal_net 10.30.0.0/24 ────┘
+                │                       │
+        [john's workstation]      (future: luke_ws,
+        10.30.0.5                  hardened_ws_*,
+                                   sysadmin_ws, ...)
+```
+
+Allowed flows (everything else dropped by `FORWARD` policy):
+
+| From → To | Ports | Use |
+|---|---|---|
+| External → DMZ | tcp 80 (via DNAT) | the CVE-2021-41773 entry path |
+| DMZ → External | any | apache's reverse shells dial back to kali :4444 / :5555 |
+| DMZ → Internal | tcp 22 | Phase 4 lateral SSH (apache → john.stravidis) — **now loggable** |
+| Internal → DMZ | tcp 22 | deploy path (john pushing back to apache) |
+| Internal → External | any | future C2 / outbound from workstation |
+
 ### Containers
 - ✓ Existing: `kali` (attacker), `router`, `apache`, `ubuntu_workstation`
 - **NEW**: rename `ubuntu_workstation` → `john_ws` (or add a workstation service per role). The current single workstation becomes John's.
