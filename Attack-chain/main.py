@@ -9,7 +9,7 @@ adapter that reads from / writes to a shared ``Context``.
 Add a new step by:
   1. Writing the module under ``Attack-chain/`` with a top-level entry function.
   2. Adding an ``_step_<name>`` adapter below.
-  3. Appending a ``Step(...)`` entry to ``CHAIN``.
+  3. Appending a ``Step(...)`` entry to ``CHAIN_BASIC`` (and/or ``CHAIN_ADVANCED``).
 """
 
 from __future__ import annotations
@@ -155,6 +155,7 @@ def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
     out_path = out_dir / f"chain-{sanitized}.json"
     payload = {
         "run_id": run_id,
+        "mode": ctx.mode,
         "target": ctx.target,
         "kali": ctx.kali_host,
         "steps": results,
@@ -426,7 +427,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="scenario variant to execute, case-insensitive (default: basic)",
     )
 
-    step_names = sorted({s.name for c in CHAINS.values() for s in c})
+    seen: dict[str, None] = {}
+    for chain in CHAINS.values():
+        for step in chain:
+            seen.setdefault(step.name, None)
+    step_names = list(seen)
     sel = p.add_mutually_exclusive_group()
     sel.add_argument("--only", choices=step_names)
     sel.add_argument("--from", dest="start", choices=step_names)
