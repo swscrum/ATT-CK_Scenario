@@ -27,10 +27,12 @@ echo "Gefundene Apache IP: $APACHE_IP"
 
 # ============================================================
 # Dynamische Interface-Erkennung
-# Feste Subnetze: public_net=10.10.0.0/24, internal_net=10.30.0.0/24
+# Fixed subnets: public_net=10.10.0.0/24, dmz_net=10.40.0.0/24,
+#                internal_net=10.30.0.0/24
 # ============================================================
-INTERNAL_IF=""
 PUBLIC_IF=""
+DMZ_IF=""
+INTERNAL_IF=""
 
 while read -r line; do
     iface=$(echo "$line" | awk '{print $2}')
@@ -39,33 +41,113 @@ while read -r line; do
     if echo "$ip_addr" | grep -q "^10\.30\."; then
         INTERNAL_IF="$iface"
         echo "Internal interface: $iface ($ip_addr)"
+    elif echo "$ip_addr" | grep -q "^10\.40\."; then
+        DMZ_IF="$iface"
+        echo "DMZ interface:      $iface ($ip_addr)"
     elif echo "$ip_addr" | grep -q "^10\.10\."; then
         PUBLIC_IF="$iface"
-        echo "Public interface: $iface ($ip_addr)"
+        echo "Public interface:   $iface ($ip_addr)"
     fi
 done < <(ip -4 -o addr show scope global)
 
-echo "INTERNAL_IF=$INTERNAL_IF  PUBLIC_IF=$PUBLIC_IF"
+echo "PUBLIC_IF=$PUBLIC_IF  DMZ_IF=$DMZ_IF  INTERNAL_IF=$INTERNAL_IF"
 
 # Existierende Regeln löschen
 iptables -F
 iptables -t nat -F
 
-if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$PUBLIC_IF" ]; then
+if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PUBLIC_IF" ]; then
     echo "Konfiguriere Routing und NAT..."
 
-    # 1. DNAT: Port 80 Traffic von außen an Apache weiterleiten
+    # 1. DNAT: external :80 → apache (now living in DMZ).
     iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination $APACHE_IP:80
 
-    # 2. MASQUERADE: Ausgehenden Traffic auf BEIDEN Interfaces maskieren
-    iptables -t nat -A POSTROUTING -o $PUBLIC_IF -j MASQUERADE
+    # 2. MASQUERADE: outgoing traffic on every interface gets source-rewritten.
+    iptables -t nat -A POSTROUTING -o $PUBLIC_IF   -j MASQUERADE
+    iptables -t nat -A POSTROUTING -o $DMZ_IF      -j MASQUERADE
     iptables -t nat -A POSTROUTING -o $INTERNAL_IF -j MASQUERADE
 
-    # 3. FORWARD: Stateful Firewall
+    # 3. FORWARD: zone-aware stateful firewall.
     iptables -P FORWARD DROP
     iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-    iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF -j ACCEPT
-    iptables -A FORWARD -i $PUBLIC_IF -o $INTERNAL_IF -p tcp -d $APACHE_IP --dport 80 -j ACCEPT
+
+    # External → DMZ: only the CVE-2021-41773 attack path (HTTP to apache).
+    iptables -A FORWARD -i $PUBLIC_IF   -o $DMZ_IF      -p tcp -d $APACHE_IP --dport 80 -j ACCEPT
+
+    # External → Internal: realistic perimeter posture. The current attack
+    # chain pivots in via apache (External → DMZ → Internal) and does NOT
+    # need a direct External → Internal path. A real edge firewall would
+    # still WRITE explicit rules covering this direction so the SOC has
+    # named-prefix log entries for the most common probe types instead of
+    # everything collapsing into the generic FW-DROP tail rule.
+    #
+    # ICMP echo is left open — common operational convenience in many real
+    # networks (helps admins debug, also helps attackers map; visible to
+    # SOC via the head FW-NEW NFLOG either way).
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF \
+        -p icmp --icmp-type echo-request -j ACCEPT
+    # Common scanned ports — tag with named NFLOG prefixes so SOC training
+    # rules can fire on specifically "external-to-internal probe of X"
+    # rather than the generic tail FW-DROP. Each rule is non-terminating
+    # (NFLOG continues the chain); the explicit DROP below ends the chain.
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 22 \
+        -j NFLOG --nflog-prefix "FW-EXT-PROBE-SSH: "   --nflog-group 1
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 3389 \
+        -j NFLOG --nflog-prefix "FW-EXT-PROBE-RDP: "   --nflog-group 1
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 5432 \
+        -j NFLOG --nflog-prefix "FW-EXT-PROBE-DB: "    --nflog-group 1
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 5901 \
+        -j NFLOG --nflog-prefix "FW-EXT-PROBE-VNC: "   --nflog-group 1
+    # Explicit DROP for everything else External → Internal. Catches the
+    # remaining probes (other ports, UDP, weird protocols) AND makes the
+    # firewall intent visible in `iptables -nvL` packet counters.
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -j DROP
+
+    # DMZ → External: lets apache's reverse shells dial back to kali
+    # (Phase 2 :4444 www-data callback and Phase 3 :5555 root callback).
+    iptables -A FORWARD -i $DMZ_IF      -o $PUBLIC_IF   -j ACCEPT
+
+    # DMZ → Internal: permissive baseline. One rule per service so each
+    # port shows up with its own packet counter in `iptables -nvL` (handy
+    # for ops + SOC training). Tighten by deleting specific lines as the
+    # chain matures and named detections need cleaner signal.
+    #     22       SSH       — Phase 4 lateral (apache → workstation)
+    #     53       DNS       — name resolution (TCP + UDP)
+    #     80/443   HTTP/S    — web (intranet API, internal admin panels)
+    #     3389     RDP       — Windows remote desktop
+    #     1433/3306/5432/27017  — MSSQL / MySQL / Postgres / MongoDB
+    #                           Postgres covers the existing booking-CGI path.
+    #     5900-5901 VNC       — covers canonical :5900 and the lab's :5901
+    #     icmp     ping      — ops debugging
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p icmp --icmp-type echo-request -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 22        -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 53        -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p udp --dport 53        -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 80        -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 443       -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 3389      -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 1433      -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 3306      -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 5432      -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 27017     -j ACCEPT
+    iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 5900:5901 -j ACCEPT
+
+    # Internal → External: workstation outbound (future C2 / phases 5+).
+    iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF   -j ACCEPT
+
+    # Internal → DMZ: symmetric mirror of the DMZ → Internal block above.
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p icmp --icmp-type echo-request -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 22        -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 53        -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p udp --dport 53        -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 80        -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 443       -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 3389      -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 1433      -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 3306      -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 5432      -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 27017     -j ACCEPT
+    iptables -A FORWARD -i $INTERNAL_IF -o $DMZ_IF      -p tcp --dport 5900:5901 -j ACCEPT
 
     # 4. NFLOG: tap NEW flows at the head of FORWARD and unmatched drops at
     #    the tail. ulogd2 catches both via group 1 and writes to
@@ -82,7 +164,7 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$PUBLIC_IF" ]; then
     iptables -t nat -nvL
 else
     echo "FEHLER: Konnte Interfaces oder Apache IP nicht ermitteln."
-    echo "  APACHE_IP=$APACHE_IP INTERNAL_IF=$INTERNAL_IF PUBLIC_IF=$PUBLIC_IF"
+    echo "  APACHE_IP=$APACHE_IP PUBLIC_IF=$PUBLIC_IF DMZ_IF=$DMZ_IF INTERNAL_IF=$INTERNAL_IF"
     echo "  Breche ab, um fail-closed zu bleiben und kein generelles Forwarding zu erlauben."
 
     # Fail-closed: Kein unspezifisches NAT/Forwarding aktivieren
