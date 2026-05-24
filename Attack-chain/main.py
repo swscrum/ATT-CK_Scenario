@@ -423,8 +423,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--mode",
         type=_parse_mode,
         default=DEFAULT_MODE,
-        metavar="{basic,b,advanced,a}",
-        help="scenario variant to execute, case-insensitive (default: basic)",
+        metavar="{basic,advanced}",
+        help=(
+            "scenario variant to execute, case-insensitive; "
+            "aliases: basic/b, advanced/a/adv (default: basic)"
+        ),
     )
 
     seen: dict[str, None] = {}
