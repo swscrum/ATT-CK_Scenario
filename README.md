@@ -74,7 +74,8 @@ The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, pl
 ```bash
 # Option 1)
 #Automated Orchestration of all phases and automated cleanup:
-tools/run.sh
+tools/run.sh                       # defaults to --mode basic
+tools/run.sh --mode advanced       # stealthier variant (placeholder, mirrors basic for now)
 
 # Option 2)
 # Running the phases one by one:

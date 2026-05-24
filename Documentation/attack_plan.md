@@ -311,7 +311,7 @@ Many will be slim (one or two `send_command` calls plus state plumbing); some wi
 
 ### Orchestrator changes (`Attack-chain/main.py`)
 
-Each phase becomes a `Step(...)` in `CHAIN`, with proper `requires=` plumbing so the orchestrator can refuse to run a step whose state inputs are missing. The hybrid TTP model means several steps will set up shared state objects that persist across multiple subsequent steps (the C2 tunnel handle, the various per-host `Connection` objects).
+Each phase becomes a `Step(...)` in a chain (`CHAIN_BASIC` / `CHAIN_ADVANCED`, selected at runtime via `--mode {basic,advanced}`), with proper `requires=` plumbing so the orchestrator can refuse to run a step whose state inputs are missing. The hybrid TTP model means several steps will set up shared state objects that persist across multiple subsequent steps (the C2 tunnel handle, the various per-host `Connection` objects). Advanced mode currently mirrors basic; stealthier per-step variants are swapped into `CHAIN_ADVANCED` as they're implemented.
 
 ## Open questions (deferred to step 3 implementation)
 
