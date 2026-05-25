@@ -54,9 +54,9 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 | 7 | [T1110.003](https://attack.mitre.org/techniques/T1110/003/) Brute Force: Password Spraying | spray against hardened workstations |
 | 7 | [T1018](https://attack.mitre.org/techniques/T1018/) Remote System Discovery | the actual workstation enumeration |
 | 7 | [T1046](https://attack.mitre.org/techniques/T1046/) Network Service Discovery | port-scanning the internal subnet from John's box |
-| 8 | [T1083](https://attack.mitre.org/techniques/T1083/) File and Directory Discovery | finding `/var/log/migration/`, `/home/luke.smith.bak/` |
-| 8 | [T1087.001](https://attack.mitre.org/techniques/T1087/001/) Account Discovery: Local Account | identifying the previous user |
-| 8 | [T1552.004](https://attack.mitre.org/techniques/T1552/004/) Unsecured Credentials: Private Keys | Luke's stale personal SSH key |
+| 8 | [T1110.003](https://attack.mitre.org/techniques/T1110/003/) Brute Force: Password Spraying | spray against `luke.smith` from John's box — denied + logged |
+| 8 | [T1078.003](https://attack.mitre.org/techniques/T1078/003/) Valid Accounts: Local Accounts | reuse of John's stolen credentials against Luke — denied (different account) |
+| 8 | [T1021.004](https://attack.mitre.org/techniques/T1021/004/) Remote Services: SSH | SSH attempt vector itself — sshd `LogLevel VERBOSE` records each fingerprint |
 
 ### Group D — Deep lateral movement
 
