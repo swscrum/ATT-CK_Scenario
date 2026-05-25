@@ -7,7 +7,7 @@ HISTFILESIZE=4000
 shopt -s histappend
 shopt -s checkwinsize
 
-export PS1='\u@\h:\w# '
+export PS1='\u@\h:\w\$ '
 
 # Sysadmin aliases — fleet management.
 alias ll='ls -lah'
