@@ -49,6 +49,7 @@ What advanced adds for the SOC trainee: the **sysadmin-key-theft** detection bea
 | Execution | (existing) reverse shell | T1059.004 |
 | Privilege Escalation | (existing) cron + chmod 777 | T1053.003 |
 | Credential Access | deploy creds in files on apache | T1552.001 |
+| Discovery + Credential Access | nmap sweep + sshpass spray from apache | T1018, T1046, T1110.004 |
 | Lateral Movement | SSH to John | T1021.004, T1078 |
 | Persistence | authorized_keys + systemd user unit | T1098.004, T1543.002 |
 | Command & Control | encrypted reverse tunnel | T1572, T1071.001 |
@@ -144,8 +145,23 @@ Find Stravidis's deploy credentials, which were left behind during MVP delivery:
 - `/opt/waystar-connect/deploy.log` containing rsync/scp lines like `rsync -avz john.stravidis@10.30.0.5:/proj/waystar-connect/dist/ /var/www/html/`
 - `/root/.ssh/authorized_keys` and `/root/.ssh/known_hosts` referencing `john.stravidis@10.30.0.5`
 - A deploy SSH private key the attacker can copy out (most realistic location: `/root/.ssh/id_ed25519_deploy` or in a `.deploy_config` Stravidis dropped to make `make deploy` work)
+- John's interim password in `/home/john.stravidis/.env` (mode 600 — readable only after privesc to root). The file is the vibecoded MVP's dev-env helper that was never removed before go-live; the same `waystar2026!` the transition team set on the workstation account is sitting next to deploy-host metadata.
 
 Lab seeding requirement: bake these into `Infrastructure/apache/`.
+
+#### Phase 3.5 — Internal host discovery + credential stuffing
+
+Status: ✓ implemented in `Attack-chain/credential_stuffing.py`.
+
+Before the attacker has any IP for John's workstation in hand, they:
+
+1. Read `/home/john.stravidis/.env` (root-only) and pull `WS_PASS=waystar2026!`. T1552.001 — Credentials In Files.
+2. Run `nmap -Pn -n -p 22 --open 10.30.0.0/24` from inside apache to enumerate live SSH hosts on the internal subnet. T1018 / T1046. Apache→Internal :22 is the only zone-crossing that the router's FORWARD policy permits, so this scan is the cheapest legitimate discovery path open from a DMZ foothold.
+3. For each discovered host, attempt password-only SSH as `john.stravidis` using `sshpass`. T1110.004 — Credential Stuffing (reuse of one known credential pair against many endpoints). The spray succeeds on John's workstation only; the other accounts (Luke, Vinzenz) reject the password.
+
+The orchestrator runs this from Kali but executes the actual scan + spray FROM apache via the existing root reverse shell — Kali itself has no FORWARD-permitted path to internal_net :22. The "what an operator would actually type" command is `nxc ssh 10.30.0.0/24 -u john.stravidis -p 'waystar2026!'` — [netexec](https://www.netexec.wiki/) is installed in the kali image for that manual demo. It cannot drive the automated chain end-to-end because (a) the router blocks External→Internal :22, and (b) the apache base image (Debian Buster, Python 3.7) is below netexec's minimum Python version.
+
+Output of this step seeds `ctx.state["john_ip"]` so the lateral-movement step skips deploy.log parsing.
 
 #### Phase 4 — Lateral movement to John's workstation
 
