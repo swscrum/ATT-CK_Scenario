@@ -56,6 +56,11 @@ STEP_META = {
         "techniques": ["T1053.003", "T1068"],
         "color": "red",
     },
+    "creds": {
+        "tactic": "TA0006 · Credential Access · TA0007 · Discovery",
+        "techniques": ["T1552.001", "T1018", "T1046", "T1110.004"],
+        "color": "blue",
+    },
     "lateral": {
         "tactic": "TA0008 · Lateral Movement",
         "techniques": ["T1021.004", "T1078"],
@@ -221,12 +226,27 @@ def _step_privesc(ctx: Context) -> dict[str, Any]:
     return {"root_shell": root_shell}
 
 
+def _step_creds(ctx: Context) -> dict[str, Any]:
+    from credential_stuffing import run as creds_run
+
+    result = creds_run(ctx.state["root_shell"])
+    if not result or not result.get("john_ip"):
+        raise RuntimeError("credential stuffing found no usable account on the internal subnet")
+    return {
+        "john_ip": result["john_ip"],
+        "john_password": result["john_password"],
+        "creds_scan": result.get("scanned_hosts", []),
+        "creds_successes": result.get("successes", []),
+    }
+
+
 def _step_lateral(ctx: Context) -> dict[str, Any]:
     from lateral_movement import run as lateral_run
 
     john_shell = lateral_run(
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
+        workstation_ip=ctx.state.get("john_ip"),
     )
     if john_shell is None:
         raise RuntimeError("lateral movement returned no john.stravidis shell")
@@ -259,9 +279,14 @@ CHAIN_BASIC: list[Step] = [
         teardown=_teardown_close_socket("root_shell"),
     ),
     Step(
+        "creds",
+        _step_creds,
+        requires=("root_shell",),
+    ),
+    Step(
         "lateral",
         _step_lateral,
-        requires=("root_shell",),
+        requires=("root_shell", "john_ip"),
         teardown=_teardown_close_socket("john_shell"),
     ),
 ]

