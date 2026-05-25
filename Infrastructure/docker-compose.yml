@@ -98,6 +98,12 @@ services:
     networks:
       internal_net:
         ipv4_address: 10.30.0.7
+    # apache lives in dmz_net, so Docker's embedded DNS doesn't resolve
+    # `apache` from this internal-only container. Luke's seeded
+    # ~/.ssh/config and ~/.bash_history use the hostname for ssh/rsync/curl,
+    # so we pin it to the DMZ IP (same pattern as ubuntu_workstation).
+    extra_hosts:
+      - "apache:10.40.0.2"
     restart: unless-stopped
 
   vinzenz_ws:
@@ -112,6 +118,10 @@ services:
     networks:
       internal_net:
         ipv4_address: 10.30.0.8
+    # Same DNS pinning as luke_ws: Vinzenz's ~/.ssh/config + inventory.ini
+    # reference `apache` by name for fleet management.
+    extra_hosts:
+      - "apache:10.40.0.2"
     restart: unless-stopped
 
   db-internal:
