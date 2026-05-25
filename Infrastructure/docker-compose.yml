@@ -123,7 +123,8 @@ services:
       - NET_ADMIN
     environment:
       # Privileged owner — credentials live on Vinzenz's workstation (vinzenz_ws).
-      # waystar-readonly (ChangeMe!2026) is breadcrumbed on John's workstation.
+      # waystar-readonly (ChangeMe!2026) is breadcrumbed on John's workstation
+      # AND on Luke's workstation (~luke.smith/.pgpass — Luke uses it daily).
       POSTGRES_DB: waystar
       POSTGRES_USER: waystar
       POSTGRES_PASSWORD: "WaystarDB!Secure2024"
