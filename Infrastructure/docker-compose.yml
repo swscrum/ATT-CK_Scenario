@@ -82,6 +82,48 @@ services:
       - "apache:10.40.0.2"
     restart: unless-stopped
 
+  luke_ws:
+    build:
+      context: .
+      dockerfile: luke_ws/Dockerfile
+    container_name: luke_ws
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      # Mirror of the workstation logging pattern. rsyslog inside the
+      # container writes /var/log/syslog + /var/log/auth.log as usual;
+      # 40-lab-persist.conf duplicates them to /var/log/persist which
+      # is bind-mounted here so the SOC can ingest.
+      - ./logs/luke_ws:/var/log/persist
+    networks:
+      internal_net:
+        ipv4_address: 10.30.0.7
+    # apache lives in dmz_net, so Docker's embedded DNS doesn't resolve
+    # `apache` from this internal-only container. Luke's seeded
+    # ~/.ssh/config and ~/.bash_history use the hostname for ssh/rsync/curl,
+    # so we pin it to the DMZ IP (same pattern as ubuntu_workstation).
+    extra_hosts:
+      - "apache:10.40.0.2"
+    restart: unless-stopped
+
+  vinzenz_ws:
+    build:
+      context: .
+      dockerfile: vinzenz_ws/Dockerfile
+    container_name: vinzenz_ws
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./logs/vinzenz_ws:/var/log/persist
+    networks:
+      internal_net:
+        ipv4_address: 10.30.0.8
+    # Same DNS pinning as luke_ws: Vinzenz's ~/.ssh/config + inventory.ini
+    # reference `apache` by name for fleet management.
+    extra_hosts:
+      - "apache:10.40.0.2"
+    restart: unless-stopped
+
   db-internal:
     build:
       context: .
@@ -90,8 +132,9 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
-      # Privileged owner — credentials live on Hans's workstation (sysadmin_ws).
-      # waystar-readonly (ChangeMe!2026) is breadcrumbed on John's workstation.
+      # Privileged owner — credentials live on Vinzenz's workstation (vinzenz_ws).
+      # waystar-readonly (ChangeMe!2026) is breadcrumbed on John's workstation
+      # AND on Luke's workstation (~luke.smith/.pgpass — Luke uses it daily).
       POSTGRES_DB: waystar
       POSTGRES_USER: waystar
       POSTGRES_PASSWORD: "WaystarDB!Secure2024"
@@ -126,7 +169,9 @@ services:
       # NET_ADMIN lets kali modify its own routing table at startup so
       # 10.30.0.0/24 + 10.40.0.0/24 traffic is sent to the router instead
       # of Docker's bridge gateway. Realistic — an attacker has admin on
-      # their own host.
+      # their own host. (Also required for nmap, whose binary has file
+      # caps cap_net_admin=eip and would fail with EPERM if the bounding
+      # set lacked it.)
       - NET_ADMIN
     # Add static routes so kali (the attacker host) can reach DMZ + Internal
     # via the router. Without this, kali's default gateway is Docker's
