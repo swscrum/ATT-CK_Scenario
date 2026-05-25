@@ -102,11 +102,11 @@ sequenceDiagram
     Att->>R: 9. SSH with Luke's personal key
     R-->>Att: shell as luke.smith
     Att->>R: 10. Read ~/Maildir
-    R-->>Att: 10. emails identifying hans.mueller (sysadmin)
+    R-->>Att: 10. emails identifying vinzenz.fedora (sysadmin)
     Att->>R: 11. Compose + send spearphishing email to Vinzenz
     R->>S: 11. SMTP attachment
     Note right of S: mail-processor sim opens attachment
-    S-->>Att: 11. reverse shell as hans.mueller
+    S-->>Att: 11. reverse shell as vinzenz.fedora
     Att->>S: 12. Harvest DB creds, backup keys, fleet SSH keys
 
     Note over Att,S: Group E — Objectives
@@ -249,7 +249,7 @@ The chain's only "user simulation" beat. Two implementation choices (decision de
 - **Option A (recommended)**: A `mail-processor` daemon runs on Vinzenz's workstation that periodically polls his mailbox and "opens" attachments from senders in his contact list. The processor *is* the simulated user — defensible to mark out-of-scope for detection (we model user behaviour, not the user's decision). Demo lands as: attacker sends → ~30 s later sysadmin shell appears.
 - **Option B**: skip the phishing; Luke's mail archive contains an old plaintext password Vinzenz once emailed to him. Attacker reads → SSHes in. Simpler to implement; loses the phishing-detection beat.
 
-Either way, attacker gets a reverse shell as `hans.mueller`.
+Either way, attacker gets a reverse shell as `vinzenz.fedora`.
 
 #### Phase 12 — Sysadmin credential harvest
 
