@@ -63,6 +63,18 @@ RUN chown -R luke.smith:luke.smith /home/luke.smith \
     && chmod 700 /home/vinzenz.fedora/.ssh \
     && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
 
+# Build Luke's local SQLite patient cache from patient-cache.sql. The cache
+# is referenced by ~/.bashrc (alias `localnotes`) and ~/.bash_history, and
+# acts as the Phase 11 local-cache loot artefact (T1005). Materialised at
+# build time so the file is present + watchable by lab-fim from boot.
+COPY luke_ws/patient-cache.sql /tmp/patient-cache.sql
+RUN mkdir -p /home/luke.smith/.local/share/waystar-psyc \
+    && sqlite3 /home/luke.smith/.local/share/waystar-psyc/patients.sqlite < /tmp/patient-cache.sql \
+    && rm /tmp/patient-cache.sql \
+    && chown -R luke.smith:luke.smith /home/luke.smith/.local \
+    && chmod 700 /home/luke.smith/.local \
+    && chmod 600 /home/luke.smith/.local/share/waystar-psyc/patients.sqlite
+
 # Lab File Integrity Monitor — inotify watcher, same pattern as john_ws.
 # Writes to /var/log/persist/lab-fim.log (bind-mounted host path).
 COPY luke_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
