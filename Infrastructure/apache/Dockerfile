@@ -91,6 +91,18 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
     && chmod 700 /home/vinzenz.fedora/.ssh \
     && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
 
+# ============================================================================
+#  luke.smith — psychiatrist's named account on this host.
+#  Luke SSHes in from his workstation (10.30.0.7) to push periodic backups
+#  of his ~/Documents/notes/ tree (see ~luke.smith/.bash_history). NO sudo
+#  — Luke is a clinical end-user, not an admin. Password auth (his sshd
+#  on apache already allows it; mirrors his own workstation's posture).
+# ============================================================================
+RUN useradd -m -s /bin/bash luke.smith \
+    && echo 'luke.smith:WaystarLuke!2026' | chpasswd \
+    && mkdir -p /home/luke.smith/backup/notes \
+    && chown -R luke.smith:luke.smith /home/luke.smith
+
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
 
