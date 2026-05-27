@@ -71,7 +71,7 @@ To add more internal clients later, connect them to `internal_net` and `egress_n
 
 ## Running the recon phase
 
-The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, plus `wget` and `curl`. The `Attack-chain/` directory is mounted into the container at `/Attack-chain`, so `initial_recon_1.py` is runnable from inside.
+The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, `sshpass`, and [`netexec`](https://www.netexec.wiki/) (manual-use credential-stuffing tool referenced from the `creds` chain step), plus `wget` and `curl`. The `Attack-chain/` directory is mounted into the container at `/Attack-chain`, so `initial_recon_1.py` is runnable from inside.
 
 ```bash
 # Option 1)
