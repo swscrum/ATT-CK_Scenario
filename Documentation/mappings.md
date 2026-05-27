@@ -34,8 +34,11 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 | Phase | Technique | Where it bites |
 |---|---|---|
 | 3 | [T1083](https://attack.mitre.org/techniques/T1083/) File and Directory Discovery | reading `/opt/waystar-connect/`, `/root/.ssh/` |
-| 3 | [T1552.001](https://attack.mitre.org/techniques/T1552/001/) Unsecured Credentials: Credentials In Files | deploy log + private key on apache |
+| 3 | [T1552.001](https://attack.mitre.org/techniques/T1552/001/) Unsecured Credentials: Credentials In Files | deploy log + private key on apache, plus John's `~/.env` (mode 600, john.stravidis-owned — not accessible to www-data, readable after root privesc) |
 | 3 | [T1552.004](https://attack.mitre.org/techniques/T1552/004/) Unsecured Credentials: Private Keys | the deploy SSH private key |
+| 3.5 | [T1018](https://attack.mitre.org/techniques/T1018/) Remote System Discovery | nmap sweep of 10.30.0.0/24 from apache enumerates live workstation hosts |
+| 3.5 | [T1046](https://attack.mitre.org/techniques/T1046/) Network Service Discovery | the `-p 22 --open` portion of the same scan — apache fingerprints which internal hosts run sshd |
+| 3.5 | [T1110.004](https://attack.mitre.org/techniques/T1110/004/) Brute Force: Credential Stuffing | reuse of John's `~/.env` password across every discovered SSH host — auths against `john_ws`, denied on Luke/Vinzenz |
 | 4 | [T1021.004](https://attack.mitre.org/techniques/T1021/004/) Remote Services: SSH | SSH from apache (or attacker via apache) to John's workstation |
 | 4 | [T1078.003](https://attack.mitre.org/techniques/T1078/003/) Valid Accounts: Local Accounts | john.stravidis is a real user on the workstation |
 | 5 | [T1098.004](https://attack.mitre.org/techniques/T1098/004/) Account Manipulation: SSH Authorized Keys | append attacker's public key to `~/.ssh/authorized_keys` |
@@ -96,6 +99,8 @@ For SOC training and customer SIEM/EDR demos, what *should* fire on each techniq
 | T1059.004 reverse-shell payload | EDR (auditd execve) | `bash -i >& /dev/tcp/...` is a textbook signature | router NFLOG `FW-NEW: SRC=10.40.0.2 DST=10.10.0.2 DPT={4444,5555}` in `logs/router/ulog-iptables.log` (apache calling back to kali) |
 | T1053.003 cron tampering | auditd file watch on `/opt/cleanup.sh`; cron logs | content change of a script run as root every minute | `/var/log/lab-fim.log` line `tag=lab_fim path=/opt/cleanup.sh event=MODIFY` (inside the apache container; inotify substitute for auditd — see implementation note below) |
 | T1552.001 / .004 credential discovery | auditd file watch on `/root/.ssh/`, `/opt/waystar-connect/` | unusual reads from www-data / root after foothold | not yet implemented (post-foothold phase) |
+| T1018 / T1046 internal scan from DMZ | router NFLOG + workstation auth.log | bursts of SYN/connect probes from apache (10.40.0.2) to every host in 10.30.0.0/24 :22 | `logs/router/ulog-iptables.log` (every probe gets `FW-NEW`); `logs/workstation/auth.log` (sshd opens then immediately disconnects for hosts where credentials don't match) |
+| T1110.004 credential stuffing | sshd auth.log on each target | one password attempt per host from the same source IP within seconds; failures on Luke/Vinzenz, success on John | `logs/luke_ws/auth.log`, `logs/vinzenz_ws/auth.log` (`Failed password for john.stravidis`); `logs/workstation/auth.log` (`Accepted password for john.stravidis`) |
 | T1021.004 SSH lateral | sshd auth.log | new login from apache→workstation IP, principal `john.stravidis`, no prior session pattern | `logs/workstation/auth.log` (sshd `LogLevel VERBOSE` records key fingerprints) |
 | T1021.004 SSH lateral | router NFLOG | `FW-NEW: SRC=10.40.0.2 DST=10.30.0.5 DPT=22` — DMZ-to-Internal SSH crosses the router and gets a network-layer log line | `logs/router/ulog-iptables.log` (since PR #79: apache split off `internal_net` onto `dmz_net`, so the lateral pivot is no longer same-subnet) |
 | T1098.004 authorized_keys append | EDR file watch on `~/.ssh/authorized_keys` | append events outside normal user sessions | `logs/workstation/lab-fim.log` once `john.stravidis` user lands (lab-fim already watches `~john.stravidis/.ssh`) |

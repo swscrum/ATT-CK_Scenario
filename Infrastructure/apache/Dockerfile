@@ -10,6 +10,7 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
         cron iproute2 dnsutils openssh-server openssh-client coreutils \
         rsync \
         python3 python3-psycopg2 \
+        nmap sshpass \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
@@ -57,7 +58,8 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
     && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
-    && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts
+    && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts \
+    && chmod 600 /home/john.stravidis/.env
 
 # ============================================================================
 #  Waystar Connect DB credentials for the booking-form CGI.
