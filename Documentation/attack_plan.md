@@ -145,7 +145,7 @@ Find Stravidis's deploy credentials, which were left behind during MVP delivery:
 - `/opt/waystar-connect/deploy.log` containing rsync/scp lines like `rsync -avz john.stravidis@10.30.0.5:/proj/waystar-connect/dist/ /var/www/html/`
 - `/root/.ssh/authorized_keys` and `/root/.ssh/known_hosts` referencing `john.stravidis@10.30.0.5`
 - A deploy SSH private key the attacker can copy out (most realistic location: `/root/.ssh/id_ed25519_deploy` or in a `.deploy_config` Stravidis dropped to make `make deploy` work)
-- John's interim password in `/home/john.stravidis/.env` (mode 600 — readable only after privesc to root). The file is the vibecoded MVP's dev-env helper that was never removed before go-live; the same `waystar2026!` the transition team set on the workstation account is sitting next to deploy-host metadata.
+- John's interim password in `/home/john.stravidis/.env` (mode 600, owned by john.stravidis — not readable by www-data pre-privesc, but accessible once root is obtained). The file is the vibecoded MVP's dev-env helper that was never removed before go-live; the same `waystar2026!` the transition team set on the workstation account is sitting next to deploy-host metadata.
 
 Lab seeding requirement: bake these into `Infrastructure/apache/`.
 
@@ -155,7 +155,7 @@ Status: ✓ implemented in `Attack-chain/credential_stuffing.py`.
 
 Before the attacker has any IP for John's workstation in hand, they:
 
-1. Read `/home/john.stravidis/.env` (root-only) and pull `WS_PASS=waystar2026!`. T1552.001 — Credentials In Files.
+1. Read `/home/john.stravidis/.env` (mode 600, john.stravidis-owned — only accessible after privesc to root) and pull `WS_PASS=waystar2026!`. T1552.001 — Credentials In Files.
 2. Run `nmap -Pn -n -p 22 --open 10.30.0.0/24` from inside apache to enumerate live SSH hosts on the internal subnet. T1018 / T1046. Apache→Internal :22 is the only zone-crossing that the router's FORWARD policy permits, so this scan is the cheapest legitimate discovery path open from a DMZ foothold.
 3. For each discovered host, attempt password-only SSH as `john.stravidis` using `sshpass`. T1110.004 — Credential Stuffing (reuse of one known credential pair against many endpoints). The spray succeeds on John's workstation only; the other accounts (Luke, Vinzenz) reject the password.
 

@@ -34,7 +34,7 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 | Phase | Technique | Where it bites |
 |---|---|---|
 | 3 | [T1083](https://attack.mitre.org/techniques/T1083/) File and Directory Discovery | reading `/opt/waystar-connect/`, `/root/.ssh/` |
-| 3 | [T1552.001](https://attack.mitre.org/techniques/T1552/001/) Unsecured Credentials: Credentials In Files | deploy log + private key on apache, plus John's `~/.env` (mode 600) |
+| 3 | [T1552.001](https://attack.mitre.org/techniques/T1552/001/) Unsecured Credentials: Credentials In Files | deploy log + private key on apache, plus John's `~/.env` (mode 600, john.stravidis-owned — not accessible to www-data, readable after root privesc) |
 | 3 | [T1552.004](https://attack.mitre.org/techniques/T1552/004/) Unsecured Credentials: Private Keys | the deploy SSH private key |
 | 3.5 | [T1018](https://attack.mitre.org/techniques/T1018/) Remote System Discovery | nmap sweep of 10.30.0.0/24 from apache enumerates live workstation hosts |
 | 3.5 | [T1046](https://attack.mitre.org/techniques/T1046/) Network Service Discovery | the `-p 22 --open` portion of the same scan — apache fingerprints which internal hosts run sshd |

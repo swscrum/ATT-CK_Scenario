@@ -230,7 +230,7 @@ def _step_creds(ctx: Context) -> dict[str, Any]:
     from credential_stuffing import run as creds_run
 
     result = creds_run(ctx.state["root_shell"])
-    if not result or not result.get("john_ip"):
+    if not result.get("john_ip"):
         raise RuntimeError("credential stuffing found no usable account on the internal subnet")
     return {
         "john_ip": result["john_ip"],
@@ -286,7 +286,7 @@ CHAIN_BASIC: list[Step] = [
     Step(
         "lateral",
         _step_lateral,
-        requires=("root_shell", "john_ip"),
+        requires=("root_shell",),  # john_ip optional: used if present, else deploy.log fallback
         teardown=_teardown_close_socket("john_shell"),
     ),
 ]

