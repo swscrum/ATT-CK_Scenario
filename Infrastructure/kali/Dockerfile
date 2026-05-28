@@ -25,6 +25,7 @@ RUN echo 'deb http://kali.download/kali kali-rolling main contrib non-free non-f
     python3-rich \
     sliver \
     netexec \
+    git \
     && ln -s /usr/share/dirb/wordlists /usr/share/wordlists/dirb \
     && rm -rf /var/lib/apt/lists/*
 

