@@ -2,7 +2,7 @@
 
 This project is about an custom attack scenario to showcase IT security demonstrations.
 
-Currently, it consists of an attacker client (Kali Linux), a router container that simulates the edge of the network, a victim webserver, a victim Ubuntu workstation with an XFCE desktop, and an internal PostgreSQL database server (`db-internal`). The webserver, workstation, and database share an internal docker network. The workstation also uses an egress network so it can communicate outward. The router connects the internal network to the public side and forwards only port 80 to the webserver.
+Currently, it consists of an attacker client (Kali Linux), a router container that simulates the edge of the network, a victim webserver, victim Ubuntu workstations (one with an XFCE desktop), and an internal PostgreSQL database server (`db-internal`). The network is split into three router-controlled zones: `public_net` (attacker side), `dmz_net` (the webserver), and `internal_net` (workstations + database). All cross-zone traffic traverses the router, which forwards only port 80 inbound to the webserver.
 
 ## Network topology
 
@@ -20,9 +20,9 @@ ssh labuser@<ubuntu_workstation-IP>
 
 | Container | Image | Network | Purpose |
 |---|---|---|---|
-| `router` | Ubuntu 22.04 | `public_net` + `internal_net` | Edge router; forwards port 80 to apache |
-| `apache` | httpd:2.4.50 (vulnerable) | `internal_net` + `egress_net` | Waystar Connect webserver; CVE-2021-41773 target |
-| `ubuntu_workstation` | Ubuntu 24.04 | `internal_net` + `egress_net` | John Stravidis's dev workstation (VNC on port 5901) |
+| `router` | Ubuntu 22.04 | `public_net` + `dmz_net` + `internal_net` | Edge router; forwards port 80 to apache |
+| `apache` | httpd:2.4.50 (vulnerable) | `dmz_net` | Waystar Connect webserver; CVE-2021-41773 target |
+| `ubuntu_workstation` | Ubuntu 24.04 | `internal_net` | John Stravidis's dev workstation (VNC on port 5901) |
 | `luke_ws` | Ubuntu 24.04 | `internal_net` | Luke Smith's workstation (psychiatrist, 10.30.0.7); read-only patient-DB client |
 | `vinzenz_ws` | Ubuntu 24.04 | `internal_net` | Vinzenz Fedora's sysadmin workstation (10.30.0.8); cross-fleet SSH reach + superuser DB credentials |
 | `db-internal` | postgres:16 | `internal_net` only | Waystar Royco patient database; Phase 12–13 target |
@@ -65,9 +65,9 @@ The Waystar Connect site (served by `apache`) ships a Python CGI at `/cgi-bin/bo
 docker compose up -d --build
 ```
 
-The workstation keeps outbound connectivity through its egress network, while inbound access from the attacker side reaches the webserver only through the router's forwarded port 80.
+Inbound access from the attacker side reaches the webserver only through the router's forwarded port 80; all cross-zone traffic is routed through the router.
 
-To add more internal clients later, connect them to `internal_net` and `egress_net` as well. Do not attach Kali to those internal networks.
+To add more internal clients later, connect them to `internal_net`. Do not attach Kali to the DMZ or internal networks.
 
 ## Running the recon phase
 
