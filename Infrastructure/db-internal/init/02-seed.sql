@@ -275,3 +275,24 @@ INSERT INTO session_notes (patient_id, therapist, session_date, session_type, du
 
 -- Patient 80 — Julia Roth (F41.0)
 (80, 'Dr. Sabine Kohl',  '2025-10-30', 'Erstgespräch',     50, 'Panikattacken im Straßenverkehr als Fahrerin. Patientin fährt kein Auto mehr seit drei Monaten. Einschränkungen im Alltag erheblich. Behandlungsplan erstellt.');
+
+-- ─── Luke Smith's caseload ──────────────────────────────────────────────────
+-- Anglophone therapist on the Waystar Royco mental-health team. Notes in
+-- English to match the patient population he treats. ~10 session_notes
+-- across 5 patients gives the lab a credible "Luke's patients" query for
+-- his workstation's .bash_history aliases (mypatients, notes).
+
+INSERT INTO session_notes (patient_id, therapist, session_date, session_type, duration_min, content) VALUES
+    (1,  'Luke Smith', '2026-04-08', 'Initial Assessment', 60, 'New referral from primary care. Patient reports persistent low mood for ~6 months following job loss. Sleep fragmented, appetite reduced, anhedonia. PHQ-9 score 17 (moderately severe). No suicidal ideation. Started weekly CBT, considering pharmacotherapy referral.'),
+    (1,  'Luke Smith', '2026-04-22', 'Individual Therapy', 50, 'Session 3. Patient engaged with thought record exercises. Identified core belief: "I am a failure if I am not employed." Behavioural activation: scheduled 2 valued activities for the week. Mood marginally improved.'),
+    (1,  'Luke Smith', '2026-05-06', 'Individual Therapy', 50, 'Session 5. Patient secured part-time consulting work. PHQ-9 down to 11. Continued cognitive restructuring around self-worth contingent on employment status.'),
+
+    (2,  'Luke Smith', '2026-03-14', 'Initial Assessment', 60, 'Adult ADHD assessment referral. Long-standing executive dysfunction: missed deadlines, chronic disorganization, emotional dysregulation at work. WHO ASRS positive. DIVA-5 interview scheduled.'),
+    (2,  'Luke Smith', '2026-04-04', 'Individual Therapy', 50, 'DIVA-5 confirmed combined-presentation ADHD. Discussed treatment options. Patient wishes to try non-pharm strategies first. Started practical executive-function coaching (Pomodoro, externalized to-do system).'),
+    (2,  'Luke Smith', '2026-05-02', 'Individual Therapy', 50, 'Patient implementing time-boxing successfully at work. Reports significant reduction in missed deadlines. Sleep hygiene also discussed; bedtime drift identified as major driver of daytime fatigue.'),
+
+    (5,  'Luke Smith', '2026-02-19', 'Initial Assessment', 60, 'Patient (28F) with generalized anxiety. Worries pervasive across work, finances, relationships. GAD-7 score 16. Past dependence on benzodiazepines (no current use). Starting CBT with focus on intolerance of uncertainty.'),
+    (5,  'Luke Smith', '2026-04-30', 'Individual Therapy', 50, 'Session 10. GAD-7 down to 9. Patient successfully postponed three worry episodes using planned "worry time" technique. Discussing transition to monthly maintenance sessions.'),
+
+    (8,  'Luke Smith', '2026-05-12', 'Initial Assessment', 60, 'OCD presentation: contamination obsessions, ritual handwashing (~3hr/day). Y-BOCS score 26 (severe). Patient highly motivated. Will begin ERP after psychoeducation phase. Discussed family involvement; spouse to attend session 3.'),
+    (8,  'Luke Smith', '2026-05-19', 'Individual Therapy', 50, 'ERP hierarchy completed. Lowest-anxiety exposures (touching doorknob, brief delay before washing) practiced in-session, SUD 5→3. Homework: 3x daily delay practice. Patient cautious but engaged.');

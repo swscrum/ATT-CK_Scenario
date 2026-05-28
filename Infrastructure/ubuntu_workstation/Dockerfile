@@ -4,8 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # ============================================================================
 #  John Stravidis — frontend freelancer building Waystar Connect.
-#  This workstation is his (he was set up here while the box's previous
-#  owner — Luke Smith — was on six months of medical leave).
+#  This is his dev/staging workstation, provisioned for the project.
 #  See Documentation/scenario_story.md for the full backstory.
 #
 #  LAB ONLY — intentionally weak credentials for the attack-chain demo.
@@ -94,6 +93,20 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && cd /home/john.stravidis/projects/waystar-connect \
     && npm install \
     && chown -R john.stravidis:john.stravidis node_modules
+
+# ============================================================================
+#  vinzenz.fedora — sysadmin's named account on this host.
+#  Vinzenz SSHes from his own workstation (10.30.0.8) using the shared
+#  vincent_admin_key. He has sudo. Models the realistic enterprise pattern
+#  where a sysadmin has a dedicated account on every managed box.
+# ============================================================================
+RUN useradd -m -s /bin/bash -G sudo vinzenz.fedora \
+    && echo 'vinzenz.fedora:VinzenzAdmin!2026' | chpasswd \
+    && mkdir -p /home/vinzenz.fedora/.ssh
+COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_keys
+RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
+    && chmod 700 /home/vinzenz.fedora/.ssh \
+    && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
 
 COPY ubuntu_workstation/logind-stub.py /usr/local/bin/logind-stub.py
 # D-Bus policy that allows root to own org.freedesktop.login1 (the logind stub).

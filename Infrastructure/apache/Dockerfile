@@ -10,6 +10,7 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
         cron iproute2 dnsutils openssh-server openssh-client coreutils \
         rsync \
         python3 python3-psycopg2 \
+        nmap sshpass \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
@@ -57,7 +58,8 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
     && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
-    && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts
+    && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts \
+    && chmod 600 /home/john.stravidis/.env
 
 # ============================================================================
 #  Waystar Connect DB credentials for the booking-form CGI.
@@ -73,6 +75,35 @@ RUN mkdir -p /etc/waystar \
          > /etc/waystar/db.env \
     && chown root:www-data /etc/waystar/db.env \
     && chmod 640 /etc/waystar/db.env
+
+# ============================================================================
+#  vinzenz.fedora — sysadmin's named account on this host.
+#  Vinzenz SSHes in from his workstation (10.30.0.8) using the shared
+#  vincent_admin_key keypair. He has sudo. This is the sysadmin reach the
+#  attack chain pivots to once the attacker compromises Vinzenz's box.
+# ============================================================================
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends sudo \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -s /bin/bash -G sudo vinzenz.fedora \
+    && echo 'vinzenz.fedora:VinzenzAdmin!2026' | chpasswd \
+    && mkdir -p /home/vinzenz.fedora/.ssh
+COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_keys
+RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
+    && chmod 700 /home/vinzenz.fedora/.ssh \
+    && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
+
+# ============================================================================
+#  luke.smith — psychiatrist's named account on this host.
+#  Luke SSHes in from his workstation (10.30.0.7) to push periodic backups
+#  of his ~/Documents/notes/ tree (see ~luke.smith/.bash_history). NO sudo
+#  — Luke is a clinical end-user, not an admin. Password auth (his sshd
+#  on apache already allows it; mirrors his own workstation's posture).
+# ============================================================================
+RUN useradd -m -s /bin/bash luke.smith \
+    && echo 'luke.smith:WaystarLuke!2026' | chpasswd \
+    && mkdir -p /home/luke.smith/backup/notes \
+    && chown -R luke.smith:luke.smith /home/luke.smith
 
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
