@@ -129,7 +129,7 @@ Status: ✓ implemented in `Attack-chain/initial_access.py`.
 - Apache 2.4.50 mis-handles the encoding, executes `/bin/sh` with the POST body as input.
 - Result: `www-data` reverse shell from apache to attacker on TCP/4444.
 
-**Story-required addition** (per 2026-04-27 protocol): a *discovery beat* — attacker tries several payload variants (single-encoded, alternative CGI-base paths) before the working one lands. Currently the working payload is sent directly. To honour: extend `initial_access.py` with a small variant-walk loop.
+**Discovery beat** (per 2026-04-27 protocol): ✓ implemented. Before the working request, `fire_exploit` walks through three plausible-but-failing variants — un-encoded `../` traversal (normalised away by Apache), a too-shallow traversal that never reaches a binary, and a GET against the correct path (no body, so no stdin for the CGI shell). Each one reaches the server and lands in the Apache access log, mirroring an attacker fine-tuning the exploit, before the working double-encoded POST lands. The loop carries an `attempt_delay` parameter (default 0, wired through `get_www_shell`) so a scenario operator can later pace the attacker.
 
 #### Phase 2 — Privilege Escalation via writable cron
 
