@@ -31,7 +31,7 @@ SSH_PORT         = 22
 SCAN_OUTPUT_FILE = "/tmp/cs-scan.gnmap"
 
 # Noise file patterns searched before the real .env read (T1552.001).
-# Each tuple is (filename_glob, list_of_dirs_to_search).  All searches are
+# Each tuple is (filename, list_of_dirs_to_search).  All searches are
 # expected to come up empty — the point is to generate observable events in
 # the scenario log and the apache shell history that a blue team can correlate.
 _NOISE_FILE_PATTERNS = [
@@ -116,14 +116,29 @@ def _search_noise_files(shell):
     observe when analysing the scenario.  The print lines and the `find`
     commands sent through the shell both appear in scenario logs and apache
     shell history respectively.
+
+    Matches are detected via a `-printf` marker rather than "any output":
+    the root reverse shell echoes a PS1 prompt (and, on some shells, the
+    command itself) into every `_run_remote` capture, so a plain emptiness
+    check would treat that prompt noise as a hit and fire the `[?]` branch on
+    every pattern.  Only lines carrying the `CS_NOISE_HIT` marker count as
+    real finds.
     """
     print("[*] Expanding credential search to common sensitive file patterns...")
     for filename, dirs in _NOISE_FILE_PATTERNS:
         search_dirs = " ".join(dirs)
-        cmd = f"find {search_dirs} -maxdepth 4 -name {shlex.quote(filename)} 2>/dev/null"
-        result = _run_remote(shell, cmd, timeout=10).strip()
-        if result:
-            print(f"[?] Unexpected find for {filename!r}: {result}")
+        cmd = (
+            f"find {search_dirs} -maxdepth 4 -name {shlex.quote(filename)} "
+            f"-printf 'CS_NOISE_HIT %p\\n' 2>/dev/null"
+        )
+        out = _run_remote(shell, cmd, timeout=10)
+        hits = [
+            line[len("CS_NOISE_HIT "):]
+            for line in out.splitlines()
+            if line.startswith("CS_NOISE_HIT ")
+        ]
+        if hits:
+            print(f"[?] Unexpected find for {filename!r}: {', '.join(hits)}")
         else:
             print(f"[-] {filename!r} not found in {search_dirs}")
     print("[*] Noise search complete — no additional credential files discovered")
