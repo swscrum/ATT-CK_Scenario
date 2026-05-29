@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Timestamped console logging (UTC ISO-8601, matches the attack-chain output).
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
+
 # Cross-zone routes via the router (10.30.0.4 is its internal_net leg):
 #   - 10.10.0.0/24 (External) — any future C2 / outbound traffic
 #   - 10.40.0.0/24 (DMZ)      — Luke browsing the Waystar Connect intranet
@@ -18,13 +21,13 @@ chmod 0775 /var/log/persist
 # container, and the 40-lab-persist.conf snippet mirrors them to the
 # host-visible /var/log/persist.
 rsyslogd \
-    || echo "[entrypoint] rsyslogd failed to start"
+    || log "[entrypoint] rsyslogd failed to start"
 
 # Lab File Integrity Monitor — inotify watcher for Luke-relevant paths.
 touch /var/log/persist/lab-fim.log
 chmod 0644 /var/log/persist/lab-fim.log
 nohup /usr/local/bin/lab-fim.sh >> /var/log/persist/lab-fim.log 2>&1 &
-echo "[entrypoint] lab-fim watcher PID $!"
+log "[entrypoint] lab-fim watcher PID $!"
 
 # sshd in the foreground — keeps PID 1 alive without needing wait/tail tricks.
 exec /usr/sbin/sshd -D
