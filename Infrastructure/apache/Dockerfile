@@ -29,10 +29,11 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
 #  have arbitrary code executed as root within ~60 seconds.
 # ============================================================================
 
-# Maintenance script written by the "admin" — does real work (log rotation,
-# tempfile cleanup, disk-usage snapshot). The TODO comment in the file
-# explains in-fiction why the permissions are 777 ("only for debugging,
-# revert before go-live") and were never reverted.
+# Maintenance script written by the sysadmin (Vinzenz Fedora) — does real work
+# (log rotation, tempfile cleanup, disk-usage snapshot). John Stravidis chmod
+# 777'd it while debugging a deploy permission issue and never reverted it; the
+# TODO comment in the file explains that in-fiction ("revert to 700 before
+# go-live"). See Documentation/scenario_story.md.
 COPY apache/cleanup.sh /opt/cleanup.sh
 RUN chmod 777 /opt/cleanup.sh
 # rwxrwxrwx — anyone can overwrite, www-data can drop root-executable code.
