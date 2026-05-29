@@ -65,7 +65,7 @@ def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
             print("[-] Timeout — no root shell received")
             print("    → cron daemon not running: service cron status")
             print("    → cron job missing: cat /etc/cron.d/cleanup")
-            print("    → wrong file permissions: ls -la /opt/cleanup.sh")
+            print(f"    → wrong file permissions: ls -la {cron_script}")
             return None
     finally:
         root_server.close()
