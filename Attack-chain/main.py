@@ -78,7 +78,7 @@ STEP_META = {
     },
     "exfiltrate": {
         "tactic": "TA0009 · Collection · TA0010 · Exfiltration",
-        "techniques": ["T1552.001", "T1021.004", "T1213", "T1041"],
+        "techniques": ["T1552.001", "T1213", "T1041"],
         "color": "red",
     },
     "cleanup": {"tactic": "operator hygiene", "techniques": [], "color": "green"},
@@ -292,7 +292,7 @@ def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
         db_creds=ctx.state.get("db_creds"),   # set by enumeration_john_ws if it ran
     )
     if not result.get("exfil_ok"):
-        raise RuntimeError("exfiltration step did not produce a dump on kali")
+        raise RuntimeError("exfiltration transfer failed — dump not received on kali")
     return {
         "db_creds":    result["db_creds"],
         "exfil_path":  result["exfil_path"],
