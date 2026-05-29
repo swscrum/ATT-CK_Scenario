@@ -17,11 +17,18 @@ def timestamp() -> str:
 
 
 def log(msg: str = "", *, end: str = "\n", flush: bool = False) -> None:
-    """``print`` a line prefixed with ``[<utc-iso>]``.
+    """``print`` ``msg`` with every line prefixed by ``[<utc-iso>]``.
+
+    Multi-line messages (e.g. captured command output) get the same prefix on
+    each line so every console line carries a timestamp. A single timestamp is
+    sampled per call so all lines of one message share the same instant.
 
     Leading newlines in ``msg`` are emitted before the prefix so blank-line
-    spacing between sections is preserved rather than timestamped.
+    spacing between sections is preserved rather than timestamped. Blank lines
+    inside the message are left empty for the same reason.
     """
     stripped = msg.lstrip("\n")
     leading = msg[: len(msg) - len(stripped)]
-    print(f"{leading}[{timestamp()}] {stripped}", end=end, flush=flush)
+    prefix = f"[{timestamp()}] "
+    prefixed = "\n".join(prefix + line if line else line for line in stripped.split("\n"))
+    print(f"{leading}{prefixed}", end=end, flush=flush)
