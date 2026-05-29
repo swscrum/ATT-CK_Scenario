@@ -113,7 +113,7 @@ def _search_noise_files(shell):
 
     All searches are expected to return nothing — the function exists purely
     to generate log-visible noise events (T1552.001) that a blue team can
-    observe when analysing the scenario.  The print lines and the `find`
+    observe when analysing the scenario.  The log lines and the `find`
     commands sent through the shell both appear in scenario logs and apache
     shell history respectively.
 
@@ -124,7 +124,7 @@ def _search_noise_files(shell):
     every pattern.  Only lines carrying the `CS_NOISE_HIT` marker count as
     real finds.
     """
-    print("[*] Expanding credential search to common sensitive file patterns...")
+    log("[*] Expanding credential search to common sensitive file patterns...")
     for filename, dirs in _NOISE_FILE_PATTERNS:
         search_dirs = " ".join(dirs)
         cmd = (
@@ -138,10 +138,10 @@ def _search_noise_files(shell):
             if line.startswith("CS_NOISE_HIT ")
         ]
         if hits:
-            print(f"[?] Unexpected find for {filename!r}: {', '.join(hits)}")
+            log(f"[?] Unexpected find for {filename!r}: {', '.join(hits)}")
         else:
-            print(f"[-] {filename!r} not found in {search_dirs}")
-    print("[*] Noise search complete — no additional credential files discovered")
+            log(f"[-] {filename!r} not found in {search_dirs}")
+    log("[*] Noise search complete — no additional credential files discovered")
 
 
 def _parse_gnmap_hosts(gnmap_text):
