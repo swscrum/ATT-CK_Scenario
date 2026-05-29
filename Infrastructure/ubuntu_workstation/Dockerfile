@@ -39,6 +39,7 @@ RUN apt-get update \
         inotify-tools \
         sqlite3 \
         postgresql-client \
+        sshpass \
     && rm -rf /var/lib/apt/lists/* \
     # pm-utils is not packaged for Ubuntu 24.04; provide a stub so xfce4-session
     # doesn't log "No such file or directory" when probing power-management support.
