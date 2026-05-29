@@ -135,10 +135,11 @@ def _print_step_result(
     console.print()
     meta = STEP_META.get(step.name, {})
     color = meta.get("color", "white")
+    ts = f"[dim]{_iso_utc()}[/dim]  "
     if success:
-        msg = f"[bold green]✓[/bold green]  [bold {color}]{step.name}[/bold {color}]  [green]completed[/green]  [dim]{elapsed:.1f}s[/dim]"
+        msg = f"{ts}[bold green]✓[/bold green]  [bold {color}]{step.name}[/bold {color}]  [green]completed[/green]  [dim]{elapsed:.1f}s[/dim]"
     else:
-        msg = f"[bold red]✗[/bold red]  [bold {color}]{step.name}[/bold {color}]  [red]failed[/red]  [dim]{elapsed:.1f}s[/dim]  [red]{error}[/red]"
+        msg = f"{ts}[bold red]✗[/bold red]  [bold {color}]{step.name}[/bold {color}]  [red]failed[/red]  [dim]{elapsed:.1f}s[/dim]  [red]{error}[/red]"
     console.print(msg)
     console.print()
 
@@ -521,9 +522,11 @@ def _list_steps(mode: str = DEFAULT_MODE) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    logging.Formatter.converter = time.gmtime  # render %(asctime)s in UTC
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
-        format="[dim][%(name)s][/dim] %(message)s",
+        format="[dim][%(asctime)s] [%(name)s][/dim] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ",
     )
     if args.list:
         _list_steps(args.mode)
