@@ -10,7 +10,7 @@ def _build_request(method, host, path, body=""):
         f"{method} {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         f"Content-Type: application/x-www-form-urlencoded\r\n"
-        f"Content-Length: {len(body)}\r\n"
+        f"Content-Length: {len(body.encode())}\r\n"
         f"Connection: close\r\n"
         f"\r\n"
         f"{body}"
