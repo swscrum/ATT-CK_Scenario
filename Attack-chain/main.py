@@ -135,7 +135,7 @@ def _print_step_result(
     console.print()
     meta = STEP_META.get(step.name, {})
     color = meta.get("color", "white")
-    ts = f"[dim]{_iso_utc()}[/dim]  "
+    ts = f"[dim][{_iso_utc()}][/dim]  "
     if success:
         msg = f"{ts}[bold green]✓[/bold green]  [bold {color}]{step.name}[/bold {color}]  [green]completed[/green]  [dim]{elapsed:.1f}s[/dim]"
     else:
