@@ -64,8 +64,8 @@ find /tmp -maxdepth 1 -type f \
 
 # 5) Clear leftover core dumps from the webroot/CGI dir — Apache children can
 #    drop these on a crash and they're never useful in production.
-find /usr/local/apache2 -maxdepth 2 -type f -name "core*" \
-    -mmin +${TMP_AGE_MIN} -delete 2>/dev/null
+find /usr/local/apache2 -regextype posix-extended -maxdepth 2 -type f \
+    -regex '.*/core(\.[0-9]+)?' -mmin +${TMP_AGE_MIN} -delete 2>/dev/null
 
 # 6) Snapshot disk usage for monitoring
 df -h / > "$STATUS_FILE" 2>/dev/null
