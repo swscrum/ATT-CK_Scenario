@@ -92,6 +92,8 @@ def _start_receive_server(port=EXFIL_HTTP_PORT, output_path=EXFIL_LOCAL_PATH):
         stderr=subprocess.DEVNULL,
     )
     time.sleep(1)
+    if proc.poll() is not None:
+        raise RuntimeError(f"receive server exited immediately — port {port} already in use?")
     log(f"[+] Receive server started on port {port} (saving to {output_path})")
     return proc
 
