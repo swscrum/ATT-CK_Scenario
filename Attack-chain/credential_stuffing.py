@@ -35,9 +35,9 @@ SCAN_OUTPUT_FILE = "/tmp/cs-scan.gnmap"
 # expected to come up empty — the point is to generate observable events in
 # the scenario log and the apache shell history that a blue team can correlate.
 _NOISE_FILE_PATTERNS = [
-    ("passwords.txt",   ["/home", "/root", "/tmp", "/var/www", "/opt"]),
-    ("secrets.json",    ["/home", "/root", "/tmp", "/var/www", "/opt"]),
-    ("config.backup",   ["/home", "/root", "/tmp", "/etc",     "/opt"]),
+    ("passwords.txt",   ["/home", "/root", "/tmp", "/var/www", "/opt"]),  # /var/www: web-app credential dumps
+    ("secrets.json",    ["/home", "/root", "/tmp", "/var/www", "/opt"]),  # /var/www: web-app credential dumps
+    ("config.backup",   ["/home", "/root", "/tmp", "/etc",     "/opt"]),  # /etc: sysadmin backup destination
     ("credentials.txt", ["/home", "/root", "/tmp",             "/opt"]),
     (".passwd",         ["/home", "/root",                     "/opt"]),
     ("db_password.txt", ["/home", "/root",                     "/opt"]),
@@ -125,6 +125,7 @@ def _search_noise_files(shell):
     real finds.
     """
     log("[*] Expanding credential search to common sensitive file patterns...")
+    any_hits = False
     for filename, dirs in _NOISE_FILE_PATTERNS:
         search_dirs = " ".join(dirs)
         cmd = (
@@ -138,10 +139,14 @@ def _search_noise_files(shell):
             if line.startswith("CS_NOISE_HIT ")
         ]
         if hits:
+            any_hits = True
             log(f"[?] Unexpected find for {filename!r}: {', '.join(hits)}")
         else:
             log(f"[-] {filename!r} not found in {search_dirs}")
-    log("[*] Noise search complete — no additional credential files discovered")
+    if any_hits:
+        log("[*] Noise search complete — unexpected file(s) noted above")
+    else:
+        log("[*] Noise search complete — no additional credential files discovered")
 
 
 def _parse_gnmap_hosts(gnmap_text):
