@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Timestamped console logging (UTC ISO-8601, matches the attack-chain output).
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
+
 # ================================
 #  Cross-zone routing setup
 # ================================
@@ -22,25 +25,25 @@ if [ "$ROUTER_IP" = "$DEFAULT_ROUTER_IP" ]; then
             ROUTER_IP="$RESOLVED_ROUTER_IP"
             break
         fi
-        echo "Waiting for DNS resolution of 'router' (attempt $i/$RETRIES)..."
+        log "Waiting for DNS resolution of 'router' (attempt $i/$RETRIES)..."
         sleep 2
     done
 fi
 
 if [ -n "$ROUTER_IP" ]; then
     if [ -n "$RESOLVED_ROUTER_IP" ]; then
-        echo "Adding cross-zone routes via router ($ROUTER_IP)..."
+        log "Adding cross-zone routes via router ($ROUTER_IP)..."
     else
-        echo "DNS resolution for 'router' failed, falling back to default router IP ($ROUTER_IP)..."
+        log "DNS resolution for 'router' failed, falling back to default router IP ($ROUTER_IP)..."
     fi
     ip route add 10.10.0.0/24 via "$ROUTER_IP" || true   # External (kali)
     ip route add 10.30.0.0/24 via "$ROUTER_IP" || true   # Internal (workstations)
 else
-    echo "ERROR: could not determine router IP; reverse-shell and lateral routing may fail."
+    log "ERROR: could not determine router IP; reverse-shell and lateral routing may fail."
 fi
 
 # ================================
 #  Hand off to the original CMD
 # ================================
-echo "Handing off to the original start script: $@"
+log "Handing off to the original start script: $@"
 exec "$@"

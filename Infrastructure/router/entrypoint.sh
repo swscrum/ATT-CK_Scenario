@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Timestamped console logging (UTC ISO-8601, matches the attack-chain output).
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
+
 # IP-Forwarding und RP-Filter
 sysctl -w net.ipv4.ip_forward=1 2>/dev/null
 sysctl -w net.ipv4.conf.all.rp_filter=0 2>/dev/null
@@ -9,7 +12,7 @@ sysctl -w net.ipv4.conf.default.rp_filter=0 2>/dev/null
 # to /var/log/ulog-iptables.log (bind-mounted for SIEM ingest).
 mkdir -p /var/log
 ulogd -d -c /etc/ulogd.conf \
-    || echo "[entrypoint] ulogd failed to start"
+    || log "[entrypoint] ulogd failed to start"
 
 # Hole die IP des Apache-Containers
 APACHE_IP=""
@@ -19,11 +22,11 @@ for i in $(seq 1 $RETRIES); do
     if [ -n "$APACHE_IP" ]; then
         break
     fi
-    echo "Warte auf DNS-Auflösung für 'apache' (Versuch $i/$RETRIES)..."
+    log "Warte auf DNS-Auflösung für 'apache' (Versuch $i/$RETRIES)..."
     sleep 2
 done
 
-echo "Gefundene Apache IP: $APACHE_IP"
+log "Gefundene Apache IP: $APACHE_IP"
 
 # ============================================================
 # Dynamische Interface-Erkennung
@@ -40,24 +43,24 @@ while read -r line; do
 
     if echo "$ip_addr" | grep -q "^10\.30\."; then
         INTERNAL_IF="$iface"
-        echo "Internal interface: $iface ($ip_addr)"
+        log "Internal interface: $iface ($ip_addr)"
     elif echo "$ip_addr" | grep -q "^10\.40\."; then
         DMZ_IF="$iface"
-        echo "DMZ interface:      $iface ($ip_addr)"
+        log "DMZ interface:      $iface ($ip_addr)"
     elif echo "$ip_addr" | grep -q "^10\.10\."; then
         PUBLIC_IF="$iface"
-        echo "Public interface:   $iface ($ip_addr)"
+        log "Public interface:   $iface ($ip_addr)"
     fi
 done < <(ip -4 -o addr show scope global)
 
-echo "PUBLIC_IF=$PUBLIC_IF  DMZ_IF=$DMZ_IF  INTERNAL_IF=$INTERNAL_IF"
+log "PUBLIC_IF=$PUBLIC_IF  DMZ_IF=$DMZ_IF  INTERNAL_IF=$INTERNAL_IF"
 
 # Existierende Regeln löschen
 iptables -F
 iptables -t nat -F
 
 if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PUBLIC_IF" ]; then
-    echo "Konfiguriere Routing und NAT..."
+    log "Konfiguriere Routing und NAT..."
 
     # 1. DNAT: external :80 → apache (now living in DMZ).
     iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination $APACHE_IP:80
@@ -158,14 +161,14 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PU
         -j NFLOG --nflog-prefix "FW-DROP: " --nflog-group 1
 
     echo ""
-    echo "=== Finale iptables Konfiguration ==="
+    log "=== Finale iptables Konfiguration ==="
     iptables -nvL FORWARD
     echo ""
     iptables -t nat -nvL
 else
-    echo "FEHLER: Konnte Interfaces oder Apache IP nicht ermitteln."
-    echo "  APACHE_IP=$APACHE_IP PUBLIC_IF=$PUBLIC_IF DMZ_IF=$DMZ_IF INTERNAL_IF=$INTERNAL_IF"
-    echo "  Breche ab, um fail-closed zu bleiben und kein generelles Forwarding zu erlauben."
+    log "FEHLER: Konnte Interfaces oder Apache IP nicht ermitteln."
+    log "  APACHE_IP=$APACHE_IP PUBLIC_IF=$PUBLIC_IF DMZ_IF=$DMZ_IF INTERNAL_IF=$INTERNAL_IF"
+    log "  Breche ab, um fail-closed zu bleiben und kein generelles Forwarding zu erlauben."
 
     # Fail-closed: Kein unspezifisches NAT/Forwarding aktivieren
     iptables -P FORWARD DROP
@@ -173,5 +176,5 @@ else
 fi
 
 echo ""
-echo "Router aktiv!"
+log "Router aktiv!"
 tail -f /dev/null
