@@ -71,11 +71,6 @@ STEP_META = {
         "techniques": ["T1021.004", "T1078"],
         "color": "magenta",
     },
-    "enumeration_john_ws": {
-        "tactic": "TA0007 · Discovery",
-        "techniques": ["T1083", "T1552.001", "T1087.001"],
-        "color": "blue",
-    },
     "exfiltrate": {
         "tactic": "TA0009 · Collection · TA0010 · Exfiltration",
         "techniques": ["T1552.001", "T1213", "T1041"],
