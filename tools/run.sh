@@ -39,14 +39,37 @@ cd "$(dirname "$0")/../Infrastructure"
 # -------------------------------------------------------------------- args
 KEEP_UP=0
 BUILD=0
+# Parsed out of the --pacing forwarded arg so we can set the noise container's
+# env var BEFORE `docker compose up -d` brings it online. Defaults to fast →
+# noise off, matching main.py's DEFAULT_PACING.
+PACING=fast
 chain_args=()
+prev=""
 for arg in "$@"; do
     case "$arg" in
         --keep-up) KEEP_UP=1 ;;
         --build)   BUILD=1 ;;
-        *)         chain_args+=("$arg") ;;
+        --pacing=*)
+            PACING="${arg#--pacing=}"
+            chain_args+=("$arg")
+            ;;
+        *)
+            # Catch `--pacing <value>` (space-separated form): when the
+            # previous token was --pacing, this token is its value.
+            if [ "$prev" = "--pacing" ]; then PACING="$arg"; fi
+            chain_args+=("$arg")
+            ;;
     esac
+    prev="$arg"
 done
+
+# Wire NOISE_ENABLED based on --pacing so noise_user_sim only generates
+# traffic in realistic mode. Exported so `docker compose up -d` picks it up
+# via the ${NOISE_ENABLED:-0} substitution in docker-compose.yml.
+case "$PACING" in
+    realistic) export NOISE_ENABLED=1 ;;
+    *)         export NOISE_ENABLED=0 ;;
+esac
 
 # Snapshot destination for this run's logs.
 RUN_DIR="$PWD/logs/run-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -57,7 +80,7 @@ RUN_DIR="$PWD/logs/run-$(date -u +%Y%m%dT%H%M%SZ)"
 cleanup() {
     echo ""
     echo "[run.sh] snapshotting container logs → $RUN_DIR"
-    mkdir -p "$RUN_DIR"/{apache,router,workstation,luke_ws,vinzenz_ws,db-internal}
+    mkdir -p "$RUN_DIR"/{apache,router,workstation,luke_ws,vinzenz_ws,db-internal,noise_user_sim}
     # Best-effort: some paths exist only after later slices land (e.g.,
     # lab-fim.log, ulog-iptables.log) — `|| true` keeps the snapshot from
     # aborting if a source path is missing.
@@ -76,6 +99,7 @@ cleanup() {
     docker logs luke_ws            >"$RUN_DIR/luke_ws/stdout.log"     2>"$RUN_DIR/luke_ws/stderr.log"     || true
     docker logs vinzenz_ws         >"$RUN_DIR/vinzenz_ws/stdout.log"  2>"$RUN_DIR/vinzenz_ws/stderr.log"  || true
     docker logs db-internal        >"$RUN_DIR/db-internal/stdout.log" 2>"$RUN_DIR/db-internal/stderr.log" || true
+    docker logs noise_user_sim     >"$RUN_DIR/noise_user_sim/stdout.log" 2>"$RUN_DIR/noise_user_sim/stderr.log" || true
     docker logs kali               >"$RUN_DIR/kali.stdout.log"        2>"$RUN_DIR/kali.stderr.log"        || true
 
     if [ "$KEEP_UP" -eq 0 ]; then

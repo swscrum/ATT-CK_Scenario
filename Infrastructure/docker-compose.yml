@@ -169,6 +169,33 @@ services:
         ipv4_address: 10.30.0.6
     restart: unless-stopped
 
+  noise_user_sim:
+    build: ./noise_user_sim
+    container_name: noise_user_sim
+    cap_add:
+      # NET_ADMIN for the `ip route add 10.40.0.0/24` at startup so the
+      # container can reach apache via the router. Real internet hosts have
+      # this routing implicitly via their default gateway.
+      - NET_ADMIN
+    environment:
+      # Set to "1" only when run.sh receives --pacing realistic. With "0"
+      # the container stays up (signal.pause) but generates no traffic, so
+      # we don't pollute fast-mode runs with background HTTP.
+      NOISE_ENABLED: "${NOISE_ENABLED:-0}"
+      NOISE_TARGET: "router"
+      NOISE_THREADS: "3"
+      NOISE_PROBE_PCT: "10"
+    networks:
+      # public_net at 10.10.0.5 — DIFFERENT from kali (10.10.0.2). This is
+      # the whole point of the container: noise must originate from an IP
+      # the SOC trainee can't whitelist away with a one-line filter.
+      public_net:
+        ipv4_address: 10.10.0.5
+    depends_on:
+      - router
+      - apache
+    restart: unless-stopped
+
   kali:
     build: ./kali
     container_name: kali

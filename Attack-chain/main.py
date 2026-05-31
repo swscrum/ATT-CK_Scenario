@@ -445,15 +445,11 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
     results: list[dict] = []
     executed: list[Step] = []
 
-    # Background noise — only in realistic pacing. Threads run for the full
-    # chain duration and are stopped in the finally block below.
-    noise_stop_event = None
-    noise_threads: list = []
-    if PACING_MODES[ctx.pacing].get("noise"):
-        import noise as _noise
-        noise_stop_event, noise_threads = _noise.start(
-            target=ctx.target, speed=ctx.pacing_speed, log=log,
-        )
+    # Background noise no longer runs in this process — it now lives in the
+    # dedicated ``noise_user_sim`` container (public_net 10.10.0.5), which is
+    # started by docker compose with NOISE_ENABLED=1 when tools/run.sh is
+    # invoked with --pacing realistic. Keeping the source IP off kali means a
+    # SOC trainee can't filter the attacker out by src_ip alone.
 
     try:
         for i, step in enumerate(selected, 1):
@@ -510,12 +506,6 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             # handles inter-step pacing now.
 
     finally:
-        # Stop the noise pool before teardown so daemons don't keep hitting
-        # apache while teardown is closing its socket from earlier steps.
-        if noise_stop_event is not None:
-            import noise as _noise
-            _noise.stop(noise_stop_event, noise_threads, log)
-
         for step in reversed(executed):
             if step.teardown is None:
                 continue
