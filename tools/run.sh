@@ -74,6 +74,13 @@ esac
 # Snapshot destination for this run's logs.
 RUN_DIR="$PWD/logs/run-$(date -u +%Y%m%dT%H%M%SZ)"
 
+# Captured BEFORE `docker compose up -d` so the diurnal rewriter's window
+# filter is anchored to actual chain-launch time, not snapshot-collection
+# time. Without this, lab-startup chatter (rsyslog daemon starts, kernel
+# log noise, container boot lines) would fall inside the rewrite window
+# and pollute the SIEM view.
+RUN_START_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
 # -------------------------------------------------------------------- cleanup hook
 # Runs on EXIT regardless of how the script ends. Order matters: snapshot
 # BEFORE teardown so the writable layers still exist when docker cp reads.
@@ -101,6 +108,24 @@ cleanup() {
     docker logs db-internal        >"$RUN_DIR/db-internal/stdout.log" 2>"$RUN_DIR/db-internal/stderr.log" || true
     docker logs noise_user_sim     >"$RUN_DIR/noise_user_sim/stdout.log" 2>"$RUN_DIR/noise_user_sim/stderr.log" || true
     docker logs kali               >"$RUN_DIR/kali.stdout.log"        2>"$RUN_DIR/kali.stderr.log"        || true
+
+    # -------------------------------------------------------------------- diurnal stretch
+    # Only in realistic pacing: rewrite each log file's timestamps so the
+    # SIEM view spans a synthetic 8-hour workday (anchored at 09:00 UTC
+    # today) instead of the ~30 min wall-clock the run actually took.
+    # Preserves relative ordering and inter-event ratios. Originals are
+    # untouched — companion ``*.diurnal.log`` files appear alongside them
+    # and a ``diurnal_manifest.json`` records the stretch parameters.
+    if [ "$PACING" = "realistic" ]; then
+        RUN_END_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "[run.sh] applying diurnal stretch to $RUN_DIR (anchor=today 09:00Z, window=8h)"
+        python3 "$(cd .. && pwd)/Attack-chain/diurnal_rewriter.py" \
+            --snapshot-dir "$RUN_DIR" \
+            --run-start    "$RUN_START_ISO" \
+            --run-end      "$RUN_END_ISO" \
+            --window-hours 8 \
+            || echo "[run.sh] WARN: diurnal rewriter failed (originals untouched)"
+    fi
 
     if [ "$KEEP_UP" -eq 0 ]; then
         echo "[run.sh] tearing down lab (removes veth* and br-* interfaces)"
