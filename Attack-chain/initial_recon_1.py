@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from chainlog import log
+
 DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
@@ -21,24 +23,23 @@ DEFAULT_PACING = "fast"
 
 EXT_LIST = [".php", ".html", ".txt", ".bak", ".sh", ".cgi", ".old"]
 
-# Per-pacing scan profiles. Only `realistic` slows scans down — `fast` and
-# `relative` keep scans fast because the user-visible realism in those modes
-# comes from inter-phase dwell, not intra-phase pacing.
+# Per-pacing scan profiles. Only `realistic` slows scans down — `fast` keeps
+# scans fast because the user-visible realism in that mode comes from
+# inter-phase dwell, not intra-phase pacing.
 SCAN_PROFILES = {
     "fast":      {"nmap_T": "-T4", "gobuster_extra": [],            "ffuf_extra": []},
-    "relative":  {"nmap_T": "-T4", "gobuster_extra": [],            "ffuf_extra": []},
     "realistic": {"nmap_T": "-T2", "gobuster_extra": ["--delay", "100ms", "-t", "5"],
                                                                      "ffuf_extra": ["-rate", "30"]},
 }
 
 
 def _header(num: int, name: str) -> None:
-    print(f"\n=== Phase {num}: {name} ===", flush=True)
+    log(f"\n=== Phase {num}: {name} ===", flush=True)
 
 
 def _run(cmd: list[str], *, check: bool = True) -> int:
     """Stream a subprocess to stdout/stderr; return its exit code."""
-    print("$ " + " ".join(cmd), flush=True)
+    log("$ " + " ".join(cmd), flush=True)
     proc = subprocess.run(cmd, check=False)
     if check and proc.returncode != 0:
         raise SystemExit(
@@ -60,7 +61,7 @@ def phase_nmap_services(target: str, results_dir: Path, *, pacing: str = DEFAULT
     out = results_dir / "nmap-services.txt"
     fullscan = results_dir / "nmap-fullscan.txt"
     if not fullscan.exists():
-        print(f"No fullscan output at {fullscan} — skipping.")
+        log(f"No fullscan output at {fullscan} — skipping.")
         out.write_text("")
         return out
 
@@ -68,12 +69,12 @@ def phase_nmap_services(target: str, results_dir: Path, *, pacing: str = DEFAULT
         r"^(\d+)/tcp\s+open", fullscan.read_text(), flags=re.MULTILINE
     )
     if not ports:
-        print("No open ports from phase 1 — skipping.")
+        log("No open ports from phase 1 — skipping.")
         out.write_text("")
         return out
 
     port_list = ",".join(ports)
-    print(f"Open ports: {port_list}")
+    log(f"Open ports: {port_list}")
     profile = SCAN_PROFILES.get(pacing, SCAN_PROFILES[DEFAULT_PACING])
     _run(
         [
@@ -89,7 +90,7 @@ def phase_gobuster(target: str, results_dir: Path, wordlist: Path,
     _header(3, "gobuster directory enumeration")
     out = results_dir / "gobuster.txt"
     if not wordlist.exists():
-        print(f"Wordlist {wordlist} not found — skipping.")
+        log(f"Wordlist {wordlist} not found — skipping.")
         out.write_text("")
         return out
     profile = SCAN_PROFILES.get(pacing, SCAN_PROFILES[DEFAULT_PACING])
@@ -200,7 +201,7 @@ def run(
     for name in PHASES:
         call(name)
 
-    print(f"\nRecon complete. Results in {results}")
+    log(f"\nRecon complete. Results in {results}")
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:

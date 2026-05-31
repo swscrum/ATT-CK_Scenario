@@ -23,6 +23,8 @@ ssh labuser@<ubuntu_workstation-IP>
 | `router` | Ubuntu 22.04 | `public_net` + `internal_net` | Edge router; forwards port 80 to apache |
 | `apache` | httpd:2.4.50 (vulnerable) | `internal_net` + `egress_net` | Waystar Connect webserver; CVE-2021-41773 target |
 | `ubuntu_workstation` | Ubuntu 24.04 | `internal_net` + `egress_net` | John Stravidis's dev workstation (VNC on port 5901) |
+| `luke_ws` | Ubuntu 24.04 | `internal_net` | Luke Smith's workstation (psychiatrist, 10.30.0.7); read-only patient-DB client |
+| `vinzenz_ws` | Ubuntu 24.04 | `internal_net` | Vinzenz Fedora's sysadmin workstation (10.30.0.8); cross-fleet SSH reach + superuser DB credentials |
 | `db-internal` | postgres:16 | `internal_net` only | Waystar Royco patient database; Phase 12–13 target |
 | `kali` | kali-rolling | `public_net` | Attacker machine |
 
@@ -31,12 +33,13 @@ ssh labuser@<ubuntu_workstation-IP>
 `db-internal` runs PostgreSQL 16 on `internal_net` (10.30.0.6) with no outbound connectivity.
 
 **Database:** `waystar`  
-**Tables:** `patients` (80 records), `session_notes` (~100 records of fictional therapy sessions)
+**Tables:** `patients` (80 records), `session_notes` (~100 records of fictional therapy sessions), `appointments` (inbound booking requests from the public-facing site; filled at runtime by the waystar-connect web form)
 
 | User | Password | Access |
 |---|---|---|
-| `waystar` | *(privileged; stored on Hans's workstation)* | Full owner |
-| `waystar-readonly` | `ChangeMe!2026` | SELECT only — breadcrumbed in John's `~/.pgpass` |
+| `waystar` | *(privileged; stored on Vinzenz's workstation, `~/.pgpass`)* | Full owner |
+| `waystar-readonly` | `ChangeMe!2026` | SELECT on all tables — breadcrumbed in John's `~/.pgpass` |
+| `waystar-app` | `AppBooking!2026` | INSERT on `appointments` only (no patient data); used by the apache booking endpoint, stored in `apache:/etc/waystar/db.env` |
 
 **Connecting from the workstation:**
 ```bash
@@ -44,9 +47,12 @@ ssh labuser@<ubuntu_workstation-IP>
 psql -h db-internal -U waystar-readonly -d waystar
 ```
 
+**Public-facing booking endpoint:**
+The Waystar Connect site (served by `apache`) ships a Python CGI at `/cgi-bin/book.py`. It accepts a JSON booking payload, validates it server-side, and inserts a row into `appointments` as `waystar-app`. Patient data is **not** exposed through this surface — a compromised webserver lands on a least-privilege account.
+
 **Logs** are written to `Infrastructure/logs/db/postgresql-YYYY-MM-DD.log` and persist across container restarts. Connection attempts, failed authentications, and data-modification statements are all logged — useful for SIEM/NIDS demo scenarios.
 
-**Attack-chain role:** John's bash history and `~/.pgpass` breadcrumb the existence of this host (Phase 6 discovery). Phase 12 harvests the `waystar` privileged credentials from Hans's sysadmin workstation. Phase 13 exfiltrates the patient records via `pg_dump`.
+**Attack-chain role:** John's bash history and `~/.pgpass` breadcrumb the existence of this host (Phase 6 discovery). Phase 12 harvests the `waystar` privileged credentials from Vinzenz Fedora's sysadmin workstation (`vinzenz_ws`). Phase 13 exfiltrates the patient records via `pg_dump`. The `waystar-app` credentials on apache are an *additional* lateral surface but only reach `appointments`.
 
 ## Prerequisites
 
@@ -65,12 +71,15 @@ To add more internal clients later, connect them to `internal_net` and `egress_n
 
 ## Running the recon phase
 
-The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, plus `wget` and `curl`. The `Attack-chain/` directory is mounted into the container at `/Attack-chain`, so `initial_recon_1.py` is runnable from inside.
+The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, `sshpass`, and [`netexec`](https://www.netexec.wiki/) (manual-use credential-stuffing tool referenced from the `creds` chain step), plus `wget` and `curl`. The `Attack-chain/` directory is mounted into the container at `/Attack-chain`, so `initial_recon_1.py` is runnable from inside.
 
 ```bash
 # Option 1)
 #Automated Orchestration of all phases and automated cleanup:
-tools/run.sh
+tools/run.sh                       # defaults to --mode basic
+tools/run.sh --mode advanced       # stealthier variant (placeholder, mirrors basic for now)
+tools/run.sh --build               # rebuild images first — use after a `git pull`
+                                   # that changed a Dockerfile or seeded file
 
 # Option 2)
 # Running the phases one by one:
@@ -96,5 +105,9 @@ Results land in `Attack-chain/results/` (bind-mounted, persisted on the host):
 | `gobuster.txt` | `gobuster dir` against `dirb/common.txt` (override via `--wordlist`) |
 | `ffuf.json` | extension fuzz on `/index<ext>` (JSON output from ffuf `-of json`) |
 | `nikto.txt` | `nikto -Tuning b` |
+
+## Console output & timestamps
+
+Every console line the project emits is prefixed with a UTC ISO-8601 timestamp in the form `[YYYY-MM-DDTHH:MM:SSZ]` so the sequence and timing of events is traceable during a run. This covers the attack-chain modules and orchestrator (`Attack-chain/`) as well as the container start-up scripts under `Infrastructure/`. The format is deliberately the same one used by the per-run ground-truth records (`Attack-chain/results/run-<ISO8601>/chain-<ISO8601>.json`) and the `lab-fim` SIEM watcher, so operator output, the structured JSON, and the blue-team logs all correlate to the second. The orchestrator's decorative banners, section rules, and summary table are intentionally left un-prefixed to keep the layout readable.
 
 

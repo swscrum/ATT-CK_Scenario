@@ -1,0 +1,7 @@
+[user]
+    name = Luke Smith
+    email = luke.smith@waystar.local
+[init]
+    defaultBranch = main
+[pull]
+    rebase = false

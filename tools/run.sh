@@ -20,12 +20,16 @@
 #   Attack-chain/results/                       (already bind-mounted via kali)
 #
 # Pre-req: images built once via `docker compose build` (or first run after
-# a Dockerfile change). This script does not pass `--build` to keep startup
-# fast; rebuild yourself when needed.
+# a Dockerfile change). The default `up -d` does NOT pass `--build`, to keep
+# startup fast. Pass --build whenever a Dockerfile or a seeded file changed
+# (e.g. after pulling new breadcrumbs) — otherwise a stale image silently
+# reuses the old contents and the chain can fail on missing seed data.
 #
 # Usage:
 #   tools/run.sh                    # full chain, snapshot + teardown after
 #   tools/run.sh --only recon       # forwarded to main.py
+#   tools/run.sh --build            # rebuild images first, then run (use
+#                                   # after a Dockerfile / seed change)
 #   tools/run.sh --keep-up          # skip teardown so the lab stays running
 #                                   # for follow-up exploration; tear down
 #                                   # later with `docker compose down`
@@ -34,10 +38,12 @@ cd "$(dirname "$0")/../Infrastructure"
 
 # -------------------------------------------------------------------- args
 KEEP_UP=0
+BUILD=0
 chain_args=()
 for arg in "$@"; do
     case "$arg" in
         --keep-up) KEEP_UP=1 ;;
+        --build)   BUILD=1 ;;
         *)         chain_args+=("$arg") ;;
     esac
 done
@@ -51,19 +57,25 @@ RUN_DIR="$PWD/logs/run-$(date -u +%Y%m%dT%H%M%SZ)"
 cleanup() {
     echo ""
     echo "[run.sh] snapshotting container logs → $RUN_DIR"
-    mkdir -p "$RUN_DIR/apache" "$RUN_DIR/router" "$RUN_DIR/workstation"
+    mkdir -p "$RUN_DIR"/{apache,router,workstation,luke_ws,vinzenz_ws,db-internal}
     # Best-effort: some paths exist only after later slices land (e.g.,
     # lab-fim.log, ulog-iptables.log) — `|| true` keeps the snapshot from
     # aborting if a source path is missing.
     # File-based logs (only present when the container app writes to disk).
-    docker cp apache:/usr/local/apache2/logs/. "$RUN_DIR/apache/"      2>/dev/null || true
-    docker cp router:/var/log/.                "$RUN_DIR/router/"      2>/dev/null || true
-    docker cp ubuntu_workstation:/var/log/.    "$RUN_DIR/workstation/" 2>/dev/null || true
+    docker cp apache:/usr/local/apache2/logs/.    "$RUN_DIR/apache/"      2>/dev/null || true
+    docker cp router:/var/log/.                   "$RUN_DIR/router/"      2>/dev/null || true
+    docker cp ubuntu_workstation:/var/log/.       "$RUN_DIR/workstation/" 2>/dev/null || true
+    docker cp luke_ws:/var/log/.                  "$RUN_DIR/luke_ws/"     2>/dev/null || true
+    docker cp vinzenz_ws:/var/log/.               "$RUN_DIR/vinzenz_ws/"  2>/dev/null || true
+    docker cp db-internal:/var/log/postgres/.     "$RUN_DIR/db-internal/" 2>/dev/null || true
     # Stdout/stderr captured by Docker's logging driver — covers apache's
     # default httpd-foreground that pipes access/error to stdout/stderr.
     docker logs apache             >"$RUN_DIR/apache/stdout.log"      2>"$RUN_DIR/apache/stderr.log"      || true
     docker logs router             >"$RUN_DIR/router/stdout.log"      2>"$RUN_DIR/router/stderr.log"      || true
     docker logs ubuntu_workstation >"$RUN_DIR/workstation/stdout.log" 2>"$RUN_DIR/workstation/stderr.log" || true
+    docker logs luke_ws            >"$RUN_DIR/luke_ws/stdout.log"     2>"$RUN_DIR/luke_ws/stderr.log"     || true
+    docker logs vinzenz_ws         >"$RUN_DIR/vinzenz_ws/stdout.log"  2>"$RUN_DIR/vinzenz_ws/stderr.log"  || true
+    docker logs db-internal        >"$RUN_DIR/db-internal/stdout.log" 2>"$RUN_DIR/db-internal/stderr.log" || true
     docker logs kali               >"$RUN_DIR/kali.stdout.log"        2>"$RUN_DIR/kali.stderr.log"        || true
 
     if [ "$KEEP_UP" -eq 0 ]; then
@@ -96,7 +108,12 @@ trap cleanup EXIT
 
 # -------------------------------------------------------------------- run
 echo "[run.sh] ensuring lab is up..."
-docker compose up -d >/dev/null
+if [ "$BUILD" -eq 1 ]; then
+    echo "[run.sh] --build: rebuilding changed images (layer cache keeps this cheap)"
+    docker compose up -d --build >/dev/null
+else
+    docker compose up -d >/dev/null
+fi
 
 # Wait for the lab to be fully wired before starting the chain. On a cold
 # `compose up -d` the router still needs to: resolve apache via DNS, configure
@@ -126,7 +143,7 @@ done
 if [ "$ready" -ne 1 ]; then
     echo "[run.sh] ERROR: lab did not become reachable within 60s." >&2
     echo "[run.sh]        Likely causes:" >&2
-    echo "[run.sh]          - container images are stale; rerun with 'docker compose build'" >&2
+    echo "[run.sh]          - container images are stale; rerun with 'tools/run.sh --build'" >&2
     echo "[run.sh]          - one of router/apache is crash-looping" >&2
     echo "[run.sh]        Check 'docker compose logs router apache kali' before retrying." >&2
     exit 1

@@ -6,10 +6,10 @@ FROM postgres:16
 #
 #  Users:
 #    waystar          — privileged owner created by the official Postgres
-#                       entrypoint from POSTGRES_USER (credentials on Hans's
-#                       workstation)
+#                       entrypoint from POSTGRES_USER (credentials on Vinzenz
+#                       Fedora's workstation, ~/.pgpass)
 #    waystar-readonly — read-only, created by init/01-schema.sql
-#                       (credentials breadcrumbed on John's box)
+#                       (credentials breadcrumbed on John's and Luke's boxes)
 #
 #  LAB ONLY — intentionally weak credentials for the attack-chain demo.
 #  Do NOT use outside an isolated lab environment.

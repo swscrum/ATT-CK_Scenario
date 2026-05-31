@@ -34,8 +34,11 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 | Phase | Technique | Where it bites |
 |---|---|---|
 | 3 | [T1083](https://attack.mitre.org/techniques/T1083/) File and Directory Discovery | reading `/opt/waystar-connect/`, `/root/.ssh/` |
-| 3 | [T1552.001](https://attack.mitre.org/techniques/T1552/001/) Unsecured Credentials: Credentials In Files | deploy log + private key on apache |
+| 3 | [T1552.001](https://attack.mitre.org/techniques/T1552/001/) Unsecured Credentials: Credentials In Files | deploy log + private key on apache, plus John's `~/.env` (mode 600, john.stravidis-owned — not accessible to www-data, readable after root privesc) |
 | 3 | [T1552.004](https://attack.mitre.org/techniques/T1552/004/) Unsecured Credentials: Private Keys | the deploy SSH private key |
+| 3.5 | [T1018](https://attack.mitre.org/techniques/T1018/) Remote System Discovery | nmap sweep of 10.30.0.0/24 from apache enumerates live workstation hosts |
+| 3.5 | [T1046](https://attack.mitre.org/techniques/T1046/) Network Service Discovery | the `-p 22 --open` portion of the same scan — apache fingerprints which internal hosts run sshd |
+| 3.5 | [T1110.004](https://attack.mitre.org/techniques/T1110/004/) Brute Force: Credential Stuffing | reuse of John's `~/.env` password across every discovered SSH host — auths against `john_ws`, denied on Luke/Vinzenz |
 | 4 | [T1021.004](https://attack.mitre.org/techniques/T1021/004/) Remote Services: SSH | SSH from apache (or attacker via apache) to John's workstation |
 | 4 | [T1078.003](https://attack.mitre.org/techniques/T1078/003/) Valid Accounts: Local Accounts | john.stravidis is a real user on the workstation |
 | 5 | [T1098.004](https://attack.mitre.org/techniques/T1098/004/) Account Manipulation: SSH Authorized Keys | append attacker's public key to `~/.ssh/authorized_keys` |
@@ -54,9 +57,9 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 | 7 | [T1110.003](https://attack.mitre.org/techniques/T1110/003/) Brute Force: Password Spraying | spray against hardened workstations |
 | 7 | [T1018](https://attack.mitre.org/techniques/T1018/) Remote System Discovery | the actual workstation enumeration |
 | 7 | [T1046](https://attack.mitre.org/techniques/T1046/) Network Service Discovery | port-scanning the internal subnet from John's box |
-| 8 | [T1083](https://attack.mitre.org/techniques/T1083/) File and Directory Discovery | finding `/var/log/migration/`, `/home/luke.smith.bak/` |
-| 8 | [T1087.001](https://attack.mitre.org/techniques/T1087/001/) Account Discovery: Local Account | identifying the previous user |
-| 8 | [T1552.004](https://attack.mitre.org/techniques/T1552/004/) Unsecured Credentials: Private Keys | Luke's stale personal SSH key |
+| 8 | [T1110.003](https://attack.mitre.org/techniques/T1110/003/) Brute Force: Password Spraying | spray against `luke.smith` from John's box — denied + logged |
+| 8 | [T1078.003](https://attack.mitre.org/techniques/T1078/003/) Valid Accounts: Local Accounts | reuse of John's stolen credentials against Luke — denied (different account) |
+| 8 | [T1021.004](https://attack.mitre.org/techniques/T1021/004/) Remote Services: SSH | SSH attempt vector itself — sshd `LogLevel VERBOSE` records each fingerprint |
 
 ### Group D — Deep lateral movement
 
@@ -66,7 +69,7 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 | 9 | [T1078.003](https://attack.mitre.org/techniques/T1078/003/) Valid Accounts: Local Accounts | luke.smith is a real user; key reuse is the OPSEC failure |
 | 10 | [T1114.001](https://attack.mitre.org/techniques/T1114/001/) Email Collection: Local Email Collection | reading Luke's `~/Maildir` |
 | 10 | [T1087.001](https://attack.mitre.org/techniques/T1087/001/) Account Discovery: Local Account | identifying the sysadmin from email |
-| 11 | [T1566.001](https://attack.mitre.org/techniques/T1566/001/) Phishing: Spearphishing Attachment | malicious attachment from Luke to Hans |
+| 11 | [T1566.001](https://attack.mitre.org/techniques/T1566/001/) Phishing: Spearphishing Attachment | malicious attachment from Luke to Vinzenz |
 | 11 | [T1204.002](https://attack.mitre.org/techniques/T1204/002/) User Execution: Malicious File | mail-processor sim "opens" the attachment |
 | 11 | [T1059.004](https://attack.mitre.org/techniques/T1059/004/) Command and Scripting Interpreter: Unix Shell | the attachment's payload |
 | 12 | [T1552.001](https://attack.mitre.org/techniques/T1552/001/) Unsecured Credentials: Credentials In Files | DB conn string in `/etc/waystar/db.conf`, backup keys, `.pgpass` |
@@ -92,11 +95,15 @@ For SOC training and customer SIEM/EDR demos, what *should* fire on each techniq
 
 | Technique(s) | Detection source | Signature / behaviour | Lab log path (PR #58) |
 |---|---|---|---|
-| T1190 (CVE-2021-41773) | Apache access log + NIDS | URL pattern `cgi-bin/.%32%65/.../bin/sh` is unmistakeable; ETOPEN Suricata rules ship for this CVE | `logs/apache/access.log`, `logs/apache/forensic_log`; router NFLOG `FW-NEW: SRC=10.10.0.2 DST=10.30.0.2 DPT=80` in `logs/router/ulog-iptables.log` |
-| T1059.004 reverse-shell payload | EDR (auditd execve) | `bash -i >& /dev/tcp/...` is a textbook signature | router NFLOG `FW-NEW: SRC=10.30.0.2 DST=10.10.0.2 DPT={4444,5555}` in `logs/router/ulog-iptables.log` (apache calling back to kali) |
+| T1190 (CVE-2021-41773) | Apache access log + NIDS | URL pattern `cgi-bin/.%32%65/.../bin/sh` is unmistakeable; ETOPEN Suricata rules ship for this CVE | `logs/apache/access.log`, `logs/apache/forensic_log`; router NFLOG `FW-NEW: SRC=10.10.0.2 DST=10.40.0.2 DPT=80` in `logs/router/ulog-iptables.log` |
+| T1059.004 reverse-shell payload | EDR (auditd execve) | `bash -i >& /dev/tcp/...` is a textbook signature | router NFLOG `FW-NEW: SRC=10.40.0.2 DST=10.10.0.2 DPT={4444,5555}` in `logs/router/ulog-iptables.log` (apache calling back to kali) |
 | T1053.003 cron tampering | auditd file watch on `/opt/cleanup.sh`; cron logs | content change of a script run as root every minute | `/var/log/lab-fim.log` line `tag=lab_fim path=/opt/cleanup.sh event=MODIFY` (inside the apache container; inotify substitute for auditd — see implementation note below) |
-| T1552.001 / .004 credential discovery | auditd file watch on `/root/.ssh/`, `/opt/waystar-connect/` | unusual reads from www-data / root after foothold | not yet implemented (post-foothold phase) |
+| T1552.004 credential discovery — private key | auditd file watch on `/root/.ssh/`, `/opt/waystar-connect/` | unusual reads from www-data / root after foothold | lab-fim watches those paths; `cat` / `cp` of key material fires `event=ACCESS` |
+| T1552.001 credential discovery — `.env` noise search | scenario log; apache shell history | six `find` commands for common sensitive file names (`passwords.txt`, `secrets.json`, `config.backup`, `credentials.txt`, `.passwd`, `db_password.txt`) across `/home /root /tmp /var/www /opt /etc` — normally returning empty; unexpected hits appear as `[?] Unexpected find` in the scenario log | scenario log (`[-] '…' not found in …` / `[?] Unexpected find …` lines from `_search_noise_files`); apache bash history; lab-fim does not trigger (no inotify-watched path touched) |
+| T1018 / T1046 internal scan from DMZ | router NFLOG + workstation auth.log | bursts of SYN/connect probes from apache (10.40.0.2) to every host in 10.30.0.0/24 :22 | `logs/router/ulog-iptables.log` (every probe gets `FW-NEW`); `logs/workstation/auth.log` (sshd opens then immediately disconnects for hosts where credentials don't match) |
+| T1110.004 credential stuffing | sshd auth.log on each target | one password attempt per host from the same source IP within seconds; failures on Luke/Vinzenz, success on John | `logs/luke_ws/auth.log`, `logs/vinzenz_ws/auth.log` (`Failed password for john.stravidis`); `logs/workstation/auth.log` (`Accepted password for john.stravidis`) |
 | T1021.004 SSH lateral | sshd auth.log | new login from apache→workstation IP, principal `john.stravidis`, no prior session pattern | `logs/workstation/auth.log` (sshd `LogLevel VERBOSE` records key fingerprints) |
+| T1021.004 SSH lateral | router NFLOG | `FW-NEW: SRC=10.40.0.2 DST=10.30.0.5 DPT=22` — DMZ-to-Internal SSH crosses the router and gets a network-layer log line | `logs/router/ulog-iptables.log` (since PR #79: apache split off `internal_net` onto `dmz_net`, so the lateral pivot is no longer same-subnet) |
 | T1098.004 authorized_keys append | EDR file watch on `~/.ssh/authorized_keys` | append events outside normal user sessions | `logs/workstation/lab-fim.log` once `john.stravidis` user lands (lab-fim already watches `~john.stravidis/.ssh`) |
 | T1543.002 systemd persistence | auditd file watch on `~/.config/systemd/user/` and `/etc/systemd/`; systemd journal | new unit creation / enable | extend `Infrastructure/ubuntu_workstation/lab-fim.sh` watch list when this slice lands |
 | T1572 / T1071.001 C2 tunnel | NIDS + flow logs | long-lived outbound TLS / SSH to non-routable / unusual destination; periodic keepalive cadence | `logs/router/ulog-iptables.log` — every NEW flow is captured with full 5-tuple |

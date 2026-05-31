@@ -21,4 +21,6 @@ sudo cat /etc/cron.d/cleanup
 ls -la /opt/cleanup.sh
 cat /var/log/cleanup.log | tail
 htop
+cat ~/.env
+source ~/.env && echo "ws=$WS_HOST user=$WS_USER"
 exit

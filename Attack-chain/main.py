@@ -9,7 +9,7 @@ adapter that reads from / writes to a shared ``Context``.
 Add a new step by:
   1. Writing the module under ``Attack-chain/`` with a top-level entry function.
   2. Adding an ``_step_<name>`` adapter below.
-  3. Appending a ``Step(...)`` entry to ``CHAIN``.
+  3. Appending a ``Step(...)`` entry to ``CHAIN_BASIC`` (and/or ``CHAIN_ADVANCED``).
 """
 
 from __future__ import annotations
@@ -42,15 +42,15 @@ DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
 
 # Pacing — controls how realistic the attacker-side dwells are.
 #   speed = realistic_seconds / wall_clock_seconds (higher → faster demo)
-#   noise / diurnal are not consumed yet; reserved for later slices.
 #
-# fast       — current dev behaviour, full chain in ~3 s
-# relative   — preserves attacker tempo, fits in ~30 min
-# realistic  — real-time (~12 h overnight); will additionally spawn noise
-#              daemons + run a diurnal timestamp rewriter when those land
+# fast       — current dev behaviour, full chain in ~3 s (no noise/diurnal)
+# realistic  — real-time dwells PLUS a background noise generator and a
+#              diurnal timestamp rewriter post-process; the rewriter stretches
+#              the snapshotted log window into a synthetic workday so a ~30 min
+#              wall-clock run reads as ~8 h on the SIEM dashboard without
+#              losing event ordering or relative spacing.
 PACING_MODES: dict[str, dict[str, Any]] = {
     "fast":      {"speed": 100_000, "noise": False, "diurnal": False},
-    "relative":  {"speed":      25, "noise": False, "diurnal": False},
     "realistic": {"speed":       1, "noise": True,  "diurnal": True},
 }
 DEFAULT_PACING = "fast"
@@ -66,10 +66,20 @@ STEP_META = {
         "techniques": ["T1190", "T1059.004"],
         "color": "yellow",
     },
+    "post_exploit_recon": {
+        "tactic": "TA0007 · Discovery",
+        "techniques": ["T1082", "T1087.001", "T1057", "T1053.003", "T1016", "T1552.001"],
+        "color": "blue",
+    },
     "privesc": {
         "tactic": "TA0004 · Privilege Escalation",
         "techniques": ["T1053.003", "T1068"],
         "color": "red",
+    },
+    "creds": {
+        "tactic": "TA0006 · Credential Access · TA0007 · Discovery",
+        "techniques": ["T1552.001", "T1018", "T1046", "T1110.004"],
+        "color": "blue",
     },
     "lateral": {
         "tactic": "TA0008 · Lateral Movement",
@@ -88,6 +98,8 @@ class Context:
     results_dir: str = DEFAULT_RESULTS_DIR
     kali_host: str = DEFAULT_KALI_HOST
     wordlist: str = DEFAULT_WORDLIST
+    mode: str = "basic"
+    linpeas: bool = True
     # Pacing — set from PACING_MODES in main(). pacing_speed is the divisor
     # step modules apply to their attacker-decided sleeps (think-time,
     # rate-limits). Infrastructure-bound sleeps (cron firing window, mail
@@ -119,6 +131,7 @@ class Step:
 def _print_banner(ctx: Context, steps: list[Step]) -> None:
     title = Text("⛓  ATTACK CHAIN", style="bold white")
     meta = (
+        f"[dim]Mode:[/dim] [bold cyan]{ctx.mode}[/bold cyan]   "
         f"[dim]Target:[/dim] [bold cyan]{ctx.target}[/bold cyan]   "
         f"[dim]Kali:[/dim] [bold cyan]{ctx.kali_host}[/bold cyan]   "
         f"[dim]Pacing:[/dim] [bold cyan]{ctx.pacing}[/bold cyan] "
@@ -150,10 +163,11 @@ def _print_step_result(
     console.print()
     meta = STEP_META.get(step.name, {})
     color = meta.get("color", "white")
+    ts = f"[dim][{_iso_utc()}][/dim]  "
     if success:
-        msg = f"[bold green]✓[/bold green]  [bold {color}]{step.name}[/bold {color}]  [green]completed[/green]  [dim]{elapsed:.1f}s[/dim]"
+        msg = f"{ts}[bold green]✓[/bold green]  [bold {color}]{step.name}[/bold {color}]  [green]completed[/green]  [dim]{elapsed:.1f}s[/dim]"
     else:
-        msg = f"[bold red]✗[/bold red]  [bold {color}]{step.name}[/bold {color}]  [red]failed[/red]  [dim]{elapsed:.1f}s[/dim]  [red]{error}[/red]"
+        msg = f"{ts}[bold red]✗[/bold red]  [bold {color}]{step.name}[/bold {color}]  [red]failed[/red]  [dim]{elapsed:.1f}s[/dim]  [red]{error}[/red]"
     console.print(msg)
     console.print()
 
@@ -181,6 +195,7 @@ def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
     out_path = out_dir / f"chain-{sanitized}.json"
     payload = {
         "run_id": run_id,
+        "mode": ctx.mode,
         "target": ctx.target,
         "kali": ctx.kali_host,
         "pacing": ctx.pacing,
@@ -244,13 +259,40 @@ def _step_exploit(ctx: Context) -> dict[str, Any]:
     return {"www_shell": www_shell}
 
 
+def _step_post_exploit_recon(ctx: Context) -> dict[str, Any]:
+    from post_exploit_recon import run as recon_run
+
+    findings = recon_run(www_shell=ctx.state["www_shell"], kali_host=ctx.kali_host, use_linpeas=ctx.linpeas)
+    if not findings.get("cron_script"):
+        raise RuntimeError("post-exploit recon found no writable cron script — cannot escalate")
+    return findings
+
+
 def _step_privesc(ctx: Context) -> dict[str, Any]:
     from privesc import run as privesc_run
 
-    root_shell = privesc_run(ctx.state["www_shell"], kali_host=ctx.kali_host)
+    root_shell = privesc_run(
+        ctx.state["www_shell"],
+        kali_host=ctx.kali_host,
+        cron_script=ctx.state["cron_script"],
+    )
     if root_shell is None:
         raise RuntimeError("privesc returned no root shell")
     return {"root_shell": root_shell}
+
+
+def _step_creds(ctx: Context) -> dict[str, Any]:
+    from credential_stuffing import run as creds_run
+
+    result = creds_run(ctx.state["root_shell"])
+    if not result.get("john_ip"):
+        raise RuntimeError("credential stuffing found no usable account on the internal subnet")
+    return {
+        "john_ip": result["john_ip"],
+        "john_password": result["john_password"],
+        "creds_scan": result.get("scanned_hosts", []),
+        "creds_successes": result.get("successes", []),
+    }
 
 
 def _step_lateral(ctx: Context) -> dict[str, Any]:
@@ -259,6 +301,7 @@ def _step_lateral(ctx: Context) -> dict[str, Any]:
     john_shell = lateral_run(
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
+        workstation_ip=ctx.state.get("john_ip"),
         pacing_speed=ctx.pacing_speed,
     )
     if john_shell is None:
@@ -282,21 +325,70 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
 # Chain definition
 # ---------------------------------------------------------------------------
 
-CHAIN: list[Step] = [
-    # dwell_before is in REALISTIC seconds. Scaled by pacing_speed at run time:
+CHAIN_BASIC: list[Step] = [
+    # dwell_before is in REALISTIC seconds. Scaled by ctx.pacing_speed at run time:
     #   fast      → divided by 100 000 (≈ no wait)
-    #   relative  → divided by      25 (15 min → ~36 s)
-    #   realistic → divided by       1 (the real wait)
+    #   realistic → divided by       1 (the real wait, post-process diurnal-stretched)
+    # Numbers reflect typical APT pacing: tens of minutes between distinct moves.
     Step("recon", _step_recon, dwell_before=0),
     Step("exploit", _step_exploit, dwell_before=15 * 60,
          teardown=_teardown_close_socket("www_shell")),
-    Step("privesc", _step_privesc, dwell_before=30 * 60,
-         requires=("www_shell",),
-         teardown=_teardown_close_socket("root_shell")),
-    Step("lateral", _step_lateral, dwell_before=2 * 3600,
-         requires=("root_shell",),
-         teardown=_teardown_close_socket("john_shell")),
+    Step(
+        "post_exploit_recon",
+        _step_post_exploit_recon,
+        dwell_before=10 * 60,
+        requires=("www_shell",),
+    ),
+    Step(
+        "privesc",
+        _step_privesc,
+        dwell_before=30 * 60,
+        requires=("www_shell", "cron_script"),
+        teardown=_teardown_close_socket("root_shell"),
+    ),
+    Step(
+        "creds",
+        _step_creds,
+        dwell_before=10 * 60,
+        requires=("root_shell",),
+    ),
+    Step(
+        "lateral",
+        _step_lateral,
+        dwell_before=2 * 3600,
+        requires=("root_shell",),  # john_ip optional: used if present, else deploy.log fallback
+        teardown=_teardown_close_socket("john_shell"),
+    ),
 ]
+
+# Advanced mode reuses the basic chain until stealthier per-step variants land;
+# swap entries in CHAIN_ADVANCED as they're implemented.
+CHAIN_ADVANCED: list[Step] = list(CHAIN_BASIC)
+
+CHAINS: dict[str, list[Step]] = {
+    "basic": CHAIN_BASIC,
+    "advanced": CHAIN_ADVANCED,
+}
+
+DEFAULT_MODE = "basic"
+
+MODE_ALIASES: dict[str, str] = {
+    "b": "basic",
+    "basic": "basic",
+    "a": "advanced",
+    "adv": "advanced",
+    "advanced": "advanced",
+}
+
+
+def _parse_mode(value: str) -> str:
+    key = value.strip().lower()
+    if key not in MODE_ALIASES:
+        valid = ", ".join(sorted(MODE_ALIASES))
+        raise argparse.ArgumentTypeError(
+            f"invalid mode {value!r}; choose one of: {valid}"
+        )
+    return MODE_ALIASES[key]
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +433,8 @@ def _result_entry(step: Step, *, ok: bool, started: str, ended: str,
 
 
 def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
-    selected = _select(CHAIN, only=only, start=start, stop=stop)
+    chain = CHAINS[ctx.mode]
+    selected = _select(chain, only=only, start=start, stop=stop)
 
     run_id = _iso_utc()
     run_dir = Path(ctx.results_dir) / f"run-{_sanitize_run_id(run_id)}"
@@ -453,22 +546,40 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--kali-host", default=DEFAULT_KALI_HOST)
     p.add_argument("--wordlist", default=DEFAULT_WORDLIST)
     p.add_argument(
+        "--mode",
+        type=_parse_mode,
+        default=DEFAULT_MODE,
+        metavar="{basic,advanced}",
+        help=(
+            "scenario variant to execute, case-insensitive; "
+            "aliases: basic/b, advanced/a/adv (default: basic)"
+        ),
+    )
+    p.add_argument(
         "--pacing",
         choices=list(PACING_MODES),
         default=DEFAULT_PACING,
         help=(
             "How realistically attacker-chosen dwells are paced. "
             "fast = instant (dev/CI); "
-            "relative = compressed but ordered (live demo, ~30 min); "
-            "realistic = real-time (overnight SIEM training, ~12 h)."
+            "realistic = real-time dwells + background noise + diurnal "
+            "timestamp rewriter (the post-process stretches the log window "
+            "into a synthetic workday so a short wall-clock run looks like "
+            "a normal business day on the SIEM)."
         ),
     )
 
-    step_names = [s.name for s in CHAIN]
+    seen: dict[str, None] = {}
+    for chain in CHAINS.values():
+        for step in chain:
+            seen.setdefault(step.name, None)
+    step_names = list(seen)
     sel = p.add_mutually_exclusive_group()
     sel.add_argument("--only", choices=step_names)
     sel.add_argument("--from", dest="start", choices=step_names)
     p.add_argument("--to", dest="stop", choices=step_names)
+    p.add_argument("--no-linpeas", dest="linpeas", action="store_false", default=True,
+                   help="Skip LinPEAS and use targeted commands only (default: LinPEAS enabled)")
     p.add_argument("--list", action="store_true")
     p.add_argument("-v", "--verbose", action="store_true")
 
@@ -478,9 +589,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return args
 
 
-def _list_steps() -> None:
-    console.print(Rule("[dim]configured steps[/dim]", style="dim"))
-    for step in CHAIN:
+def _list_steps(mode: str = DEFAULT_MODE) -> None:
+    console.print(Rule(f"[dim]configured steps ({mode})[/dim]", style="dim"))
+    for step in CHAINS[mode]:
         meta = STEP_META.get(step.name, {})
         color = meta.get("color", "white")
         reqs = (
@@ -500,12 +611,14 @@ def _list_steps() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    logging.Formatter.converter = time.gmtime  # render %(asctime)s in UTC
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
-        format="[dim][%(name)s][/dim] %(message)s",
+        format="[dim][%(asctime)s] [%(name)s][/dim] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ",
     )
     if args.list:
-        _list_steps()
+        _list_steps(args.mode)
         return 0
 
     pacing_cfg = PACING_MODES[args.pacing]
@@ -514,6 +627,8 @@ def main(argv: list[str] | None = None) -> int:
         results_dir=args.results_dir,
         kali_host=args.kali_host,
         wordlist=args.wordlist,
+        mode=args.mode,
+        linpeas=args.linpeas,
         pacing=args.pacing,
         pacing_speed=float(pacing_cfg["speed"]),
     )

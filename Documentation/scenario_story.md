@@ -43,18 +43,32 @@ Solo frontend specialist. Hired to build Waystar Connect's web presence end-to-e
 - Reaches for a familiar Docker base image — Apache 2.4.50, the version that ships CVE-2021-41773. He's a frontend specialist; infrastructure auditing isn't his strength and nobody in his contract chain is positioned to ask the right question.
 - "Vibecodes" the bulk of the rest with AI assistance. Output ships without review.
 - Sets the scheduled-maintenance script `/opt/cleanup.sh` to `chmod 777` while debugging a permissions issue. Plans to revert before go-live, gets pulled into the timeline cut, never reverts. The TODO comment he left in the script ("set back to 700 before go-live") is still there, exactly as written.
-- Uses a Linux workstation that's actually a colleague's regular box, idle during the colleague's six-month medical leave (see *Luke Smith* below). The transition team set him up with throwaway credentials (`labuser` / `labpass`) instead of a proper dedicated account — the box was meant to be returned when the colleague came back, and never was.
+- Uses a Linux workstation provisioned for him by IT with throwaway credentials (`labuser` / `labpass` initially, later `john.stravidis` / `waystar2026!`) that were meant to be rotated before go-live — never were.
 - Ships on the new deadline. The consultancy is satisfied. The board is satisfied. Waystar Connect goes live.
 
 Stravidis is competent, not malicious. Every shortcut traces back to the four-week clock and to him being asked to do two-thirds of a job he was originally hired to do.
 
-### Luke Smith — previous user of Stravidis's workstation
+### Luke Smith — psychiatrist, Waystar Royco clinical team
 
-A long-term Waystar employee who took six months off for a planned medical operation. While he was out, his Linux workstation — already running, already on the internal network, already provisioned — was reassigned to John Stravidis as a dev/staging box for the Waystar Connect project. It was the obvious candidate: idle, ready, and on a still-uneven Linux fleet where standing up new boxes is slow. IT preserved Luke's home directory in place ("he's coming back; don't delete it"), wrote a brief migration note to `/var/log/migration/`, and otherwise didn't treat the reassignment as a security event. Medical leave isn't a re-onboarding trigger — nothing on Luke's account was actively rotated.
+Clinician on the Waystar Royco mental-health franchise. Sees patients during the day, writes session notes in the central patient DB (`db-internal`) in the evening, has a thin local SQLite cache of "his patients" he uses offline at home. His workstation (`luke_ws`, `10.30.0.7`) is configured the way most clinical end-user boxes are: a password account, broad outbound network access, a credentials file (`~/.pgpass`) so `psql` Just Works without typing the password every time. Patient data is his daily work, not a special asset.
 
-When Luke returned (two months before the relaunch), he was set up on a *new* workstation. He restored his dotfiles to it from a personal backup, including `~/.ssh/`, bringing his pre-leave SSH keys onto the new box wholesale.
+Luke is **not** the immediate post-John pivot in the **basic** mode of the chain. The attacker who lands on John's box will *try* to reach Luke (Luke is the obvious next employee target) but **fail** — Luke's box doesn't trust John's SSH key, his account doesn't share John's password, and there's no credential left behind on John's box that lets the attacker into Luke's. The visible noise of the failed attempt is its own SOC-training signal (T1110 / T1078 brute-force attempts that get denied + logged). In the basic flow, the attacker gives up on Luke and exfiltrates what they have from John's box.
 
-Luke has no narrative role beyond this. The chain uses **his name** (the attacker recognises it from eighteen months ago), **his preserved home directory on Stravidis's box**, and **his SSH key surviving across the leave** to pivot deeper into the network. Whether he was *the* compromised account in the prior breach is left implicit.
+In the **advanced** mode the attacker reaches Luke a different way: by first pivoting from John to **Vinzenz Fedora** (the sysadmin) and using Vinzenz's cross-fleet SSH key to log into Luke as `vinzenz.fedora` (a sysadmin account that exists on every host). Once on Luke's box as a sudoer, the attacker can read his `.pgpass`, run his queries against `db-internal`, and exfiltrate the patient data Luke routinely accesses.
+
+### Vinzenz Fedora — sysadmin, Waystar Royco IT
+
+The only person at Waystar Royco with SSH reach into every Linux host: the public web server (`apache`), John's workstation, Luke's workstation, and the patient database server (`db-internal`, via `psql` superuser). He has a dedicated `vinzenz.fedora` sudoer account on each managed box; his public key is in each `~vinzenz.fedora/.ssh/authorized_keys`; his private key lives unencrypted in his own workstation's `~/.ssh/id_ed25519`.
+
+That private key file is the central loot artefact of the **advanced** chain. Anyone who steals it owns the whole fleet — the same way it works in real enterprise networks where the SOC's worst-case scenario is a compromised sysadmin laptop.
+
+Vinzenz's workstation (`vinzenz_ws`, `10.30.0.8`) also stores:
+
+- a `~/.pgpass` with the **superuser** Postgres credentials for `db-internal` (full read+write on the patient DB)
+- an Ansible-style `inventory.ini` listing every managed host — a useful breadcrumb to an attacker mapping the fleet
+- a fleet-wide `~/.ssh/config` with friendly aliases (`apache`, `john`, `luke`, `db-internal`) that point at the right IPs and use the right key automatically
+
+Vinzenz is competent — his hygiene is fine for the size of the team — but the lab models a realistic small-shop sysadmin: one account, one key, no break-glass account, no key rotation cadence. Once the attacker is on his box, they have the keys to the kingdom.
 
 ## The trigger
 

@@ -9,6 +9,9 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
     && apt-get install -y --no-install-recommends \
         cron iproute2 dnsutils openssh-server openssh-client coreutils \
         inotify-tools \
+        rsync \
+        python3 python3-psycopg2 \
+        nmap sshpass \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
@@ -27,10 +30,11 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
 #  have arbitrary code executed as root within ~60 seconds.
 # ============================================================================
 
-# Maintenance script written by the "admin" — does real work (log rotation,
-# tempfile cleanup, disk-usage snapshot). The TODO comment in the file
-# explains in-fiction why the permissions are 777 ("only for debugging,
-# revert before go-live") and were never reverted.
+# Maintenance script written by the sysadmin (Vinzenz Fedora) — does real work
+# (log rotation, tempfile cleanup, disk-usage snapshot). John Stravidis chmod
+# 777'd it while debugging a deploy permission issue and never reverted it; the
+# TODO comment in the file explains that in-fiction ("revert to 700 before
+# go-live"). See Documentation/scenario_story.md.
 COPY apache/cleanup.sh /opt/cleanup.sh
 RUN chmod 777 /opt/cleanup.sh
 # rwxrwxrwx — anyone can overwrite, www-data can drop root-executable code.
@@ -46,7 +50,7 @@ RUN printf '* * * * * root /opt/cleanup.sh\n' > /etc/cron.d/cleanup \
 # ============================================================================
 RUN useradd -m -s /bin/bash john.stravidis
 COPY apache/john_home/ /home/john.stravidis/
-COPY html/ /opt/waystar-connect/dist/
+COPY apache/dist/ /opt/waystar-connect/dist/
 COPY shared-lab-keys/john_deploy_key.pub /home/john.stravidis/.ssh/authorized_keys
 COPY shared-lab-keys/john_deploy_key     /home/john.stravidis/.ssh/id_ed25519
 COPY apache/john_home/projects/waystar-connect/deploy.log /opt/waystar-connect/deploy.log
@@ -56,7 +60,55 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
     && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
-    && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts
+    && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts \
+    && chmod 600 /home/john.stravidis/.env
+
+# ============================================================================
+#  Waystar Connect DB credentials for the booking-form CGI.
+# ----------------------------------------------------------------------------
+#  /etc/waystar/db.env holds the `waystar-app` Postgres credentials used by
+#  cgi-bin/book.py to insert into the appointments table on db-internal.
+#  File is mode 0640 (root:www-data) — readable by the Apache worker, not
+#  world-readable. NOTE: an attacker who lands a www-data shell via
+#  CVE-2021-41773 can still read it, which is the intended scenario surface.
+# ============================================================================
+RUN mkdir -p /etc/waystar \
+    && printf 'PGHOST=db-internal\nPGPORT=5432\nPGDATABASE=waystar\nPGUSER=waystar-app\nPGPASSWORD=AppBooking!2026\n' \
+         > /etc/waystar/db.env \
+    && chown root:www-data /etc/waystar/db.env \
+    && chmod 640 /etc/waystar/db.env
+
+# ============================================================================
+#  vinzenz.fedora — sysadmin's named account on this host.
+#  Vinzenz SSHes in from his workstation (10.30.0.8) using the shared
+#  vincent_admin_key keypair. He has sudo. This is the sysadmin reach the
+#  attack chain pivots to once the attacker compromises Vinzenz's box.
+# ============================================================================
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends sudo \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -s /bin/bash -G sudo vinzenz.fedora \
+    && echo 'vinzenz.fedora:VinzenzAdmin!2026' | chpasswd \
+    && mkdir -p /home/vinzenz.fedora/.ssh
+COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_keys
+RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
+    && chmod 700 /home/vinzenz.fedora/.ssh \
+    && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
+
+# ============================================================================
+#  luke.smith — psychiatrist's named account on this host.
+#  Luke SSHes in from his workstation (10.30.0.7) to push periodic backups
+#  of his ~/Documents/notes/ tree (see ~luke.smith/.bash_history). NO sudo
+#  — Luke is a clinical end-user, not an admin. Password auth (his sshd
+#  on apache already allows it; mirrors his own workstation's posture).
+# ============================================================================
+RUN useradd -m -s /bin/bash luke.smith \
+    && echo 'luke.smith:WaystarLuke!2026' | chpasswd \
+    && mkdir -p /home/luke.smith/backup/notes \
+    && chown -R luke.smith:luke.smith /home/luke.smith
+
+# NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
+# +x bit on book.py is preserved from the host filesystem; no chmod here.
 
 # Start script: launches cron + sshd, then the inotify-based File Integrity
 # Monitor that watches /opt/cleanup.sh (the privesc tripwire), then hands

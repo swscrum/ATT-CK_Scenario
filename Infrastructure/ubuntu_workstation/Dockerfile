@@ -4,8 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # ============================================================================
 #  John Stravidis — frontend freelancer building Waystar Connect.
-#  This workstation is his (he was set up here while the box's previous
-#  owner — Luke Smith — was on six months of medical leave).
+#  This is his dev/staging workstation, provisioned for the project.
 #  See Documentation/scenario_story.md for the full backstory.
 #
 #  LAB ONLY — intentionally weak credentials for the attack-chain demo.
@@ -29,13 +28,22 @@ RUN apt-get update \
         npm \
         xfce4 \
         xfce4-terminal \
+        dbus \
         dbus-x11 \
+        gnupg \
+        tumbler \
+        python3-dbus \
+        python3-gi \
         tigervnc-standalone-server \
         rsyslog \
         inotify-tools \
         sqlite3 \
         postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
+    # pm-utils is not packaged for Ubuntu 24.04; provide a stub so xfce4-session
+    # doesn't log "No such file or directory" when probing power-management support.
+    && printf '#!/bin/sh\nexit 1\n' > /usr/bin/pm-is-supported \
+    && chmod +x /usr/bin/pm-is-supported \
     # Remove the `ubuntu` user if present — official ubuntu:24.04 images do
     # not typically include it, so guard the deletion to keep builds
     # reproducible across environments. Doing it before useradd john also
@@ -74,12 +82,22 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
                     /home/john.stravidis/.ssh/config \
                     /home/john.stravidis/.ssh/known_hosts \
     && chmod +x /home/john.stravidis/.vnc/xstartup \
+    # Pre-create the gnupg directory so gpg-agent doesn't print "directory
+    # created" messages on every first boot. gpg-agent is started by
+    # xfce4-session to provide SSH key-agent integration.
+    && mkdir -p /home/john.stravidis/.gnupg/private-keys-v1.d \
+    && chown -R john.stravidis:john.stravidis /home/john.stravidis/.gnupg \
+    && chmod 700 /home/john.stravidis/.gnupg \
+                 /home/john.stravidis/.gnupg/private-keys-v1.d \
     # Build john's local dev SQLite (frontend fixture, NOT real patient data).
     # See seed_dev_db.sql next to the resulting dev.db for the schema.
     && sqlite3 /home/john.stravidis/projects/waystar-connect/dev.db \
          < /home/john.stravidis/projects/waystar-connect/seed_dev_db.sql \
     && chown john.stravidis:john.stravidis \
-         /home/john.stravidis/projects/waystar-connect/dev.db
+         /home/john.stravidis/projects/waystar-connect/dev.db \
+    && cd /home/john.stravidis/projects/waystar-connect \
+    && npm install \
+    && chown -R john.stravidis:john.stravidis node_modules
 
 # inotify-based File Integrity Monitor and an rsyslog snippet that opens
 # file-create perms enough for an operator on the host to read the logs
@@ -88,8 +106,34 @@ COPY ubuntu_workstation/lab-fim.sh          /usr/local/bin/lab-fim.sh
 COPY ubuntu_workstation/01-lab-perms.conf   /etc/rsyslog.d/01-lab-perms.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh
 
+# ============================================================================
+#  vinzenz.fedora — sysadmin's named account on this host.
+#  Vinzenz SSHes from his own workstation (10.30.0.8) using the shared
+#  vincent_admin_key. He has sudo. Models the realistic enterprise pattern
+#  where a sysadmin has a dedicated account on every managed box.
+# ============================================================================
+RUN useradd -m -s /bin/bash -G sudo vinzenz.fedora \
+    && echo 'vinzenz.fedora:VinzenzAdmin!2026' | chpasswd \
+    && mkdir -p /home/vinzenz.fedora/.ssh
+COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_keys
+RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
+    && chmod 700 /home/vinzenz.fedora/.ssh \
+    && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
+
+COPY ubuntu_workstation/logind-stub.py /usr/local/bin/logind-stub.py
+# D-Bus policy that allows root to own org.freedesktop.login1 (the logind stub).
+COPY ubuntu_workstation/dbus-logind-stub.conf /etc/dbus-1/system.d/logind-stub.conf
 COPY ubuntu_workstation/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh \
+    # tumbler's session service files include "SystemdService=" which tells D-Bus
+    # to activate via systemd --user. Without a running systemd user instance the
+    # directive is silently ignored and D-Bus falls back to the Exec= line — but
+    # only if the key is absent. Strip it so the Exec= path is always used and
+    # xfdesktop's GetFlavors call succeeds on first contact.
+    && sed -i '/^SystemdService=/d' \
+         /usr/share/dbus-1/services/org.xfce.Tumbler.Cache1.service \
+         /usr/share/dbus-1/services/org.xfce.Tumbler.Manager1.service \
+         /usr/share/dbus-1/services/org.xfce.Tumbler.Thumbnailer1.service
 
 EXPOSE 22 5901
 

@@ -9,8 +9,8 @@ built `dist/` output.
 
 1. From the workstation, build with `npm run build`
 2. `rsync -avz dist/ john.stravidis@apache:/opt/waystar-connect/dist/`
-3. The bound mount `./html → /usr/local/apache2/htdocs` is updated on the host
-   side; Apache picks the change up automatically.
+3. Apache serves directly from `/opt/waystar-connect/dist` (the DocumentRoot)
+   and picks the new files up automatically — no service reload needed.
 
 See `/home/john.stravidis/projects/waystar-connect/docs/deploy.md` on the
 workstation for the full procedure.
