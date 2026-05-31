@@ -132,6 +132,23 @@ cleanup() {
         docker compose down
     else
         echo "[run.sh] --keep-up: lab still running. Tear down later with: docker compose down"
+        echo ""
+        echo "[run.sh] analyst entry points (lab is up — verify findings live):"
+        echo "  Web app          curl http://localhost:80/"
+        echo "  John's VNC       vncviewer localhost:5901   (no password — lab)"
+        echo "  Apache shell     docker compose exec apache bash"
+        echo "  John WS shell    docker compose exec ubuntu_workstation bash"
+        echo "  Luke WS shell    docker compose exec luke_ws bash"
+        echo "  Vinzenz WS shell docker compose exec vinzenz_ws bash"
+        echo "  DB shell         docker compose exec db-internal psql -U waystar"
+        echo "                   (password: WaystarDB!Secure2024)"
+        echo "  Router shell     docker compose exec router sh"
+        echo "  Kali shell       docker compose exec kali bash"
+        echo ""
+        echo "[run.sh] analyst-facing docs:"
+        echo "  Briefing         $(cd .. && pwd)/Documentation/analyst_briefing.md"
+        echo "  Findings form    $(cd .. && pwd)/Documentation/analyst_findings_template.yaml"
+        echo "  Scenario story   $(cd .. && pwd)/Documentation/scenario_story.md"
     fi
 
     # Snapshot rotation — keep the most recent 5 run-* directories, prune

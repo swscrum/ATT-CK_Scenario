@@ -1,0 +1,50 @@
+title: T1018 + T1046 — Internal SSH Sweep Originating from DMZ
+id: 4eb5070b-c9d0-4eaa-dd55-internal-scan-01
+status: experimental
+description: |
+  Detects a burst of new connection attempts from the DMZ (apache,
+  10.40.0.2) to many hosts on the internal subnet (10.30.0.0/24) port 22
+  within a short window. This is the credential-stuffing recon — nmap
+  -Pn -p 22 --open 10.30.0.0/24 fired from apache via the root reverse
+  shell to identify live SSH hosts before spraying John's password.
+
+  In a normal Waystar Royco lab apache communicates with db-internal
+  (10.30.0.6 :5432) for the booking CGI and otherwise does NOT initiate
+  any 10.30.0.0/24 traffic. Anything else is anomalous.
+references:
+  - Documentation/mappings.md — rows "T1018 / T1046 internal scan from DMZ"
+  - Infrastructure/router/entrypoint.sh — NFLOG FW-NEW prefix
+  - Attack-chain/credential_stuffing.py
+author: Waystar lab
+date: 2026-05-31
+tags:
+  - attack.discovery
+  - attack.t1018
+  - attack.t1046
+logsource:
+  category: firewall
+  product: netfilter
+  service: ulogd2
+detection:
+  apache_to_internal_ssh:
+    Message|contains:
+      - 'FW-NEW:'
+      - 'SRC=10.40.0.2'
+      - 'DST=10.30.0.'
+      - 'DPT=22'
+  timeframe: 30s
+  condition: |
+    apache_to_internal_ssh | count(DST) by SRC > 2
+falsepositives:
+  - Legitimate sysadmin SSH from apache to internal hosts (Vinzenz Fedora
+    occasionally does this manually during maintenance). Distinguish by
+    correlating with `Accepted publickey for vinzenz.fedora` on the target
+    workstation within ±10s and by the modest connection count (Vinzenz
+    targets one host at a time; the scan hits ≥3).
+level: high
+fields:
+  - timestamp
+  - SRC
+  - DST
+  - DPT
+  - PROTO
