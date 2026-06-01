@@ -87,7 +87,7 @@ RUN_START_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cleanup() {
     echo ""
     echo "[run.sh] snapshotting container logs → $RUN_DIR"
-    mkdir -p "$RUN_DIR"/{apache,router,workstation,luke_ws,vinzenz_ws,db-internal,noise_user_sim}
+    mkdir -p "$RUN_DIR"/{apache,router,workstation,luke_ws,vinzenz_ws,db-internal,noise_user_sim,noise_monitor,noise_scanner,noise_mobile}
     # Best-effort: some paths exist only after later slices land (e.g.,
     # lab-fim.log, ulog-iptables.log) — `|| true` keeps the snapshot from
     # aborting if a source path is missing.
@@ -107,6 +107,9 @@ cleanup() {
     docker logs vinzenz_ws         >"$RUN_DIR/vinzenz_ws/stdout.log"  2>"$RUN_DIR/vinzenz_ws/stderr.log"  || true
     docker logs db-internal        >"$RUN_DIR/db-internal/stdout.log" 2>"$RUN_DIR/db-internal/stderr.log" || true
     docker logs noise_user_sim     >"$RUN_DIR/noise_user_sim/stdout.log" 2>"$RUN_DIR/noise_user_sim/stderr.log" || true
+    docker logs noise_monitor      >"$RUN_DIR/noise_monitor/stdout.log"  2>"$RUN_DIR/noise_monitor/stderr.log"  || true
+    docker logs noise_scanner      >"$RUN_DIR/noise_scanner/stdout.log"  2>"$RUN_DIR/noise_scanner/stderr.log"  || true
+    docker logs noise_mobile       >"$RUN_DIR/noise_mobile/stdout.log"   2>"$RUN_DIR/noise_mobile/stderr.log"   || true
     docker logs kali               >"$RUN_DIR/kali.stdout.log"        2>"$RUN_DIR/kali.stderr.log"        || true
 
     # -------------------------------------------------------------------- diurnal stretch

@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 """Background-noise generator for the lab.
 
-Lives in its own container (``noise_user_sim``, public_net 10.10.0.5) so the
-source IP of the noise is **different from the attacker's** (kali, 10.10.0.2).
-A SOC trainee can no longer filter the attacker out by ``src_ip != 10.10.0.2``
-alone — they must look at the actual request patterns, User-Agents, and paths.
+One Docker image, four containers, each picks a *persona* via the
+``NOISE_PERSONA`` env var (general / monitor / scanner / mobile). Each
+persona is **monomorphic** — one consistent behavior class — which is
+how real internet traffic actually looks at a public webserver:
+desktop browsers don't suddenly probe ``/wp-login.php``; uptime monitors
+don't hit anything except their one endpoint; etc.
 
-Behaviour
-=========
-- Spawns ``NUM_THREADS`` workers, each looping a GET to a random "legit"
-  path on ``--target`` (router, which DNATs :80 → apache in the DMZ) with a
-  random "legit" User-Agent every ``MIN_INTERVAL_SEC..MAX_INTERVAL_SEC``
-  real-time seconds.
-- A small fraction of requests deliberately probe paths that 404, mimicking
-  the ambient internet background scan that every public webserver gets
-  (WordPress probes, ``.env`` discovery, etc.). These look suspicious but
-  are *not* the attacker, so they teach the SOC trainee to look past
-  surface anomalies.
+This defeats the trivial SOC filter "exclude src_ip in {kali, noise}"
+because there are now four noise IPs each doing something distinct, AND
+defeats the lazy "anything with a bot UA is noise" heuristic because
+behavioral patterns matter as much as User-Agent strings.
+
+Personas (configured via PERSONAS dict below):
+
+| persona  | typical IP   | paths           | UAs       | interval        | threads |
+|----------|--------------|-----------------|-----------|-----------------|---------|
+| general  | 10.10.0.5    | LEGIT_PATHS     | HUMAN_UAS | 30–120s         | 3       |
+| monitor  | 10.10.0.6    | /api/health     | MONITOR_UA| 55–65s          | 1       |
+| scanner  | 10.10.0.7    | PROBE_PATHS     | BOT_UAS   | 60–300s         | 2       |
+| mobile   | 10.10.0.8    | LEGIT_PATHS     | MOBILE_UAS| 300–900s        | 1       |
 
 Why no rate scaling
 ===================
@@ -36,13 +40,14 @@ sends on ``stop``). Workers shut down promptly via a shared
 
 Environment variables (read at startup)
 =======================================
-- ``NOISE_ENABLED``      — "1" to run; anything else → sleep forever (so
-                           the container stays up but generates no traffic).
-                           Set to "0" by run.sh when ``--pacing fast``.
-- ``NOISE_TARGET``       — hostname/IP to GET against (default: ``router``).
-- ``NOISE_THREADS``      — worker thread count (default: 3).
-- ``NOISE_PROBE_PCT``    — % chance per request of a 404-yielding probe
-                           path (default: 10).
+- ``NOISE_ENABLED``  — "1" to run; anything else → sleep forever (so the
+                       container stays up but generates no traffic).
+                       Set to "0" by tools/run.sh when ``--pacing fast``.
+- ``NOISE_PERSONA``  — one of {general,monitor,scanner,mobile}; selects
+                       the behavior class. Default: ``general``.
+- ``NOISE_TARGET``   — hostname/IP to GET against (default: ``router``).
+- ``NOISE_THREADS``  — override the persona's default thread count.
+                       Rarely needed; default is per-persona.
 """
 from __future__ import annotations
 
@@ -57,7 +62,9 @@ import urllib.error
 import urllib.request
 
 
-# Paths a legit user / health monitor would hit on the booking site.
+# ─────────────────────────────────────────────────────────── Paths
+
+# What a real human browsing waystar-connect would touch.
 LEGIT_PATHS = [
     "/",
     "/api/health",
@@ -72,11 +79,9 @@ LEGIT_PATHS = [
     "/assets/index-CnI_Q0Cw.js",
 ]
 
-# Paths that random internet bots probe on every public webserver — these
-# all 404 against our apache config. Including them puts the attacker's
-# real CGI probes (/cgi-bin/...) in a sea of similar-shaped suspicious
-# noise so detection has to look at *which* suspicious path, not whether
-# the source generated any 404s.
+# Paths random internet bots probe on every public webserver — all 404
+# against our apache config. The scanner persona emits these and only
+# these, modelling the ambient internet background scan.
 PROBE_PATHS = [
     "/wp-login.php",
     "/wp-admin/",
@@ -89,16 +94,35 @@ PROBE_PATHS = [
     "/.aws/credentials",
 ]
 
-LEGIT_UAS = [
+
+# ─────────────────────────────────────────────────────────── User-Agents
+
+# Desktop browsers — what general human traffic looks like.
+HUMAN_UAS = [
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 "
         "(KHTML, like Gecko) Version/17.2 Safari/605.1.15",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "WaystarMonitor/2.1 (+https://waystar.local/monitor) healthcheck",
 ]
 
-# UAs the bots / scanners typically send.
+# What real uptime monitors send — Pingdom/UptimeRobot/etc. shape.
+# Single UA per persona is realistic: a monitor doesn't rotate UAs.
+MONITOR_UA = "WaystarMonitor/2.1 (+https://waystar.local/monitor) healthcheck"
+
+# Mobile browsers — same paths as desktop humans but a different UA family
+# and much sparser cadence (people pull their phones out, not constantly).
+MOBILE_UAS = [
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.6099.230 Mobile Safari/537.36",
+    "Mozilla/5.0 (Android 14; Mobile; rv:121.0) Gecko/121.0 Firefox/121.0",
+]
+
+# What internet scanners and exploit kits identify as. These ARE
+# suspicious-looking strings — that's the point: teaches the SOC trainee
+# that bot UA != attacker (the attacker's CGI POSTs come WITHOUT a UA).
 BOT_UAS = [
     "Mozilla/5.0 (compatible; censys-go-scanner)",
     "python-requests/2.31.0",
@@ -107,28 +131,68 @@ BOT_UAS = [
     "masscan/1.3 (https://github.com/robertdavidgraham/masscan)",
 ]
 
-# Real-time bounds between hits per thread (seconds).
-MIN_INTERVAL_SEC = 30
-MAX_INTERVAL_SEC = 120
-NUM_THREADS_DEFAULT = 3
+
+# ─────────────────────────────────────────────────────────── Personas
+
+PERSONAS: dict[str, dict] = {
+    # General desktop browsing — the majority of real traffic.
+    "general": {
+        "paths": LEGIT_PATHS,
+        "uas": HUMAN_UAS,
+        "min_interval": 30,
+        "max_interval": 120,
+        "threads": 3,
+    },
+    # Uptime monitor: predictable cadence, single endpoint, single UA.
+    # Distinctive shape in time-series views (hits exactly every ~60s).
+    # Targets `/` (returns 200) rather than `/api/health` (returns 404 — the
+    # booking site doesn't ship an API health endpoint), so the monitor
+    # signal looks like a HEALTHY uptime check, not a broken one.
+    "monitor": {
+        "paths": ["/"],
+        "uas": [MONITOR_UA],
+        "min_interval": 55,
+        "max_interval": 65,
+        "threads": 1,
+    },
+    # Internet background scanner: bot UAs, 404-yielding probes.
+    # Looks suspicious but is NOT the attacker — teaches "suspicious
+    # surface anomaly != malicious"; SOC trainee must look at WHICH
+    # suspicious path (the attacker hits /cgi-bin, scanners don't).
+    "scanner": {
+        "paths": PROBE_PATHS,
+        "uas": BOT_UAS,
+        "min_interval": 60,
+        "max_interval": 300,
+        "threads": 2,
+    },
+    # Mobile browsing: same paths as general but mobile UAs and a much
+    # sparser cadence. Teaches that legit traffic has wildly varying
+    # *interval* shapes, not just IPs.
+    "mobile": {
+        "paths": LEGIT_PATHS,
+        "uas": MOBILE_UAS,
+        "min_interval": 300,
+        "max_interval": 900,
+        "threads": 1,
+    },
+}
+DEFAULT_PERSONA = "general"
+
 
 log = logging.getLogger("noise")
 
 
-def _pick_request(probe_pct: int) -> tuple[str, str]:
-    """Return (path, user_agent) — a probe with probability ``probe_pct``%."""
-    if random.randrange(100) < probe_pct:
-        return random.choice(PROBE_PATHS), random.choice(BOT_UAS)
-    return random.choice(LEGIT_PATHS), random.choice(LEGIT_UAS)
-
-
-def _worker(stop_event: threading.Event, target: str, probe_pct: int) -> None:
-    """One thread; loops GETting random URLs with realistic intervals."""
+def _worker(stop_event: threading.Event, target: str,
+            paths: list[str], uas: list[str],
+            min_interval: int, max_interval: int) -> None:
+    """One thread; loops GETting random URLs from this persona's lists."""
     while not stop_event.is_set():
-        delay = random.uniform(MIN_INTERVAL_SEC, MAX_INTERVAL_SEC)
+        delay = random.uniform(min_interval, max_interval)
         if stop_event.wait(timeout=delay):
             return
-        path, ua = _pick_request(probe_pct)
+        path = random.choice(paths)
+        ua = random.choice(uas)
         url = f"http://{target}{path}"
         req = urllib.request.Request(
             url,
@@ -137,26 +201,36 @@ def _worker(stop_event: threading.Event, target: str, probe_pct: int) -> None:
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 resp.read(64)
-                log.debug("noise GET %s → %d", url, resp.status)
+                log.debug("GET %s → %d", url, resp.status)
         except urllib.error.HTTPError as exc:
-            # Expected for PROBE_PATHS — 404/403/etc. is precisely the point.
-            log.debug("noise GET %s → %d", url, exc.code)
+            # Expected for scanner persona — 404/403 is precisely the point.
+            log.debug("GET %s → %d", url, exc.code)
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
-            log.debug("noise GET failed for %s: %s", url, exc)
+            log.debug("GET failed for %s: %s", url, exc)
 
 
 def main() -> int:
+    persona_name = os.environ.get("NOISE_PERSONA", DEFAULT_PERSONA).strip().lower()
+    if persona_name not in PERSONAS:
+        # Fall back rather than crash — keeps the container up so compose
+        # doesn't restart-loop on a typo. Log loudly.
+        print(f"[noise] WARN: unknown persona {persona_name!r}, "
+              f"falling back to {DEFAULT_PERSONA!r} (valid: {sorted(PERSONAS)})",
+              file=sys.stderr)
+        persona_name = DEFAULT_PERSONA
+
     logging.basicConfig(
         level=logging.INFO,
-        format="[%(asctime)s] [noise] %(message)s",
+        format=f"[%(asctime)s] [noise:{persona_name}] %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%SZ",
     )
     logging.Formatter.converter = time.gmtime
 
+    persona = PERSONAS[persona_name]
     enabled = os.environ.get("NOISE_ENABLED", "0") == "1"
     target = os.environ.get("NOISE_TARGET", "router")
-    threads_n = int(os.environ.get("NOISE_THREADS", str(NUM_THREADS_DEFAULT)))
-    probe_pct = int(os.environ.get("NOISE_PROBE_PCT", "10"))
+    # NOISE_THREADS override is rarely needed — defaults to persona-specified.
+    threads_n = int(os.environ.get("NOISE_THREADS", str(persona["threads"])))
 
     if not enabled:
         log.info("NOISE_ENABLED=0 — sleeping forever (container stays up, no traffic)")
@@ -165,8 +239,10 @@ def main() -> int:
         signal.pause()
         return 0
 
-    log.info("starting: target=%s threads=%d probe_pct=%d interval=%ds-%ds",
-             target, threads_n, probe_pct, MIN_INTERVAL_SEC, MAX_INTERVAL_SEC)
+    log.info("starting: target=%s threads=%d interval=%ds-%ds paths=%d uas=%d",
+             target, threads_n,
+             persona["min_interval"], persona["max_interval"],
+             len(persona["paths"]), len(persona["uas"]))
 
     stop_event = threading.Event()
 
@@ -181,8 +257,10 @@ def main() -> int:
     for i in range(threads_n):
         t = threading.Thread(
             target=_worker,
-            args=(stop_event, target, probe_pct),
-            name=f"noise-{i}",
+            args=(stop_event, target,
+                  persona["paths"], persona["uas"],
+                  persona["min_interval"], persona["max_interval"]),
+            name=f"{persona_name}-{i}",
             daemon=True,
         )
         t.start()

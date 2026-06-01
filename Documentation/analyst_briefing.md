@@ -88,12 +88,31 @@ A finding usually appears in **both** — start at the edge to spot anomalies,
 pivot to host logs to confirm. If a beat only shows up in one of them, you
 might be looking at false positives or noise.
 
-Speaking of noise: **legitimate-looking background traffic is hitting the
-web server all day**. Some of it is bots; some of it is monitor agents.
-You will have to distinguish the attacker's traffic from the baseline. Hint
-that's actually fair to give: the attacker's traffic has a **different
-pre-NAT source IP** than the baseline noise. Both arrive at the apache
-container as the same post-NAT address — go look at the router.
+Speaking of noise: **four distinct kinds of legitimate-looking background
+traffic are hitting the web server all day**, each from its own pre-NAT
+source IP:
+
+- a **general human browsing pattern** (rotating desktop browser UAs, hits
+  `/`, `/about.html`, the booking flow's static assets)
+- an **uptime monitor** (predictable ~60s cadence, single endpoint, single
+  monitor UA — easiest to identify in time-series views)
+- an **internet background scanner** (404-yielding probes like
+  `/wp-login.php`, `/.env`, `/phpmyadmin/`, with bot UAs like
+  `python-requests`, `masscan`, `curl`)
+- a **mobile browsing pattern** (mobile UAs, sparse cadence — minutes
+  apart, not seconds)
+
+Each noise source is *monomorphic* — it consistently exhibits one of those
+four behaviors. The **attacker's traffic is the one that doesn't fit any
+of them**: a single pre-NAT IP doing recon scanning, then exploit POSTs to
+`/cgi-bin/...`, then internal-network SSH probes — a *mixed-behavior*
+signature no legitimate source would produce. All sources arrive at apache
+as the same post-NAT address; go look at the router to see the real source
+IPs.
+
+Hint that's fair to give Tier 1: the bot-looking probes are NOT the
+attacker. The scanner probes are real-internet-noise; the attacker's CGI
+traversal is something else entirely.
 
 ---
 

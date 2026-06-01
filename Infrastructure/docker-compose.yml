@@ -169,6 +169,14 @@ services:
         ipv4_address: 10.30.0.6
     restart: unless-stopped
 
+  # ──────────────────────────────────────────────────────────────────────
+  # Background noise — four containers sharing the same image, each driven
+  # by NOISE_PERSONA. Different IPs + monomorphic behaviour per persona
+  # means a SOC trainee can't filter by IP or by UA alone; they have to
+  # learn behavioural pattern analysis. See Infrastructure/noise_user_sim/
+  # noise.py PERSONAS dict for full per-persona config.
+  # ──────────────────────────────────────────────────────────────────────
+
   noise_user_sim:
     build: ./noise_user_sim
     container_name: noise_user_sim
@@ -182,15 +190,72 @@ services:
       # the container stays up (signal.pause) but generates no traffic, so
       # we don't pollute fast-mode runs with background HTTP.
       NOISE_ENABLED: "${NOISE_ENABLED:-0}"
+      NOISE_PERSONA: "general"
       NOISE_TARGET: "router"
-      NOISE_THREADS: "3"
-      NOISE_PROBE_PCT: "10"
     networks:
-      # public_net at 10.10.0.5 — DIFFERENT from kali (10.10.0.2). This is
-      # the whole point of the container: noise must originate from an IP
-      # the SOC trainee can't whitelist away with a one-line filter.
+      # public_net at 10.10.0.5 — DIFFERENT from kali (10.10.0.2). General
+      # human browsing: LEGIT_PATHS, HUMAN_UAS, 30-120s intervals, 3 threads.
       public_net:
         ipv4_address: 10.10.0.5
+    depends_on:
+      - router
+      - apache
+    restart: unless-stopped
+
+  noise_monitor:
+    build: ./noise_user_sim
+    container_name: noise_monitor
+    cap_add:
+      - NET_ADMIN
+    environment:
+      NOISE_ENABLED: "${NOISE_ENABLED:-0}"
+      NOISE_PERSONA: "monitor"
+      NOISE_TARGET: "router"
+    networks:
+      # Uptime monitor: hits /api/health every ~60s with a single UA.
+      # Distinctive cadence — exactly the kind of regular-interval traffic
+      # a SOC analyst sees from Pingdom/UptimeRobot/etc.
+      public_net:
+        ipv4_address: 10.10.0.6
+    depends_on:
+      - router
+      - apache
+    restart: unless-stopped
+
+  noise_scanner:
+    build: ./noise_user_sim
+    container_name: noise_scanner
+    cap_add:
+      - NET_ADMIN
+    environment:
+      NOISE_ENABLED: "${NOISE_ENABLED:-0}"
+      NOISE_PERSONA: "scanner"
+      NOISE_TARGET: "router"
+    networks:
+      # Internet background scanner: PROBE_PATHS + BOT_UAS, 60-300s intervals.
+      # 404-yielding probes that look suspicious but are NOT the attacker.
+      # Teaches "suspicious surface anomaly != malicious".
+      public_net:
+        ipv4_address: 10.10.0.7
+    depends_on:
+      - router
+      - apache
+    restart: unless-stopped
+
+  noise_mobile:
+    build: ./noise_user_sim
+    container_name: noise_mobile
+    cap_add:
+      - NET_ADMIN
+    environment:
+      NOISE_ENABLED: "${NOISE_ENABLED:-0}"
+      NOISE_PERSONA: "mobile"
+      NOISE_TARGET: "router"
+    networks:
+      # Mobile browsing: same paths as general but mobile UAs and sparse
+      # cadence (300-900s). Teaches that legit cadence varies wildly.
+      public_net:
+        ipv4_address: 10.10.0.8
     depends_on:
       - router
       - apache
