@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Timestamped console logging (UTC ISO-8601, matches the attack-chain output).
+log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
+
 # Cross-zone routes via the router (10.30.0.4 is its internal_net leg):
 #   - 10.10.0.0/24 (External) — reverse shells from this host to kali
 #   - 10.40.0.0/24 (DMZ)      — deploy path to apache (rsync john.stravidis@apache:...)
@@ -34,7 +37,7 @@ chmod 600 /run/user/${JOHN_UID}/ICEauthority
 # connect" warnings.
 mkdir -p /run/dbus
 dbus-daemon --system --fork 2>/dev/null \
-    || echo "[entrypoint] dbus-daemon --system unavailable (non-fatal)"
+    || log "[entrypoint] dbus-daemon --system unavailable (non-fatal)"
 
 # Register a minimal org.freedesktop.login1 stub on the system bus.
 # xfce4-panel's clock plugin (libclock) probes this interface at startup to

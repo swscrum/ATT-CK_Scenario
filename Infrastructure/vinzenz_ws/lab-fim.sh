@@ -37,7 +37,7 @@ for p in "${WATCH_PATHS[@]}"; do
 done
 
 if [ ${#EXISTING[@]} -eq 0 ]; then
-    echo "[lab-fim] no watch paths exist yet, exiting" >&2
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [lab-fim] no watch paths exist yet, exiting" >&2
     exit 0
 fi
 

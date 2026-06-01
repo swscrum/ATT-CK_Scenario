@@ -106,4 +106,8 @@ Results land in `Attack-chain/results/` (bind-mounted, persisted on the host):
 | `ffuf.json` | extension fuzz on `/index<ext>` (JSON output from ffuf `-of json`) |
 | `nikto.txt` | `nikto -Tuning b` |
 
+## Console output & timestamps
+
+Every console line the project emits is prefixed with a UTC ISO-8601 timestamp in the form `[YYYY-MM-DDTHH:MM:SSZ]` so the sequence and timing of events is traceable during a run. This covers the attack-chain modules and orchestrator (`Attack-chain/`) as well as the container start-up scripts under `Infrastructure/`. The format is deliberately the same one used by the per-run ground-truth records (`Attack-chain/results/run-<ISO8601>/chain-<ISO8601>.json`) and the `lab-fim` SIEM watcher, so operator output, the structured JSON, and the blue-team logs all correlate to the second. The orchestrator's decorative banners, section rules, and summary table are intentionally left un-prefixed to keep the layout readable.
+
 

