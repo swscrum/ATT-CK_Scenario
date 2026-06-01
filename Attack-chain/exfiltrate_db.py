@@ -10,7 +10,7 @@ from chainlog import log
 # exfiltrate_db.py — DB Exfiltration from John's Workstation
 # MITRE ATT&CK:
 #   T1552.001 – Credentials In Files   (read ~/.pgpass for DB credentials)
-#   T1213     – Data from Information Repositories (psql dump of patients + session_notes)
+#   T1213     – Data from Information Repositories (psql dump of patients, session_notes + appointments)
 #   T1041     – Exfiltration Over C2 Channel (HTTP POST back to kali)
 # =============================================================================
 
@@ -242,7 +242,7 @@ def _send_to_kali(john_shell, kali_host, port=EXFIL_HTTP_PORT):
 
 def run(john_shell, kali_host=KALI_HOST, db_creds=None):
     """
-    Dump patients + session_notes from the DB and exfiltrate to kali.
+    Dump patients, session_notes, and appointments from the DB and exfiltrate to kali.
 
     Args:
         john_shell (socket): reverse shell as john.stravidis on ubuntu_workstation.
