@@ -76,7 +76,11 @@ STEP_META = {
         "techniques": ["T1552.001", "T1213", "T1041"],
         "color": "red",
     },
-    "cleanup": {"tactic": "operator hygiene", "techniques": [], "color": "green"},
+    "cleanup": {
+        "tactic": "TA0005 · Defense Evasion",
+        "techniques": ["T1070", "T1070.003", "T1070.004"],
+        "color": "green",
+    },
 }
 
 
@@ -295,6 +299,16 @@ def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
     }
 
 
+def _step_cleanup(ctx: Context) -> dict[str, Any]:
+    from defensive_evasion import run as cleanup_run
+
+    cleanup_run(
+        root_shell=ctx.state.get("root_shell"),
+        john_shell=ctx.state.get("john_shell"),
+    )
+    return {}
+
+
 def _teardown_close_socket(key: str) -> Callable[[Context], None]:
     def _close(ctx: Context) -> None:
         sock = ctx.state.get(key)
@@ -340,6 +354,11 @@ CHAIN_BASIC: list[Step] = [
         "exfiltrate",
         _step_exfiltrate,
         requires=("john_shell",),
+    ),
+    Step(
+        "cleanup",
+        _step_cleanup,
+        optional=True,
     ),
 ]
 
@@ -443,6 +462,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             _print_step_header(step, i, len(selected))
             started = _iso_utc()
             t0 = time.perf_counter()
+            delta = {}
             ok = True
             err = ""
             try:
