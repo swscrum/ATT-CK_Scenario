@@ -68,7 +68,7 @@ STEP_META = {
     },
     "lateral": {
         "tactic": "TA0008 · Lateral Movement",
-        "techniques": ["T1021.004", "T1078"],
+        "techniques": ["T1110", "T1110.001", "T1552.001", "T1021.004", "T1078"],
         "color": "magenta",
     },
     "exfiltrate": {
@@ -268,14 +268,21 @@ def _step_creds(ctx: Context) -> dict[str, Any]:
 def _step_lateral(ctx: Context) -> dict[str, Any]:
     from lateral_movement import run as lateral_run
 
-    john_shell = lateral_run(
+    result = lateral_run(
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
         workstation_ip=ctx.state.get("john_ip"),
+        other_targets=ctx.state.get("creds_scan", []),
+        john_ip=ctx.state.get("john_ip"),
     )
-    if john_shell is None:
+    if result["john_shell"] is None:
         raise RuntimeError("lateral movement returned no john.stravidis shell")
-    return {"john_shell": john_shell}
+    return {
+        "john_shell": result["john_shell"],
+        "failed_lateral_targets": result["failed_lateral_targets"],
+        "failed_lateral_key_failures": result["failed_lateral_key_failures"],
+        "failed_lateral_password_failures": result["failed_lateral_password_failures"],
+    }
 
 
 def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
