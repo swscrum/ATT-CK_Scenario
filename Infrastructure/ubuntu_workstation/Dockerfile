@@ -72,7 +72,7 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
-    && chmod 600 /home/john.stravidis/.pgpass \
+    && chmod 600 /home/john.stravidis/projects/waystar-connect/.pgpass \
     && chmod 644 /home/john.stravidis/.ssh/id_ed25519.pub \
                     /home/john.stravidis/.ssh/config \
                     /home/john.stravidis/.ssh/known_hosts \
