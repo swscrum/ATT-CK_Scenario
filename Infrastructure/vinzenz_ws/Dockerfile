@@ -35,6 +35,7 @@ RUN apt-get update \
         tmux \
         vim \
         htop \
+        python3 \
     && rm -rf /var/lib/apt/lists/* \
     # Reclaim UID 1000 if the base image ships an `ubuntu` user.
     && if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
@@ -71,6 +72,14 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
 COPY vinzenz_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
 COPY vinzenz_ws/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh
+
+# Workstation activity simulator — runs as vinzenz.fedora from the entrypoint
+# when ACTIVITY_ENABLED=1. CRUCIAL persona: Vinzenz SSHes out to apache,
+# john_ws, luke_ws during normal maintenance, generating the baseline of
+# "Accepted publickey for vinzenz.fedora" entries on those hosts that the
+# attacker's stolen-key activity (advanced chain) needs to hide in.
+COPY lab-activity-sim/activity_sim.py /usr/local/bin/activity_sim.py
+RUN chmod +x /usr/local/bin/activity_sim.py
 
 COPY vinzenz_ws/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

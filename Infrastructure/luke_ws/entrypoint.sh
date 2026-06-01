@@ -29,5 +29,19 @@ chmod 0644 /var/log/persist/lab-fim.log
 nohup /usr/local/bin/lab-fim.sh >> /var/log/persist/lab-fim.log 2>&1 &
 log "[entrypoint] lab-fim watcher PID $!"
 
+# Activity simulator — runs as luke.smith (the daily-user persona) when
+# ACTIVITY_ENABLED=1 (set by tools/run.sh in --pacing realistic). Generates
+# the legitimate-baseline of psql queries to db-internal + vim/ls on
+# ~/Documents/notes so the attacker's eventual exfil queries have history
+# to hide in. Runs in background so sshd takes PID 1.
+nohup runuser -u luke.smith -- \
+    env ACTIVITY_ENABLED="${ACTIVITY_ENABLED:-0}" \
+        ACTIVITY_PERSONA=clinical \
+        ACTIVITY_HOME=/home/luke.smith \
+        HOME=/home/luke.smith \
+    python3 -u /usr/local/bin/activity_sim.py \
+        >> /var/log/persist/activity_sim.log 2>&1 &
+log "[entrypoint] activity_sim (clinical) PID $!"
+
 # sshd in the foreground — keeps PID 1 alive without needing wait/tail tricks.
 exec /usr/sbin/sshd -D

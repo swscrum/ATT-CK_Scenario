@@ -63,12 +63,15 @@ for arg in "$@"; do
     prev="$arg"
 done
 
-# Wire NOISE_ENABLED based on --pacing so noise_user_sim only generates
-# traffic in realistic mode. Exported so `docker compose up -d` picks it up
-# via the ${NOISE_ENABLED:-0} substitution in docker-compose.yml.
+# Wire NOISE_ENABLED + ACTIVITY_ENABLED based on --pacing so the noise
+# containers AND the per-workstation activity simulators only generate
+# baseline traffic in realistic mode. Exported so `docker compose up -d`
+# picks both up via the ${VAR:-0} substitutions in docker-compose.yml.
+# Same axis intentionally — there's no realistic scenario where you want
+# one but not the other.
 case "$PACING" in
-    realistic) export NOISE_ENABLED=1 ;;
-    *)         export NOISE_ENABLED=0 ;;
+    realistic) export NOISE_ENABLED=1 ACTIVITY_ENABLED=1 ;;
+    *)         export NOISE_ENABLED=0 ACTIVITY_ENABLED=0 ;;
 esac
 
 # Snapshot destination for this run's logs.

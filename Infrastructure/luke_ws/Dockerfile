@@ -28,6 +28,8 @@ RUN apt-get update \
         inotify-tools \
         postgresql-client \
         sqlite3 \
+        python3 \
+        vim \
     && rm -rf /var/lib/apt/lists/* \
     # Reclaim UID 1000 if the base image ships an `ubuntu` user.
     && if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
@@ -80,6 +82,13 @@ RUN mkdir -p /home/luke.smith/.local/share/waystar-psyc \
 COPY luke_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
 COPY luke_ws/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh
+
+# Workstation activity simulator — runs as luke.smith from the entrypoint
+# when ACTIVITY_ENABLED=1. Generates the clinical-user baseline (psql to
+# db-internal, vim on session notes) so the attacker's eventual exfil
+# queries have a non-empty postgres history to hide in.
+COPY lab-activity-sim/activity_sim.py /usr/local/bin/activity_sim.py
+RUN chmod +x /usr/local/bin/activity_sim.py
 
 COPY luke_ws/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

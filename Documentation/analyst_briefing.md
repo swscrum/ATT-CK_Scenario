@@ -114,6 +114,32 @@ Hint that's fair to give Tier 1: the bot-looking probes are NOT the
 attacker. The scanner probes are real-internet-noise; the attacker's CGI
 traversal is something else entirely.
 
+### Workstation-side baseline
+
+The three internal workstations are **not idle**. Each runs a small daily-
+user activity loop while the lab is in `--pacing realistic`:
+
+- **John's workstation** — developer activity: `git status`, `npm` commands,
+  occasional `sudo apt update`, `vim` edits on `~/projects/waystar-connect/`.
+  Writes to `~/.bash_history` and `logs/workstation/auth.log` (sudo).
+- **Luke's workstation** — clinical activity: `psql` queries to
+  `db-internal` against his patient list, `vim` on `~/Documents/notes/`.
+  Writes to `~/.bash_history`, `logs/luke_ws/auth.log`, AND
+  `logs/db-internal/postgresql-*.log` (legitimate read-only queries from
+  `waystar-readonly`).
+- **Vinzenz's workstation** — sysadmin activity: SSHes out to apache,
+  John's, Luke's boxes for routine maintenance (`uptime`, `df -h`),
+  occasional sudo. Writes auth.log entries on his OWN box AND on the
+  remote hosts (`Accepted publickey for vinzenz.fedora` from 10.30.0.8).
+
+This means **finding "a sudo from john.stravidis" or "a vinzenz.fedora SSH
+to apache" is NOT the attacker** — those happen routinely. The attacker
+distinguishes themselves by: timing (off-hours), command sequences (recon
++ exploit + lateral in minutes), or by performing actions inconsistent
+with the user's normal pattern (e.g., vinzenz.fedora SSHing to a host he
+doesn't normally touch, OR doing it twice in 30 seconds when he usually
+spaces sessions 10+ minutes apart).
+
 ---
 
 ## Deliverable

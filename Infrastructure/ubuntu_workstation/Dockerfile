@@ -106,6 +106,13 @@ COPY ubuntu_workstation/lab-fim.sh          /usr/local/bin/lab-fim.sh
 COPY ubuntu_workstation/01-lab-perms.conf   /etc/rsyslog.d/01-lab-perms.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh
 
+# Workstation activity simulator — runs as john.stravidis from the entrypoint
+# when ACTIVITY_ENABLED=1 (set by tools/run.sh in --pacing realistic). Without
+# it, john's auth.log + bash history + lab-fim feed stay flat-zero except for
+# the attack chain itself, which makes detection trivial.
+COPY lab-activity-sim/activity_sim.py /usr/local/bin/activity_sim.py
+RUN chmod +x /usr/local/bin/activity_sim.py
+
 # ============================================================================
 #  vinzenz.fedora — sysadmin's named account on this host.
 #  Vinzenz SSHes from his own workstation (10.30.0.8) using the shared

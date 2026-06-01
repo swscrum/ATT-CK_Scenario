@@ -12,6 +12,7 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
         rsync \
         python3 python3-psycopg2 \
         nmap sshpass \
+        rsyslog \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
@@ -119,6 +120,12 @@ RUN useradd -m -s /bin/bash luke.smith \
 COPY apache/start.sh   /usr/local/bin/start.sh
 COPY apache/lab-fim.sh /usr/local/bin/lab-fim.sh
 RUN chmod +x /usr/local/bin/start.sh /usr/local/bin/lab-fim.sh
+
+# Mirror auth.log + syslog into /usr/local/apache2/logs/ (the bind-mounted
+# dir) so sshd auth events from luke.smith and vinzenz.fedora baseline
+# sessions reach the SIEM. Without this, apache's auth.log only exists
+# inside the container's writable layer and disappears on teardown.
+COPY apache/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
 
 CMD ["/usr/local/bin/start.sh"]
 

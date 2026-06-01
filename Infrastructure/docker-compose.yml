@@ -69,6 +69,11 @@ services:
     container_name: ubuntu_workstation
     cap_add:
       - NET_ADMIN
+    environment:
+      # Drives activity_sim.py inside this container. Set to "1" by
+      # tools/run.sh when --pacing realistic; "0" in fast mode so CI
+      # doesn't generate baseline noise that's never read.
+      ACTIVITY_ENABLED: "${ACTIVITY_ENABLED:-0}"
     ports:
       - "5901:5901"
     volumes:
@@ -96,6 +101,8 @@ services:
     container_name: luke_ws
     cap_add:
       - NET_ADMIN
+    environment:
+      ACTIVITY_ENABLED: "${ACTIVITY_ENABLED:-0}"
     volumes:
       # Mirror of the workstation logging pattern. rsyslog inside the
       # container writes /var/log/syslog + /var/log/auth.log as usual;
@@ -120,6 +127,8 @@ services:
     container_name: vinzenz_ws
     cap_add:
       - NET_ADMIN
+    environment:
+      ACTIVITY_ENABLED: "${ACTIVITY_ENABLED:-0}"
     volumes:
       - ./logs/vinzenz_ws:/var/log/persist
     networks:

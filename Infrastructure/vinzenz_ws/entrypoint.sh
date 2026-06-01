@@ -29,5 +29,21 @@ chmod 0644 /var/log/persist/lab-fim.log
 nohup /usr/local/bin/lab-fim.sh >> /var/log/persist/lab-fim.log 2>&1 &
 log "[entrypoint] lab-fim watcher PID $!"
 
+# Activity simulator — runs as vinzenz.fedora (the daily-user persona) when
+# ACTIVITY_ENABLED=1 (set by tools/run.sh in --pacing realistic). This is
+# the BIGGEST realism win: Vinzenz's ssh-out commands generate the baseline
+# of "Accepted publickey for vinzenz.fedora" entries on apache, john_ws,
+# luke_ws — so the attacker's eventual stolen-key SSH activity (advanced
+# chain) has a non-zero baseline to hide in, instead of being the ONLY
+# vinzenz.fedora session anywhere on the fleet.
+nohup runuser -u vinzenz.fedora -- \
+    env ACTIVITY_ENABLED="${ACTIVITY_ENABLED:-0}" \
+        ACTIVITY_PERSONA=sysadmin \
+        ACTIVITY_HOME=/home/vinzenz.fedora \
+        HOME=/home/vinzenz.fedora \
+    python3 -u /usr/local/bin/activity_sim.py \
+        >> /var/log/persist/activity_sim.log 2>&1 &
+log "[entrypoint] activity_sim (sysadmin) PID $!"
+
 # sshd in the foreground — keeps PID 1 alive.
 exec /usr/sbin/sshd -D

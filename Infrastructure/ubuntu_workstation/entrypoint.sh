@@ -59,6 +59,14 @@ disown
 # currently uses inotify for FIM.
 chown root:syslog /var/log
 chmod 0775 /var/log
+# Also reset ownership on existing log FILES inside /var/log — bind mounts
+# preserve old ownership across container restarts, and rsyslog (running as
+# user `syslog`) silently fails to append to files it can't open for write.
+# Without this, auth.log / syslog stay frozen at whatever the last run wrote
+# and no new sshd events are recorded. The `|| true` keeps existing files
+# we don't recognise alone.
+chown -R syslog:adm /var/log/*.log /var/log/syslog 2>/dev/null || true
+chmod 0640 /var/log/*.log /var/log/syslog 2>/dev/null || true
 mkdir -p /var/log/audit
 chown root:adm /var/log/audit
 chmod 0750 /var/log/audit
@@ -79,6 +87,21 @@ rsyslogd \
 touch /var/log/lab-fim.log && chmod 0644 /var/log/lab-fim.log
 nohup /usr/local/bin/lab-fim.sh >> /var/log/lab-fim.log 2>&1 &
 echo "[entrypoint] lab-fim watcher PID $!"
+
+# Activity simulator — runs as john.stravidis (the daily-user persona) when
+# ACTIVITY_ENABLED=1 (set by tools/run.sh in --pacing realistic). Generates
+# the developer baseline (git, npm, vim, occasional sudo) so the attacker's
+# post-foothold enumeration walk has actual prior shell history to land in,
+# instead of an empty ~/.bash_history that itself screams "this account
+# isn't used."
+nohup runuser -u john.stravidis -- \
+    env ACTIVITY_ENABLED="${ACTIVITY_ENABLED:-0}" \
+        ACTIVITY_PERSONA=developer \
+        ACTIVITY_HOME=/home/john.stravidis \
+        HOME=/home/john.stravidis \
+    python3 -u /usr/local/bin/activity_sim.py \
+        >> /var/log/activity_sim.log 2>&1 &
+echo "[entrypoint] activity_sim (developer) PID $!"
 
 # Start sshd in the background so the container has a remote shell.
 /usr/sbin/sshd
