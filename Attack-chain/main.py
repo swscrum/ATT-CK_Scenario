@@ -71,6 +71,11 @@ STEP_META = {
         "techniques": ["T1110", "T1110.001", "T1552.001", "T1021.004", "T1078"],
         "color": "magenta",
     },
+    "enumeration_john_ws": {
+        "tactic": "TA0007 · Discovery",
+        "techniques": ["T1082", "T1087.001", "T1016", "T1083", "T1552.001", "T1552.004"],
+        "color": "blue",
+    },
     "exfiltrate": {
         "tactic": "TA0009 · Collection · TA0010 · Exfiltration",
         "techniques": ["T1552.001", "T1213", "T1041"],
@@ -285,6 +290,22 @@ def _step_lateral(ctx: Context) -> dict[str, Any]:
     }
 
 
+def _step_enumeration_john_ws(ctx: Context) -> dict[str, Any]:
+    from enumeration_john_ws import run as enum_run
+
+    result = enum_run(
+        john_shell=ctx.state["john_shell"],
+        kali_host=ctx.kali_host,
+    )
+    return {
+        "db_creds":         result["db_creds"],
+        "ssh_key":          result["ssh_key"],
+        "discovered_hosts": result["discovered_hosts"],
+        "local_dbs":        result["local_dbs"],
+        "credential_files": result["credential_files"],
+    }
+
+
 def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
     from exfiltrate_db import run as exfiltrate_run
 
@@ -342,6 +363,11 @@ CHAIN_BASIC: list[Step] = [
         _step_lateral,
         requires=("root_shell",),  # john_ip optional: used if present, else deploy.log fallback
         teardown=_teardown_close_socket("john_shell"),
+    ),
+    Step(
+        "enumeration_john_ws",
+        _step_enumeration_john_ws,
+        requires=("john_shell",),
     ),
     Step(
         "exfiltrate",

