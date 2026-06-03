@@ -11,6 +11,15 @@ description: |
   In the lab the attacker sends three plausible-but-failing variants before
   the working POST payload (initial_access.py:fire_exploit), so a real chain
   run produces 4 distinct events for this technique within ~1 second.
+
+  TRANSPORT FINGERPRINT: the attacker delivers all four requests over
+  plain HTTP (port 80) even though apache serves HTTPS on :443 as the
+  primary transport. EVERY OTHER client in the lab (noise containers,
+  workstation activity_sim, monitor checks) uses HTTPS — so the URL
+  pattern AND the bare-HTTP transport are *both* anomalies. The matching
+  events land in `access.log` (not `access_ssl.log`); ingesting only the
+  plain-HTTP access log is sufficient to fire the rule, and the absence
+  of any matching `access_ssl.log` entry is itself confirmatory.
 references:
   - https://nvd.nist.gov/vuln/detail/CVE-2021-41773
   - Documentation/mappings.md — row "T1190 (CVE-2021-41773)"

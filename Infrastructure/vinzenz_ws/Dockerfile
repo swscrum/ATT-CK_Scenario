@@ -25,6 +25,7 @@ RUN apt-get update \
         iproute2 \
         iputils-ping \
         ca-certificates \
+        curl \
         rsyslog \
         inotify-tools \
         postgresql-client \
@@ -72,6 +73,11 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
 COPY vinzenz_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
 COPY vinzenz_ws/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh
+
+# Trust the lab internal CA so curl/wget against fake_internet domains
+# (github.com, archive.ubuntu.com, etc.) works WITHOUT -k.
+COPY shared-lab-keys/lab-ca.crt /usr/local/share/ca-certificates/waystar-lab-ca.crt
+RUN update-ca-certificates >/dev/null 2>&1
 
 # Workstation activity simulator — runs as vinzenz.fedora from the entrypoint
 # when ACTIVITY_ENABLED=1. CRUCIAL persona: Vinzenz SSHes out to apache,

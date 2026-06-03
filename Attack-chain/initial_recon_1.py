@@ -94,10 +94,15 @@ def phase_gobuster(target: str, results_dir: Path, wordlist: Path,
         out.write_text("")
         return out
     profile = SCAN_PROFILES.get(pacing, SCAN_PROFILES[DEFAULT_PACING])
+    # Apache now redirects :80 → :443, so every URL on :80 returns 301.
+    # gobuster's wildcard-detection bails out unless we either go directly
+    # to :443 (with -k to ignore self-signed) or tell it to exclude 301.
+    # Hitting :443 is more realistic for what a real recon would do.
     _run(
         [
             "gobuster", "dir",
-            "-u", f"http://{target}",
+            "-u", f"https://{target}",
+            "-k",                      # accept self-signed cert
             "-w", str(wordlist),
             "-o", str(out),
             "-q",
@@ -114,11 +119,13 @@ def phase_ffuf(target: str, results_dir: Path, *, pacing: str = DEFAULT_PACING) 
     ext_file.write_text("\n".join(EXT_LIST) + "\n")
     profile = SCAN_PROFILES.get(pacing, SCAN_PROFILES[DEFAULT_PACING])
     # ffuf can exit non-zero when no matches are found — don't make it fatal.
+    # Hit :443 directly so ffuf doesn't trip on the :80 → :443 redirect.
     _run(
         [
             "ffuf",
             "-w", f"{ext_file}:FUZZ",
-            "-u", f"http://{target}/indexFUZZ",
+            "-u", f"https://{target}/indexFUZZ",
+            "-k",                      # accept self-signed cert
             "-o", str(out),
             "-of", "json",
             "-s",
@@ -141,7 +148,8 @@ def phase_nikto(target: str, results_dir: Path, *, pacing: str = DEFAULT_PACING)
     _run(
         [
             "nikto",
-            "-h", f"http://{target}",
+            "-h", f"https://{target}",
+            "-ssl",                    # explicit TLS (some nikto versions need this even with https://)
             "-Tuning", "b",
             "-Format", "txt",
             "-o", str(results_dir / "nikto"),

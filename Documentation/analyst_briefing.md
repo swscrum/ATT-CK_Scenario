@@ -116,8 +116,23 @@ traversal is something else entirely.
 
 ### Workstation-side baseline
 
-The three internal workstations are **not idle**. Each runs a small daily-
-user activity loop while the lab is in `--pacing realistic`:
+The three internal workstations are **not idle**. They have outbound
+network activity in two directions, both routed through the lab firewall
+where the router NFLOG captures each new flow:
+
+- **To the DMZ (apache)** — booking-site checks, deploy verifications,
+  internal API hits. All on HTTPS (port 443).
+- **To the simulated "internet"** — workstations resolve real-looking
+  domains (`github.com`, `archive.ubuntu.com`, `registry.npmjs.org`,
+  `slack.com`, `time.cloudflare.com`, `intranet.waystar.local`) via the
+  lab DNS server (`lab_dns`, 10.30.0.10). Every lookup is logged in
+  `logs/lab_dns/stdout.log`. The DNS replies all point at one
+  `fake_internet` container (10.10.0.11) which serves realistic-looking
+  responses per domain. Outbound flows from workstations to 10.10.0.11
+  appear in the router NFLOG tagged `FW-INT-OUT-{DNS,HTTPS,HTTP}`.
+
+Each workstation also runs a small daily-user activity loop while the
+lab is in `--pacing realistic`:
 
 - **John's workstation** — developer activity: `git status`, `npm` commands,
   occasional `sudo apt update`, `vim` edits on `~/projects/waystar-connect/`.
@@ -214,7 +229,7 @@ Per-technique detection signal pointers. This is the subset of
 
 | Technique | Where to look | What to look for |
 |---|---|---|
-| **T1190** Exploit Public-Facing App (CVE-2021-41773) | `logs/apache/access.log` | `POST /cgi-bin/.%32%65/.../bin/sh` — double-URL-encoded path traversal |
+| **T1190** Exploit Public-Facing App (CVE-2021-41773) | `logs/apache/access.log` (plain HTTP, port 80) | Double-URL-encoded path traversal targeting `/cgi-bin/`. **The attacker uses plain HTTP — everyone else (noise containers, workstation curls, activity_sim) hits apache over HTTPS on :443.** Plain HTTP requests to `/cgi-bin/` are the high-signal anomaly in a TLS-everywhere baseline. NFLOG shows :80 flow from `SRC=10.10.0.2` (kali) to `DST=10.40.0.2` (apache); apache's `access.log` shows the URL pattern uniquely |
 | **T1059.004** Reverse Shell | `logs/router/ulog-iptables.log` | `FW-NEW: SRC=10.40.0.2 DST=10.10.0.2 DPT=4444` — apache calling back to kali |
 | **T1053.003** Cron Tampering | `logs/apache/lab-fim.log` | `tag=lab_fim path=/opt/cleanup.sh event=MODIFY` |
 | **T1552.001** Credentials in Files | `logs/apache/lab-fim.log` + bash history | `cat /home/john.stravidis/.env` reads |
@@ -222,6 +237,8 @@ Per-technique detection signal pointers. This is the subset of
 | **T1110.004** Credential Stuffing | `logs/luke_ws/auth.log`, `logs/vinzenz_ws/auth.log`, `logs/workstation/auth.log` | Same source IP, one password per host within seconds; failures on Luke/Vinzenz, success on John |
 | **T1021.004** SSH Lateral | `logs/workstation/auth.log` + `logs/router/ulog-iptables.log` | `Accepted publickey for john.stravidis` from apache; `FW-NEW: SRC=10.40.0.2 DST=10.30.0.5 DPT=22` |
 | **T1078** Valid Accounts | `logs/workstation/auth.log` | John's account used from a host he doesn't normally connect from |
+| **(baseline)** T1071.001 Web Outbound (Internal→DMZ) | `logs/router/ulog-iptables.log` + `logs/apache/access_ssl.log` | Internal→DMZ HTTPS is **normal traffic** — Luke checks the booking site, John verifies deploys, Vinzenz monitors server-status. Flows from 10.30.0.5/7/8 → 10.40.0.2 :443 are baseline, NOT the attacker. Use this as filter context, not signal |
+| **(baseline)** T1071.001 Web Outbound (Internal→External) | `logs/router/ulog-iptables.log` (FW-INT-OUT-* prefixes) + `logs/lab_dns/stdout.log` + `logs/fake_internet/access.log` | Workstations also browse the simulated "internet" — github.com, registry.npmjs.org, archive.ubuntu.com, slack.com, intranet.waystar.local, etc. All resolve via lab_dns to fake_internet (10.10.0.11). `FW-INT-OUT-DNS`, `FW-INT-OUT-HTTPS`, `FW-INT-OUT-HTTP` NFLOG prefixes mark these flows. **Attacker C2 from a workstation would ALSO carry one of those prefixes — the pivot is the DESTINATION DOMAIN (lab_dns log) or the absence of any DNS lookup (raw-IP outbound, also anomalous).** See Sigma rule `dns_unfamiliar_domain.yml` for the canonical baseline-vs-anomaly query |
 
 ---
 

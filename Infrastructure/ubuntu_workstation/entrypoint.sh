@@ -57,6 +57,21 @@ disown
 # Ubuntu root:syslog ownership before rsyslog tries to write. /var/log/audit
 # is set up in advance for any future auditd plugin even though the lab
 # currently uses inotify for FIM.
+# Pin DNS resolution to lab_dns (10.30.0.10) instead of Docker's embedded
+# resolver. Why: workstation activity_sim hits "internet" domains like
+# github.com / archive.ubuntu.com / registry.npmjs.org — these must
+# resolve through the lab_dns hostfile to land at fake_internet (and to
+# generate a logged DNS query the SOC can ingest). Docker's embedded DNS
+# wouldn't know about those domains.
+# Tradeoff: workstation can no longer resolve OTHER container names
+# (apache, db-internal, kali, router) via Docker DNS — those entries
+# are mirrored into lab_dns's hostfile (see Infrastructure/lab_dns/
+# dnsmasq.hosts) so service-name resolution still works.
+cat > /etc/resolv.conf <<EOF
+nameserver 10.30.0.10
+options edns0 timeout:2 attempts:2
+EOF
+
 chown root:syslog /var/log
 chmod 0775 /var/log
 # Also reset ownership on existing log FILES inside /var/log — bind mounts

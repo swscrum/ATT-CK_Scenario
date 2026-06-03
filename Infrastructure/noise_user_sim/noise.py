@@ -58,8 +58,20 @@ import signal
 import sys
 import threading
 import time
+import ssl
 import urllib.error
 import urllib.request
+
+
+# Self-signed cert acceptance — apache's lab cert (CN=apache, SAN=DNS:apache,
+# IP:10.40.0.2) won't validate against the system trust store. Real noise
+# sources in the wild would either trust a CA-signed cert or run with
+# certificate-skipping curl/wget; we model the latter (the practical reality
+# for many monitor/scanner clients hitting public sites with weird CAs).
+# One context shared across all workers — cheaper than building per-request.
+_TLS_CTX = ssl.create_default_context()
+_TLS_CTX.check_hostname = False
+_TLS_CTX.verify_mode = ssl.CERT_NONE
 
 
 # ─────────────────────────────────────────────────────────── Paths
@@ -193,13 +205,13 @@ def _worker(stop_event: threading.Event, target: str,
             return
         path = random.choice(paths)
         ua = random.choice(uas)
-        url = f"http://{target}{path}"
+        url = f"https://{target}{path}"
         req = urllib.request.Request(
             url,
             headers={"User-Agent": ua, "Accept": "text/html,*/*;q=0.8"},
         )
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=5, context=_TLS_CTX) as resp:
                 resp.read(64)
                 log.debug("GET %s → %d", url, resp.status)
         except urllib.error.HTTPError as exc:

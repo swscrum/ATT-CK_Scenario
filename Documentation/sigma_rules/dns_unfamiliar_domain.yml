@@ -1,0 +1,74 @@
+title: T1071.001 — Workstation DNS Query for Unfamiliar Domain
+id: 5fc6181c-da41-4f55-ee66-dns-unfamiliar-01
+status: experimental
+description: |
+  Detects a DNS query from any internal workstation to a domain that
+  ISN'T on the baseline-allowed list. Source: lab_dns query log
+  (dnsmasq's stdout, mirrored into the run snapshot at
+  ``logs/run-<ts>/lab_dns/stdout.log``).
+
+  In a normal Waystar workstation day, the only DNS lookups the lab_dns
+  resolver serves are for the baseline domains John, Luke, and Vinzenz's
+  activity simulators routinely visit (apt mirrors, GitHub, npm registry,
+  Slack, the intranet, connectivity-check). Anything ELSE — an attacker's
+  C2 callback domain, a DGA-style burst of unique-name lookups, an
+  exfiltration domain — should be a rare, high-signal event worth
+  flagging.
+
+  Because the lab's dnsmasq has ``no-resolv`` (no upstream forwarder),
+  any non-baseline query NXDOMAINs at lab_dns — but the QUERY is still
+  logged. This rule catches the LOOKUP itself, regardless of whether
+  the attacker also gets a successful resolution.
+
+  Complement detection (NOT in this rule, but worth knowing): if the
+  attacker skips DNS entirely and connects to a raw IP, lab_dns shows
+  no query, but the router NFLOG still shows the FW-INT-OUT-* flow —
+  a workstation flow without a preceding DNS query is itself anomalous.
+references:
+  - Documentation/mappings.md — new T1071.001 row
+  - Infrastructure/lab_dns/dnsmasq.conf — log-queries setting
+  - Infrastructure/lab_dns/dnsmasq.hosts — the baseline-allowed list
+author: Waystar lab
+date: 2026-06-03
+tags:
+  - attack.command_and_control
+  - attack.t1071.001
+  - attack.t1568.002   # DGA-style burst variant
+logsource:
+  category: dns
+  product: dnsmasq
+  service: lab_dns
+detection:
+  # dnsmasq's log format (stdout via log-facility=- + log-queries):
+  #   query[A] github.com from 10.30.0.7
+  query_log_line:
+    Message|contains: 'query['
+  # Allowlist — every domain dnsmasq.hosts knows about. Anything else
+  # is suspicious. Keep this list in sync with dnsmasq.hosts.
+  baseline_domains:
+    Message|contains:
+      - 'archive.ubuntu.com'
+      - 'security.ubuntu.com'
+      - 'registry.npmjs.org'
+      - 'github.com'
+      - 'api.github.com'
+      - 'raw.githubusercontent.com'
+      - 'slack.com'
+      - 'api.slack.com'
+      - 'time.cloudflare.com'
+      - 'connectivity-check.ubuntu.com'
+      - 'intranet.waystar.local'
+      - 'apache'
+      - 'db-internal'
+      - 'router'
+      - 'router-internal'
+      - 'router-dmz'
+      - 'kali'
+  condition: query_log_line and not baseline_domains
+falsepositives:
+  - "A new baseline domain that hasn't been added to dnsmasq.hosts yet. Fix is to add it to the baseline_domains list above (and to dnsmasq.hosts) BEFORE running the chain."
+  - "Reverse-DNS queries (PTR lookups for in-addr.arpa) that dnsmasq processes locally. Not actual outbound; can be ignored. The query[A] filter should already exclude these because PTR queries use query[PTR] (uppercase). If false-positives appear, tighten the Message contains filter to require 'query[A]' AND 'from 10.30.0.' to scope to workstation A-record lookups only."
+level: high
+fields:
+  - timestamp
+  - Message

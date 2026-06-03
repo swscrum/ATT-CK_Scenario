@@ -43,6 +43,7 @@ services:
     # goes through the router's iptables DNAT as intended.
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
@@ -176,6 +177,55 @@ services:
     networks:
       internal_net:
         ipv4_address: 10.30.0.6
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────
+  # lab_dns — workstation DNS resolver. Replaces Docker's embedded DNS for
+  # the three internal workstations so their lookups for fake "internet"
+  # domains (github.com, archive.ubuntu.com, etc.) resolve to fake_internet,
+  # AND so every query gets logged. Dual-homed on internal_net + public_net.
+  # See Infrastructure/lab_dns/dnsmasq.hosts for the canonical resolution
+  # table.
+  # ──────────────────────────────────────────────────────────────────────
+
+  lab_dns:
+    build: ./lab_dns
+    container_name: lab_dns
+    cap_add:
+      - NET_ADMIN
+    networks:
+      internal_net:
+        ipv4_address: 10.30.0.10
+      public_net:
+        ipv4_address: 10.10.0.10
+    depends_on:
+      - router
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────
+  # fake_internet — single-IP simulation of "the internet" for workstation
+  # outbound traffic. Routes by Host header to return realistic shapes per
+  # "domain" (github API JSON, npm registry JSON, apt InRelease text, etc).
+  # All domains terminate here via lab_dns. Cert signed by lab CA so
+  # workstation curl/wget succeeds without -k.
+  # ──────────────────────────────────────────────────────────────────────
+
+  fake_internet:
+    build:
+      context: .
+      dockerfile: fake_internet/Dockerfile
+    container_name: fake_internet
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      # Bind nginx logs to host so the SIEM can see workstation outbound
+      # request shapes (host header, path, status, client IP, UA).
+      - ./logs/fake_internet:/var/log/nginx
+    networks:
+      public_net:
+        ipv4_address: 10.10.0.11
+    depends_on:
+      - router
     restart: unless-stopped
 
   # ──────────────────────────────────────────────────────────────────────

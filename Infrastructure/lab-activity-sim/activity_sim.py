@@ -196,6 +196,17 @@ PERSONAS: dict[str, dict] = {
             # vim — touches the file's mtime; lab-fim picks this up.
             ("vim ~/projects/waystar-connect/{src_file}",
              "touch ~/projects/waystar-connect/{src_file} 2>/dev/null || true"),
+            # HTTPS to apache — John checks his own deploys lands. `-k`
+            # because apache uses a self-signed lab cert; in real
+            # production John's workstation would have the CA in its
+            # trust store. Generates router NFLOG (SRC=10.30.0.5 →
+            # 10.40.0.2 :443) + apache access_ssl.log entries.
+            ("curl -ks https://apache/ | head",
+             "curl -ks --max-time 5 https://apache/ >/dev/null 2>&1 || true"),
+            ("curl -ksI https://apache/",
+             "curl -ksI --max-time 5 https://apache/ >/dev/null 2>&1 || true"),
+            ("curl -ks https://apache/api/version",
+             "curl -ks --max-time 5 https://apache/api/version >/dev/null 2>&1 || true"),
             # system / shell
             ("less ~/.bashrc",
              "cat ~/.bashrc >/dev/null 2>&1"),
@@ -214,6 +225,33 @@ PERSONAS: dict[str, dict] = {
              "sudo -n apt update >/dev/null 2>&1 || true"),
             ("sudo apt list --upgradable",
              "sudo -n apt list --upgradable >/dev/null 2>&1 || true"),
+            # Outbound HTTPS — workstation→fake_internet via lab_dns.
+            # Generates the Internal→External baseline the attacker's
+            # C2 callback would otherwise stand alone against. Each curl
+            # produces (a) a lab_dns query log entry and (b) a router
+            # NFLOG FW-INT-OUT-HTTPS flow.
+            ("curl -s https://registry.npmjs.org/express",
+             "curl -s --max-time 5 https://registry.npmjs.org/express "
+             ">/dev/null 2>&1 || true"),
+            ("curl -s https://api.github.com/repos/waystar/connect",
+             "curl -s --max-time 5 https://api.github.com/repos/waystar/connect "
+             ">/dev/null 2>&1 || true"),
+            ("curl -s https://api.github.com/repos/waystar/connect/commits | head -20",
+             "curl -s --max-time 5 https://api.github.com/repos/waystar/connect/commits "
+             "2>/dev/null | head -20 >/dev/null"),
+            ("curl -sI https://github.com/waystar/connect",
+             "curl -sI --max-time 5 https://github.com/waystar/connect "
+             ">/dev/null 2>&1 || true"),
+            ("curl -s https://raw.githubusercontent.com/waystar/connect/main/README.md",
+             "curl -s --max-time 5 "
+             "https://raw.githubusercontent.com/waystar/connect/main/README.md "
+             ">/dev/null 2>&1 || true"),
+            # `apt update` actually goes to archive.ubuntu.com over plain HTTP
+            # (apt's design — package signing is at the metadata level).
+            # Generates router FW-INT-OUT-HTTP flow + lab_dns A query.
+            ("curl -sI http://archive.ubuntu.com/ubuntu/dists/jammy/InRelease",
+             "curl -sI --max-time 5 http://archive.ubuntu.com/ubuntu/dists/jammy/InRelease "
+             ">/dev/null 2>&1 || true"),
         ],
     },
     # ───── luke.smith @ luke_ws ─────
@@ -297,6 +335,16 @@ PERSONAS: dict[str, dict] = {
              "cat ~/Documents/notes/{note_date}.md >/dev/null 2>&1 || true"),
             ("head -20 ~/Documents/notes/{note_date}.md",
              "head -20 ~/Documents/notes/{note_date}.md >/dev/null 2>&1 || true"),
+            # HTTPS to apache — Luke checks the booking site he refers
+            # patients to (he's a Waystar employee using his own
+            # company's product). Generates router NFLOG
+            # (SRC=10.30.0.7 → 10.40.0.2 :443) + apache access_ssl.log.
+            ("curl -ks https://apache/ | head",
+             "curl -ks --max-time 5 https://apache/ >/dev/null 2>&1 || true"),
+            ("curl -ks https://apache/booking",
+             "curl -ks --max-time 5 https://apache/booking >/dev/null 2>&1 || true"),
+            ("curl -ksI https://apache/",
+             "curl -ksI --max-time 5 https://apache/ >/dev/null 2>&1 || true"),
             # Local file inspection (Luke might read his own creds file).
             ("cat ~/.pgpass",
              "cat ~/.pgpass >/dev/null 2>&1"),
@@ -309,6 +357,25 @@ PERSONAS: dict[str, dict] = {
              "df -h >/dev/null 2>&1"),
             ("date",
              "date >/dev/null 2>&1"),
+            # Outbound HTTPS — Luke checks corporate Slack + corporate
+            # intranet. Each generates lab_dns A query + router NFLOG
+            # FW-INT-OUT-HTTPS flow. intranet.waystar.local resolves to
+            # apache (DMZ), so it also stresses the internal-to-DMZ TLS
+            # path; slack.com / connectivity-check resolve to fake_internet.
+            ("curl -s https://intranet.waystar.local/",
+             "curl -s --max-time 5 https://intranet.waystar.local/ "
+             ">/dev/null 2>&1 || true"),
+            ("curl -sI https://slack.com/api/auth.test",
+             "curl -sI --max-time 5 https://slack.com/api/auth.test "
+             ">/dev/null 2>&1 || true"),
+            ("curl -s https://api.slack.com/api/conversations.list",
+             "curl -s --max-time 5 https://api.slack.com/api/conversations.list "
+             ">/dev/null 2>&1 || true"),
+            # Connectivity check — NetworkManager fires this every few min
+            # on a real Ubuntu desktop. Cheap, single 204, fingerprintable.
+            ("curl -sI https://connectivity-check.ubuntu.com/",
+             "curl -sI --max-time 5 https://connectivity-check.ubuntu.com/ "
+             ">/dev/null 2>&1 || true"),
         ],
     },
     # ───── vinzenz.fedora @ vinzenz_ws ─────
@@ -404,6 +471,46 @@ PERSONAS: dict[str, dict] = {
             ("rsync -av luke:/var/log/persist/auth.log /tmp/ 2>/dev/null",
              "rsync -av -e 'ssh -o BatchMode=yes' luke:/var/log/persist/auth.log "
              "/tmp/ >/dev/null 2>&1 || true"),
+            # HTTPS to apache — Vinzenz monitors his own infra. Hits the
+            # status page apache could expose (likely 404 in our config but
+            # the request still generates baseline logs) + the homepage to
+            # verify it responds. Router NFLOG SRC=10.30.0.8 → 10.40.0.2
+            # :443 + apache access_ssl.log.
+            ("curl -ks https://apache/server-status",
+             "curl -ks --max-time 5 https://apache/server-status >/dev/null 2>&1 || true"),
+            ("curl -ksI https://apache/",
+             "curl -ksI --max-time 5 https://apache/ >/dev/null 2>&1 || true"),
+            ("curl -ks https://apache/ -o /dev/null -w '%{http_code}\\n'",
+             "curl -ks --max-time 5 https://apache/ -o /dev/null -w '%{http_code}' "
+             ">/dev/null 2>&1 || true"),
+            # Outbound HTTPS — Vinzenz's sysadmin checks against the
+            # public-feeling endpoints. Each fires (a) lab_dns A query +
+            # (b) router NFLOG FW-INT-OUT-HTTPS flow. Targets DIFFERENT
+            # domains than John (registry.npmjs.org / github) vs Luke
+            # (slack / intranet) so the per-workstation domain footprint
+            # is itself a fingerprint.
+            ("curl -s https://archive.ubuntu.com/ubuntu/dists/jammy/InRelease",
+             "curl -s --max-time 5 "
+             "https://archive.ubuntu.com/ubuntu/dists/jammy/InRelease "
+             ">/dev/null 2>&1 || true"),
+            ("curl -s https://security.ubuntu.com/ubuntu/dists/jammy-security/InRelease",
+             "curl -s --max-time 5 "
+             "https://security.ubuntu.com/ubuntu/dists/jammy-security/InRelease "
+             ">/dev/null 2>&1 || true"),
+            ("curl -sI https://api.github.com/",
+             "curl -sI --max-time 5 https://api.github.com/ "
+             ">/dev/null 2>&1 || true"),
+            # Explicit DNS-lookup commands — generate isolated lab_dns
+            # query log entries WITHOUT a follow-on HTTPS flow. Models
+            # the sysadmin reflexively `dig`/`nslookup`-ing things.
+            ("dig github.com",
+             "dig github.com >/dev/null 2>&1 || true"),
+            ("nslookup time.cloudflare.com",
+             "nslookup time.cloudflare.com >/dev/null 2>&1 || true"),
+            # apt update — actual outbound via plain HTTP (apt's design).
+            # Generates router FW-INT-OUT-HTTP flow.
+            ("sudo -n apt update",
+             "sudo -n apt update >/dev/null 2>&1 || true"),
         ],
     },
 }

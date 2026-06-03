@@ -90,7 +90,7 @@ RUN_START_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cleanup() {
     echo ""
     echo "[run.sh] snapshotting container logs → $RUN_DIR"
-    mkdir -p "$RUN_DIR"/{apache,router,workstation,luke_ws,vinzenz_ws,db-internal,noise_user_sim,noise_monitor,noise_scanner,noise_mobile}
+    mkdir -p "$RUN_DIR"/{apache,router,workstation,luke_ws,vinzenz_ws,db-internal,noise_user_sim,noise_monitor,noise_scanner,noise_mobile,lab_dns,fake_internet}
     # Best-effort: some paths exist only after later slices land (e.g.,
     # lab-fim.log, ulog-iptables.log) — `|| true` keeps the snapshot from
     # aborting if a source path is missing.
@@ -113,6 +113,14 @@ cleanup() {
     docker logs noise_monitor      >"$RUN_DIR/noise_monitor/stdout.log"  2>"$RUN_DIR/noise_monitor/stderr.log"  || true
     docker logs noise_scanner      >"$RUN_DIR/noise_scanner/stdout.log"  2>"$RUN_DIR/noise_scanner/stderr.log"  || true
     docker logs noise_mobile       >"$RUN_DIR/noise_mobile/stdout.log"   2>"$RUN_DIR/noise_mobile/stderr.log"   || true
+    # lab_dns — the dnsmasq query log lives in stdout; that's the central
+    # SIEM source for unfamiliar-domain detection (every workstation DNS
+    # query is logged with src IP + queried name).
+    docker logs lab_dns            >"$RUN_DIR/lab_dns/stdout.log"        2>"$RUN_DIR/lab_dns/stderr.log"        || true
+    # fake_internet — nginx access logs are bind-mounted, but capture
+    # stdout/stderr too in case nginx logs anything to those streams.
+    docker cp fake_internet:/var/log/nginx/.        "$RUN_DIR/fake_internet/"  2>/dev/null || true
+    docker logs fake_internet      >"$RUN_DIR/fake_internet/stdout.log" 2>"$RUN_DIR/fake_internet/stderr.log" || true
     docker logs kali               >"$RUN_DIR/kali.stdout.log"        2>"$RUN_DIR/kali.stderr.log"        || true
 
     # -------------------------------------------------------------------- diurnal stretch

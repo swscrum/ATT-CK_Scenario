@@ -24,6 +24,7 @@ RUN apt-get update \
         iproute2 \
         iputils-ping \
         ca-certificates \
+        curl \
         nodejs \
         npm \
         xfce4 \
@@ -105,6 +106,12 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
 COPY ubuntu_workstation/lab-fim.sh          /usr/local/bin/lab-fim.sh
 COPY ubuntu_workstation/01-lab-perms.conf   /etc/rsyslog.d/01-lab-perms.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh
+
+# Trust the lab internal CA so `curl https://github.com` against
+# fake_internet works WITHOUT -k. CA is at Infrastructure/shared-lab-keys/
+# lab-ca.crt (committed) and signs fake_internet's multi-SAN cert.
+COPY shared-lab-keys/lab-ca.crt /usr/local/share/ca-certificates/waystar-lab-ca.crt
+RUN update-ca-certificates >/dev/null 2>&1
 
 # Workstation activity simulator — runs as john.stravidis from the entrypoint
 # when ACTIVITY_ENABLED=1 (set by tools/run.sh in --pacing realistic). Without
