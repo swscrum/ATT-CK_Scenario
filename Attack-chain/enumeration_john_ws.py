@@ -301,7 +301,7 @@ def _phase_local_dbs(john_shell):
     db_raw = _run_remote(
         john_shell,
         f"find {HOME_DIR} -type f -not -path '*/node_modules/*' "
-        f"-name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' 2>/dev/null",
+        f"\\( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \\) 2>/dev/null",
         timeout=10,
     )
     local_dbs = _clean(db_raw)
