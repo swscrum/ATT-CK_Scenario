@@ -35,10 +35,26 @@ log() {
 
 # 1) Rotate Apache logs: compress large *.log, delete old *.log.gz
 if [ -d "$APACHE_LOGDIR" ]; then
-    find "$APACHE_LOGDIR" -type f -name "*.log" -size +${MAX_LOG_SIZE}c \
-        -exec gzip -f {} \; 2>/dev/null
+    rotated=$(find "$APACHE_LOGDIR" -type f -name "*.log" -size +${MAX_LOG_SIZE}c -print 2>/dev/null)
+    if [ -n "$rotated" ]; then
+        echo "$rotated" | xargs -r gzip -f 2>/dev/null
+    fi
     find "$APACHE_LOGDIR" -type f -name "*.log.gz" -mtime +${MAX_LOG_AGE_DAYS} \
         -delete 2>/dev/null
+
+    # If we just rotated any *.log files, signal apache to reopen its log
+    # file handles. Without this, the apache master process keeps writing
+    # to the now-deleted .log inodes (the data sits in unlinked-but-still-
+    # open file descriptors and is lost on the next apache restart). USR1
+    # = graceful restart: workers finish their current request, master
+    # reopens log files cleanly. Real production logrotate stanzas always
+    # do this; vinzenz's TODO at the top of this file flagged moving to
+    # proper logrotate(8), but adding the apachectl signal here closes
+    # the immediate data-loss bug.
+    if [ -n "$rotated" ]; then
+        /usr/local/apache2/bin/apachectl -k graceful 2>/dev/null || true
+        log "rotated apache logs; signaled apache for graceful reopen"
+    fi
 fi
 
 # 2) Rotate cleanup.log itself when it grows too big (otherwise the FS fills)

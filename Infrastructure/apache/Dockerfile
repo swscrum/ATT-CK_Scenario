@@ -118,20 +118,41 @@ RUN useradd -m -s /bin/bash luke.smith \
 # /usr/local/apache2/logs/lab-fim.log, which is bind-mounted to the host
 # so a SIEM agent can ingest it — the central detection signal for
 # T1053.003 + T1068.
-# TLS — generate a self-signed cert at build time for the :443 VirtualHost.
-# Real production would use a CA-issued cert; lab uses self-signed and all
-# our clients (noise.py, activity_sim curl -k, exploit ssl context) skip
-# verification. CN=apache, SAN covers both the hostname and the DMZ IP so
-# clients connecting either way are satisfied. 2-year validity is fine —
-# rebuilding the image regenerates it.
-RUN openssl req -x509 -nodes -newkey rsa:2048 \
+# TLS — server cert signed by the lab internal CA (same CA that signs
+# fake_internet's multi-SAN cert). Workstations trust the lab CA, so
+# they validate apache's cert without `-k`. Earlier iteration used a
+# pure self-signed cert here; that broke workstation→apache TLS
+# verification (e.g. Luke's `curl https://intranet.waystar.local/` got
+# verify_result=18 → no HTTP exchange → no SIEM signal). Signing with
+# the lab CA mirrors real production where the internal cert chain
+# anchors at the corporate-CA root.
+#
+# SAN list:
+#   DNS:apache                   — the Docker hostname workstations resolve
+#   DNS:intranet.waystar.local   — the corporate intranet alias (luke_ws hits)
+#   IP:10.40.0.2                 — direct IP access (NFLOG / curl by IP)
+#
+# Build process: COPY lab CA into a build-time scratch dir, generate a
+# CSR for the apache subject, sign it with the CA, then DELETE the CA
+# key from the image so the leaked-from-image attack surface stays just
+# the leaf cert (which is what the attacker would steal in a real
+# breach anyway).
+COPY shared-lab-keys/lab-ca.crt /tmp/lab-ca.crt
+COPY shared-lab-keys/lab-ca.key /tmp/lab-ca.key
+
+RUN openssl req -new -newkey rsa:2048 -nodes \
         -keyout /usr/local/apache2/conf/server.key \
-        -out    /usr/local/apache2/conf/server.crt \
-        -days 730 \
+        -out    /tmp/server.csr \
         -subj "/C=US/O=Waystar Royco/CN=apache" \
-        -addext "subjectAltName=DNS:apache,IP:10.40.0.2" \
+    && printf "subjectAltName=DNS:apache,DNS:intranet.waystar.local,IP:10.40.0.2\n" \
+        > /tmp/server.san \
+    && openssl x509 -req -in /tmp/server.csr \
+        -CA /tmp/lab-ca.crt -CAkey /tmp/lab-ca.key -CAcreateserial \
+        -days 730 -extfile /tmp/server.san \
+        -out /usr/local/apache2/conf/server.crt \
     && chmod 600 /usr/local/apache2/conf/server.key \
-    && chmod 644 /usr/local/apache2/conf/server.crt
+    && chmod 644 /usr/local/apache2/conf/server.crt \
+    && rm -f /tmp/lab-ca.key /tmp/lab-ca.crt /tmp/server.csr /tmp/server.san /tmp/lab-ca.srl
 
 COPY apache/start.sh   /usr/local/bin/start.sh
 COPY apache/lab-fim.sh /usr/local/bin/lab-fim.sh
