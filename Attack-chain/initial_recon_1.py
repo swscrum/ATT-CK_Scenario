@@ -27,9 +27,28 @@ EXT_LIST = [".php", ".html", ".txt", ".bak", ".sh", ".cgi", ".old"]
 # scans fast because the user-visible realism in that mode comes from
 # inter-phase dwell, not intra-phase pacing.
 SCAN_PROFILES = {
-    "fast":      {"nmap_T": "-T4", "gobuster_extra": [],            "ffuf_extra": []},
-    "realistic": {"nmap_T": "-T2", "gobuster_extra": ["--delay", "100ms", "-t", "5"],
-                                                                     "ffuf_extra": ["-rate", "30"]},
+    "fast": {
+        "nmap_T": "-T4",
+        # `-p-` = all 65,535 TCP ports. At -T4 timing this takes ~30s
+        # against our single-host targets — fine for dev/CI.
+        "nmap_ports": ["-p-"],
+        "gobuster_extra": [],
+        "ffuf_extra": [],
+    },
+    "realistic": {
+        "nmap_T": "-T2",
+        # NOT `-p-` at -T2 — that's 65k ports × 400ms minimum scan-delay =
+        # 7+ hours per host, which never finishes inside a session window.
+        # Real "low-and-slow" attackers don't scan -p- either; they pick a
+        # top-N port set so they finish before the SOC notices. Top-1000
+        # covers every interesting service in this lab (22/80/443/3389/
+        # 5432/5900-5901/27017/etc.) AND matches nmap's own default port
+        # set when -p is omitted, which is what a realistic attacker
+        # would actually run.
+        "nmap_ports": ["--top-ports", "1000"],
+        "gobuster_extra": ["--delay", "100ms", "-t", "5"],
+        "ffuf_extra": ["-rate", "30"],
+    },
 }
 
 
@@ -49,10 +68,14 @@ def _run(cmd: list[str], *, check: bool = True) -> int:
 
 
 def phase_nmap_full(target: str, results_dir: Path, *, pacing: str = DEFAULT_PACING) -> Path:
-    _header(1, f"nmap full TCP scan ({target}, pacing={pacing})")
+    _header(1, f"nmap discovery scan ({target}, pacing={pacing})")
     out = results_dir / "nmap-fullscan.txt"
     profile = SCAN_PROFILES.get(pacing, SCAN_PROFILES[DEFAULT_PACING])
-    _run(["nmap", "-Pn", "-sS", profile["nmap_T"], "-p-", target, "-oN", str(out)])
+    _run(
+        ["nmap", "-Pn", "-sS", profile["nmap_T"]]
+        + profile["nmap_ports"]
+        + [target, "-oN", str(out)]
+    )
     return out
 
 
@@ -181,10 +204,12 @@ def run(
     Designed to be called from Attack-chain/main.py.
 
     Pacing controls scan-tool timing:
-      fast / relative — aggressive flags (current behavior, ~12 s scan)
-      realistic       — slow flags (nmap -T2, gobuster --delay, ffuf -rate 30),
-                        producing the kind of low-and-slow probe pattern a real
-                        SOC would see (~15 min scan).
+      fast            — aggressive flags, full -p- port scan (~30 s total)
+      realistic       — slow flags: nmap -T2 with --top-ports 1000 (NOT -p-,
+                        which would take 7+ hours at -T2's 400 ms scan-delay),
+                        gobuster --delay 100 ms, ffuf -rate 30. Produces the
+                        low-and-slow probe pattern a real SOC sees from a
+                        careful attacker, completing in ~10-15 minutes total.
     """
     results = Path(results_dir)
     results.mkdir(parents=True, exist_ok=True)
