@@ -151,3 +151,54 @@ managed."
 *Why realistic:* the denied attempts are themselves a SOC signal (failed
 `T1021.004` / `T1078`), and the stale config entries model how access notes
 accumulate.
+
+### 3.2 Luke Smith
+
+Psychiatrist on the clinical team. Works from `luke_ws` (`10.30.0.7`), a standard
+credentialed end-user box. Patient data is his daily work, not a guarded asset —
+which is what makes the box a high-value, low-friction target. The attacker
+reaches him only via Vinzenz (§3.3).
+
+#### 3.2.1 Reviews his caseload against the central patient DB
+
+Runs `psql` against `db-internal` as `waystar-readonly`, mostly through the
+`notes` and `mypatients` aliases. A `.pgpass` set up by the transition team
+during provisioning means he never types the password.
+
+**Artefacts left behind:**
+- Read-only DB cred — `luke_ws/luke_home/.pgpass:1` (`waystar-readonly` / `ChangeMe!2026`, same cred John holds)
+- `notes` / `mypatients` aliases — `luke_ws/luke_home/.bashrc:21-22`
+- Query trail — `luke_ws/luke_home/.bash_history:4-9`
+- `Host apache` / `Host db-internal` reach — `luke_ws/luke_home/.ssh/config:5-13`
+
+*Why realistic:* a clinician with read access plus a `.pgpass` is the default
+"credentialed end-user" posture.
+
+#### 3.2.2 Keeps an offline cache of his own patients
+
+Maintains a thin local SQLite mirror of his caseload (names, ICD-10 diagnoses,
+risk flags, session headlines), queried via the `localnotes` alias / `sqlite3`.
+
+**Artefacts left behind:**
+- Local patient cache — `/home/luke.smith/.local/share/waystar-psyc/patients.sqlite`, built from `luke_ws/patient-cache.sql` at `luke_ws/Dockerfile:70-76`
+- `localnotes` alias — `luke_ws/luke_home/.bashrc:25`
+- Cache-read commands — `luke_ws/luke_home/.bash_history:10-11`
+
+*Why realistic:* clinicians routinely keep a personal offline copy of "their"
+patients despite a central system. It is the Phase-11 local-cache loot artefact
+(T1005) and the reason patient data sits on an end-user box at all.
+
+#### 3.2.3 Backs up his session notes to the apache host
+
+Rsyncs his notes folder to a `backup/notes/` directory under his named account on
+`apache`, the one internal server he can reach, then SSHes in to confirm.
+
+**Artefacts left behind:**
+- Backup target dir — `/home/luke.smith/backup/notes/`, created at `apache/Dockerfile:104-107`
+- `luke.smith` account on apache (no sudo, password auth) — `apache/Dockerfile:104-105`
+- Rsync + follow-up `ssh apache` — `luke_ws/luke_home/.bash_history:16-17`
+
+*Why realistic:* a non-technical user improvising a backup to a server he happens
+to reach is exactly the unsanctioned data-spread that puts clinical notes on a
+DMZ-adjacent webserver. (The source `~/Documents/notes/` tree is not materialised
+— see §5.)
