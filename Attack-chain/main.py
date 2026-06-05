@@ -62,13 +62,13 @@ STEP_META = {
         "color": "red",
     },
     "creds": {
-        "tactic": "TA0006 · Credential Access · TA0007 · Discovery",
-        "techniques": ["T1552.001", "T1018", "T1046", "T1110.004"],
+        "tactic": "TA0006 · Credential Access",
+        "techniques": ["T1552.001"],
         "color": "blue",
     },
     "lateral": {
-        "tactic": "TA0008 · Lateral Movement",
-        "techniques": ["T1110", "T1110.001", "T1552.001", "T1021.004", "T1078"],
+        "tactic": "TA0007 · Discovery · TA0008 · Lateral Movement",
+        "techniques": ["T1018", "T1046", "T1110.004", "T1021.004", "T1078"],
         "color": "magenta",
     },
     "enumeration_john_ws": {
@@ -260,14 +260,9 @@ def _step_creds(ctx: Context) -> dict[str, Any]:
     from credential_stuffing import run as creds_run
 
     result = creds_run(ctx.state["root_shell"])
-    if not result.get("john_ip"):
-        raise RuntimeError("credential stuffing found no usable account on the internal subnet")
-    return {
-        "john_ip": result["john_ip"],
-        "john_password": result["john_password"],
-        "creds_scan": result.get("scanned_hosts", []),
-        "creds_successes": result.get("successes", []),
-    }
+    if not result.get("john_password"):
+        raise RuntimeError("credential discovery found no usable password on apache")
+    return {"john_password": result["john_password"]}
 
 
 def _step_lateral(ctx: Context) -> dict[str, Any]:
@@ -276,16 +271,13 @@ def _step_lateral(ctx: Context) -> dict[str, Any]:
     result = lateral_run(
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
-        workstation_ip=ctx.state.get("john_ip"),
-        other_targets=ctx.state.get("creds_scan", []),
-        john_ip=ctx.state.get("john_ip"),
+        john_password=ctx.state.get("john_password"),
     )
     if result["john_shell"] is None:
         raise RuntimeError("lateral movement returned no john.stravidis shell")
     return {
         "john_shell": result["john_shell"],
         "failed_lateral_targets": result["failed_lateral_targets"],
-        "failed_lateral_key_failures": result["failed_lateral_key_failures"],
         "failed_lateral_password_failures": result["failed_lateral_password_failures"],
     }
 
@@ -361,7 +353,7 @@ CHAIN_BASIC: list[Step] = [
     Step(
         "lateral",
         _step_lateral,
-        requires=("root_shell",),  # john_ip optional: used if present, else deploy.log fallback
+        requires=("root_shell",),  # john_password optional: falls back to hardcoded default
         teardown=_teardown_close_socket("john_shell"),
     ),
     Step(
