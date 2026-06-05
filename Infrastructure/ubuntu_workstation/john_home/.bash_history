@@ -75,8 +75,8 @@ rsync -avz dist/ apache:/opt/waystar-connect/dist/
 ssh apache 'tail -n50 /usr/local/apache2/logs/error_log'
 psql -h db-internal -U waystar-readonly waystar
 psql -h db-internal -U waystar-readonly -d waystar -c '\dt'
-echo 'db-internal:5432:waystar:waystar-readonly:ChangeMe!2026' >> ~/.pgpass
-chmod 600 ~/.pgpass
+echo 'db-internal:5432:waystar:waystar-readonly:ChangeMe!2026' >> ~/projects/waystar-connect/.pgpass
+chmod 600 ~/projects/waystar-connect/.pgpass
 psql -h db-internal -U waystar-readonly waystar -c 'select count(*) from patients;'
 sl
 clear

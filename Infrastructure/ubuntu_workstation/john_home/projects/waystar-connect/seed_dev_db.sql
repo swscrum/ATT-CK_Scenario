@@ -1,7 +1,7 @@
 -- Dev fixtures for Waystar Connect frontend work.
 -- NOT real patient data. Synthetic records for local UI prototyping only.
--- The actual patient store lives behind db-internal; see ~/.pgpass for the
--- read-only connection.
+-- The actual patient store lives behind db-internal; see .pgpass in this
+-- directory for the read-only connection (PGPASSFILE is set in ~/.bashrc).
 
 CREATE TABLE IF NOT EXISTS therapists (
     id          INTEGER PRIMARY KEY,

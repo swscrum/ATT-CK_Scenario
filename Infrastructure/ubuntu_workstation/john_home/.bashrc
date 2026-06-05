@@ -22,6 +22,9 @@ alias gl='git log --oneline -20'
 alias gd='git diff'
 alias deploy='cd ~/projects/waystar-connect && npm run build && npm run deploy'
 
+# Point psql at the project-local pgpass file.
+export PGPASSFILE="$HOME/projects/waystar-connect/.pgpass"
+
 # Node — default to the project's pinned version if nvm is around
 [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
 
