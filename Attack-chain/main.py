@@ -51,7 +51,7 @@ STEP_META = {
         "techniques": ["T1190", "T1059.004"],
         "color": "yellow",
     },
-    "post_exploit_recon": {
+    "post_exploit_enumeration": {
         "tactic": "TA0007 · Discovery",
         "techniques": ["T1082", "T1087.001", "T1057", "T1053.003", "T1016", "T1552.001"],
         "color": "blue",
@@ -234,12 +234,12 @@ def _step_exploit(ctx: Context) -> dict[str, Any]:
     return {"www_shell": www_shell}
 
 
-def _step_post_exploit_recon(ctx: Context) -> dict[str, Any]:
-    from post_exploit_recon import run as recon_run
+def _step_post_exploit_enumeration(ctx: Context) -> dict[str, Any]:
+    from post_exploit_enumeration import run as enum_run
 
-    findings = recon_run(www_shell=ctx.state["www_shell"], kali_host=ctx.kali_host, use_linpeas=ctx.linpeas)
+    findings = enum_run(www_shell=ctx.state["www_shell"], kali_host=ctx.kali_host, use_linpeas=ctx.linpeas)
     if not findings.get("cron_script"):
-        raise RuntimeError("post-exploit recon found no writable cron script — cannot escalate")
+        raise RuntimeError("post-exploit enumeration found no writable cron script — cannot escalate")
     return findings
 
 
@@ -343,8 +343,8 @@ CHAIN_BASIC: list[Step] = [
     Step("recon", _step_recon),
     Step("exploit", _step_exploit, teardown=_teardown_close_socket("www_shell")),
     Step(
-        "post_exploit_recon",
-        _step_post_exploit_recon,
+        "post_exploit_enumeration",
+        _step_post_exploit_enumeration,
         requires=("www_shell",),
     ),
     Step(

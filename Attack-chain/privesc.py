@@ -31,7 +31,7 @@ def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
         kali_host (str):      IP / hostname of the Kali box that the
                               reverse-shell payload will dial back to.
         cron_script (str):    path to the world-writable root cron script,
-                              discovered by post_exploit_recon. Falls back to
+                              discovered by post_exploit_enumeration. Falls back to
                               the module-level default if not supplied.
 
     Returns:
