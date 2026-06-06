@@ -104,4 +104,20 @@ Results land in `Attack-chain/results/` (bind-mounted, persisted on the host):
 | `ffuf.json` | extension fuzz on `/index<ext>` (JSON output from ffuf `-of json`) |
 | `nikto.txt` | `nikto -Tuning b` |
 
+## Logging & detection per phase
+
+What the attacker does each chain phase and what the defender sees in a
+host-persisted log (`Infrastructure/logs/`), with the MITRE ATT&CK IDs.
+
+| Phase | Attacker | Defender log | ATT&CK |
+|---|---|---|---|
+| `recon` | scan/fuzz Kali → apache:80 | `logs/apache/{access,error,forensic_log}` (404 probe flood) | T1595, T1592 |
+| `exploit` | CVE-2021-41773 traversal + www-data reverse shell | `logs/apache/access.log` (`cgi-bin/.%32%65/…/bin/sh` URI) | T1190, T1059.004 |
+| `lateral` | SSH cred-stuffing apache → workstations | `logs/{luke_ws,vinzenz_ws}/auth.log` (`Failed password for john.stravidis`) | T1110.004, T1021.004, T1078, T1046 |
+| `exfiltrate` | `pg_dump` as `waystar-readonly` → Kali | `logs/db/postgresql-*.log` (connection + `SELECT`/`COPY`, `log_statement=all`) | T1213, T1041, T1552.001 |
+| `cleanup` | truncate apache logs, clear history | `logs/apache/*.log` (truncation visible on persisted files) | T1070, T1070.003 |
+
+Console output, the per-run ground-truth JSON, and the logs all share a UTC
+ISO-8601 timestamp so they correlate to the second.
+
 
