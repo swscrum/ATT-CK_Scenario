@@ -106,12 +106,12 @@ STEP_META_ADVANCED: dict[str, dict] = {
     "webserver_post_exploit_enum": {
         "tactic": "TA0007 · Discovery",
         "techniques": ["T1082", "T1087.001", "T1057", "T1083",
-                       "T1053.003", "T1016"],
+                       "T1548.001", "T1016"],
         "color": "blue",
     },
     "webserver_privesc": {
         "tactic": "TA0004 · Privilege Escalation · TA0006 · Credential Access",
-        "techniques": ["T1053.003", "T1068", "T1620", "T1036.005",
+        "techniques": ["T1548.001", "T1068", "T1620", "T1036.005",
                        "T1552.001", "T1552.004"],
         "color": "red",
     },
@@ -313,7 +313,7 @@ def _step_advanced_webserver_privesc(ctx: Context) -> dict[str, Any]:
 
     return privesc_run(
         sliver_session_id=ctx.state["sliver_session"],
-        cron_script=ctx.state["cron_script"],
+        cap_binary=ctx.state["cap_binary"],
         kali_host=ctx.kali_host,
         results_dir=ctx.results_dir,
     )
@@ -502,7 +502,7 @@ CHAIN_ADVANCED: list[Step] = [
     Step(
         "webserver_privesc",
         _step_advanced_webserver_privesc,
-        requires=("sliver_session", "cron_script"),
+        requires=("sliver_session", "cap_binary"),
     ),
     Step(
         "webserver_persistence",

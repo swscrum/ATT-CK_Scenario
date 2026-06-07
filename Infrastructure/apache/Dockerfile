@@ -11,11 +11,33 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
         rsync \
         python3 python3-psycopg2 \
         nmap sshpass \
+        libcap2-bin \
+        inotify-tools \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
         || { b=$(command -v base64 2>/dev/null) && [ -n "$b" ] && ln -sf "$b" /usr/bin/base64; } \
         || true)
+
+# ============================================================================
+#  MISCONFIGURATION — MITRE ATT&CK T1548.001 (Abuse Elevation Control:
+#                                              Setuid and Setgid — file capability)
+# ----------------------------------------------------------------------------
+#  Vinzenz set cap_setuid on python3 so the booking CGI (running as www-data
+#  via mod_cgi) could chown user-uploaded session-note attachments to the
+#  app's UID. He thought the capability applied only to the CGI script; in
+#  reality file capabilities are per-binary, so EVERY invocation of
+#  /usr/bin/python3 (by any user) silently gets cap_setuid+ep. A www-data
+#  shell from CVE-2021-41773 can call os.setuid(0) and become root without
+#  touching cron, sudo, or any SUID bit — and without writing to any path
+#  the lab FIM is currently watching.
+#
+#  Drives the advanced-mode privesc step (advanced_webserver_privesc.py).
+#  Basic mode still uses the /opt/cleanup.sh cron misconfig below (T1053.003);
+#  both misconfigs coexist so both modes work from the same image.
+# ============================================================================
+RUN setcap cap_setuid,cap_setgid+ep "$(readlink -f /usr/bin/python3)" \
+    && getcap "$(readlink -f /usr/bin/python3)"
 
 # Building Apache 2.4.49 ourselves would also work, but using the upstream
 # httpd:2.4.50 image is faster and equally vulnerable to CVE-2021-41773.
@@ -109,10 +131,14 @@ RUN useradd -m -s /bin/bash luke.smith \
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
 
-# Start script: launch cron and sshd, then Apache in the foreground (so the
-# container doesn't exit immediately after start).
-RUN printf '#!/bin/sh\nservice cron start\nservice ssh start\nexec httpd-foreground\n' > /usr/local/bin/start.sh \
-    && chmod +x /usr/local/bin/start.sh
+# Start script + lab-FIM. start.sh launches cron, writes the capability
+# baseline, kicks off the inotify FIM watcher, then exec's httpd in the
+# foreground. lab-fim.sh is the inotify watcher itself. Both live in the
+# source tree at Infrastructure/apache/ so they can be edited without
+# rebaking inline shell into the Dockerfile.
+COPY apache/start.sh   /usr/local/bin/start.sh
+COPY apache/lab-fim.sh /usr/local/bin/lab-fim.sh
+RUN chmod +x /usr/local/bin/start.sh /usr/local/bin/lab-fim.sh
 
 CMD ["/usr/local/bin/start.sh"]
 
