@@ -98,6 +98,23 @@ STEP_META_ADVANCED: dict[str, dict] = {
         "techniques": ["T1595.002", "T1592.002", "T1590.005", "T1583.006"],
         "color": "cyan",
     },
+    "exploit": {
+        "tactic": "TA0001 · Initial Access",
+        "techniques": ["T1190", "T1059.006", "T1620", "T1036.005", "T1071.001"],
+        "color": "yellow",
+    },
+    "webserver_post_exploit_enum": {
+        "tactic": "TA0007 · Discovery",
+        "techniques": ["T1082", "T1087.001", "T1057", "T1083",
+                       "T1053.003", "T1016"],
+        "color": "blue",
+    },
+    "webserver_privesc": {
+        "tactic": "TA0004 · Privilege Escalation · TA0006 · Credential Access · TA0003 · Persistence",
+        "techniques": ["T1053.003", "T1068", "T1620", "T1036.005",
+                       "T1552.001", "T1552.004", "T1505.003"],
+        "color": "red",
+    },
 }
 
 
@@ -264,6 +281,39 @@ def _step_advanced_recon(ctx: Context) -> dict[str, Any]:
     return {"recon_results": ctx.results_dir}
 
 
+def _step_advanced_exploit(ctx: Context) -> dict[str, Any]:
+    from advanced_initial_access import run as advanced_exploit_run
+
+    result = advanced_exploit_run(target_ip=ctx.target, kali_ip=ctx.kali_host)
+    if not result.get("sliver_session"):
+        raise RuntimeError("advanced exploit returned no Sliver session")
+    return {
+        "sliver_session": result["sliver_session"],
+        "sliver_beacon":  result.get("sliver_beacon"),
+    }
+
+
+def _step_advanced_webserver_post_exploit_enum(ctx: Context) -> dict[str, Any]:
+    from advanced_webserver_post_exploit_enum import run as enum_run
+
+    return enum_run(
+        sliver_session_id=ctx.state["sliver_session"],
+        sliver_beacon_id=ctx.state.get("sliver_beacon"),
+        kali_host=ctx.kali_host,
+    )
+
+
+def _step_advanced_webserver_privesc(ctx: Context) -> dict[str, Any]:
+    from advanced_webserver_privesc import run as privesc_run
+
+    return privesc_run(
+        sliver_session_id=ctx.state["sliver_session"],
+        cron_script=ctx.state["cron_script"],
+        kali_host=ctx.kali_host,
+        results_dir=ctx.results_dir,
+    )
+
+
 def _step_exploit(ctx: Context) -> dict[str, Any]:
     from initial_access import get_www_shell
 
@@ -422,13 +472,24 @@ CHAIN_BASIC: list[Step] = [
     ),
 ]
 
-# Advanced variants land one step at a time. Each PR swaps one more adapter
-# in this list; entries that still reference _step_* (basic) are placeholders
-# awaiting their advanced counterpart and keep the chain runnable end-to-end
-# during the transition.
+# Advanced variants land per-host bundles. PR-A shipped the recon step;
+# this PR (PR-B) adds the apache-side exploit + enumeration + privesc. The
+# chain ends after webserver_privesc -- no fall-through into basic steps
+# whose state contracts expect socket handles instead of Sliver beacon IDs.
+# Next PR appends johnws_post_exploit_enum + johnws_lateral_movement.
 CHAIN_ADVANCED: list[Step] = [
     Step("recon", _step_advanced_recon),
-    *CHAIN_BASIC[1:],
+    Step("exploit", _step_advanced_exploit),
+    Step(
+        "webserver_post_exploit_enum",
+        _step_advanced_webserver_post_exploit_enum,
+        requires=("sliver_session",),
+    ),
+    Step(
+        "webserver_privesc",
+        _step_advanced_webserver_privesc,
+        requires=("sliver_session", "cron_script"),
+    ),
 ]
 
 CHAINS: dict[str, list[Step]] = {
