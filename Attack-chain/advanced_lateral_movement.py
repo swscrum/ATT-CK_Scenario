@@ -170,9 +170,9 @@ time.sleep(600)
         import subprocess
         log("[*] SIMULATION: Sysadmin logs into Apache from his workstation (ssh -A)...")
         cmd = (
-            "sshpass -p 'password' ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
+            "sshpass -p 'VinzenzAdmin!2026' ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
             "vinzenz.fedora@10.30.0.8 "
-            "\"sshpass -p 'VinzenzAdmin!2026' ssh -A -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
+            "\"ssh -A -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
             "vinzenz.fedora@10.30.0.2 'sleep 20'\""
         )
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
