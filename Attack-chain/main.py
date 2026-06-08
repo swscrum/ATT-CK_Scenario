@@ -120,6 +120,11 @@ STEP_META_ADVANCED: dict[str, dict] = {
         "techniques": ["T1505.003"],
         "color": "green",
     },
+    "advanced_lateral_movement": {
+        "tactic": "TA0008 · Lateral Movement · TA0040 · Impact",
+        "techniques": ["T1021.004", "T1556.003", "T1499.004"],
+        "color": "magenta",
+    },
 }
 
 
