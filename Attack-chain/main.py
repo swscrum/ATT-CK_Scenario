@@ -328,6 +328,18 @@ def _step_advanced_webserver_persistence(ctx: Context) -> dict[str, Any]:
     )
 
 
+def _step_advanced_lateral_movement(ctx: Context) -> dict[str, Any]:
+    from advanced_lateral_movement import run as advanced_lateral_run
+
+    result = advanced_lateral_run(
+        root_sliver_session=ctx.state["root_sliver_session"],
+        kali_host=ctx.kali_host,
+    )
+    if not result.get("vinzenz_shell"):
+        raise RuntimeError("advanced lateral movement returned no shell for vinzenz")
+    return {"vinzenz_shell": result["vinzenz_shell"]}
+
+
 def _step_exploit(ctx: Context) -> dict[str, Any]:
     from initial_access import get_www_shell
 
@@ -508,6 +520,12 @@ CHAIN_ADVANCED: list[Step] = [
         "webserver_persistence",
         _step_advanced_webserver_persistence,
         requires=("root_sliver_session",),
+    ),
+    Step(
+        "advanced_lateral_movement",
+        _step_advanced_lateral_movement,
+        requires=("root_sliver_session",),
+        teardown=_teardown_close_socket("vinzenz_shell"),
     ),
 ]
 

