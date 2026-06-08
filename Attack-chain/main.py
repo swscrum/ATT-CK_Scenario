@@ -88,6 +88,30 @@ STEP_META = {
     },
 }
 
+# Advanced-mode overrides: when a step name appears here AND ctx.mode ==
+# "advanced", _step_meta() returns the entry below instead of the one in
+# STEP_META. Steps without an advanced variant fall through to STEP_META so
+# they keep rendering correctly while their advanced PRs are pending.
+STEP_META_ADVANCED: dict[str, dict] = {
+    "recon": {
+        "tactic": "TA0043 · Reconnaissance",
+        "techniques": ["T1595.002", "T1592.002", "T1590.005", "T1583.006"],
+        "color": "cyan",
+    },
+}
+
+
+def _step_meta(name: str, mode: str = "basic") -> dict:
+    """Return the TTP-metadata dict for ``name`` under the requested ``mode``.
+
+    Advanced mode prefers ``STEP_META_ADVANCED``; missing entries fall back
+    to ``STEP_META`` so unchanged basic-only steps keep their meta while
+    their per-step advanced PRs land.
+    """
+    if mode == "advanced" and name in STEP_META_ADVANCED:
+        return STEP_META_ADVANCED[name]
+    return STEP_META.get(name, {})
+
 
 @dataclass
 class Context:
@@ -128,8 +152,8 @@ def _print_banner(ctx: Context, steps: list[Step]) -> None:
     console.print()
 
 
-def _print_step_header(step: Step, index: int, total: int) -> None:
-    meta = STEP_META.get(step.name, {})
+def _print_step_header(step: Step, index: int, total: int, mode: str = "basic") -> None:
+    meta = _step_meta(step.name, mode)
     color = meta.get("color", "white")
     tactic = meta.get("tactic", "")
     techniques = "  ".join(f"[dim]{t}[/dim]" for t in meta.get("techniques", []))
@@ -144,10 +168,10 @@ def _print_step_header(step: Step, index: int, total: int) -> None:
 
 
 def _print_step_result(
-    step: Step, elapsed: float, success: bool, error: str = ""
+    step: Step, elapsed: float, success: bool, error: str = "", mode: str = "basic"
 ) -> None:
     console.print()
-    meta = STEP_META.get(step.name, {})
+    meta = _step_meta(step.name, mode)
     color = meta.get("color", "white")
     ts = f"[dim][{_iso_utc()}][/dim]  "
     if success:
@@ -190,7 +214,7 @@ def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
     log.info("wrote ground truth: %s", out_path)
 
 
-def _print_summary(results: list[dict]) -> None:
+def _print_summary(results: list[dict], mode: str = "basic") -> None:
     console.print(Rule("[bold white]CHAIN SUMMARY[/bold white]", style="dim white"))
     console.print()
 
@@ -202,7 +226,7 @@ def _print_summary(results: list[dict]) -> None:
     table.add_column("Techniques", style="dim")
 
     for r in results:
-        meta = STEP_META.get(r["name"], {})
+        meta = _step_meta(r["name"], mode)
         color = meta.get("color", "white")
         status = f"[green]✓ ok[/green]" if r["ok"] else f"[red]✗ failed[/red]"
         techniques = " · ".join(meta.get("techniques", []))
@@ -226,6 +250,17 @@ def _step_recon(ctx: Context) -> dict[str, Any]:
     from initial_recon_1 import run as recon_run
 
     recon_run(target=ctx.target, results_dir=ctx.results_dir, wordlist=ctx.wordlist)
+    return {"recon_results": ctx.results_dir}
+
+
+def _step_advanced_recon(ctx: Context) -> dict[str, Any]:
+    from advanced_initial_recon import run as advanced_recon_run
+
+    advanced_recon_run(
+        target=ctx.target,
+        results_dir=ctx.results_dir,
+        kali_host=ctx.kali_host,
+    )
     return {"recon_results": ctx.results_dir}
 
 
@@ -387,9 +422,14 @@ CHAIN_BASIC: list[Step] = [
     ),
 ]
 
-# Advanced mode reuses the basic chain until stealthier per-step variants land;
-# swap entries in CHAIN_ADVANCED as they're implemented.
-CHAIN_ADVANCED: list[Step] = list(CHAIN_BASIC)
+# Advanced variants land one step at a time. Each PR swaps one more adapter
+# in this list; entries that still reference _step_* (basic) are placeholders
+# awaiting their advanced counterpart and keep the chain runnable end-to-end
+# during the transition.
+CHAIN_ADVANCED: list[Step] = [
+    Step("recon", _step_advanced_recon),
+    *CHAIN_BASIC[1:],
+]
 
 CHAINS: dict[str, list[Step]] = {
     "basic": CHAIN_BASIC,
@@ -441,9 +481,9 @@ def _select(steps, *, only, start, stop) -> list[Step]:
 
 
 def _result_entry(step: Step, *, ok: bool, started: str, ended: str,
-                  elapsed: float, err: str = "") -> dict:
+                  elapsed: float, err: str = "", mode: str = "basic") -> dict:
     """Build one structured ground-truth record for a single step."""
-    meta = STEP_META.get(step.name, {})
+    meta = _step_meta(step.name, mode)
     entry = {
         "name": step.name,
         "ok": ok,
@@ -484,7 +524,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                     continue
                 raise RuntimeError(msg)
 
-            _print_step_header(step, i, len(selected))
+            _print_step_header(step, i, len(selected), mode=ctx.mode)
             started = _iso_utc()
             t0 = time.perf_counter()
             delta = {}
@@ -498,17 +538,19 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                 if not step.optional:
                     elapsed = time.perf_counter() - t0
                     ended = _iso_utc()
-                    _print_step_result(step, elapsed, ok, err)
+                    _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
                     results.append(_result_entry(step, ok=ok, started=started,
-                                                 ended=ended, elapsed=elapsed, err=err))
+                                                 ended=ended, elapsed=elapsed,
+                                                 err=err, mode=ctx.mode))
                     raise
             elapsed = time.perf_counter() - t0
             ended = _iso_utc()
             ctx.state.update(delta)
             executed.append(step)
-            _print_step_result(step, elapsed, ok, err)
+            _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
             results.append(_result_entry(step, ok=ok, started=started,
-                                         ended=ended, elapsed=elapsed))
+                                         ended=ended, elapsed=elapsed,
+                                         mode=ctx.mode))
             time.sleep(0.5)
 
     finally:
@@ -521,7 +563,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                 log.warning("teardown %s failed: %s", step.name, exc)
 
         if results:
-            _print_summary(results)
+            _print_summary(results, mode=ctx.mode)
             try:
                 _write_ground_truth(ctx, run_id, results)
             except Exception as exc:
@@ -575,7 +617,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def _list_steps(mode: str = DEFAULT_MODE) -> None:
     console.print(Rule(f"[dim]configured steps ({mode})[/dim]", style="dim"))
     for step in CHAINS[mode]:
-        meta = STEP_META.get(step.name, {})
+        meta = _step_meta(step.name, mode)
         color = meta.get("color", "white")
         reqs = (
             f"  [dim]requires: {', '.join(step.requires)}[/dim]"
