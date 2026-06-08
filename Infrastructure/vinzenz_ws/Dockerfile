@@ -69,8 +69,9 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
 
 # Lab File Integrity Monitor + rsyslog mirror — same pattern as john_ws.
 COPY vinzenz_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
+COPY vinzenz_ws/simulate_admin.sh  /usr/local/bin/simulate_admin.sh
 COPY vinzenz_ws/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
-RUN chmod +x /usr/local/bin/lab-fim.sh
+RUN chmod +x /usr/local/bin/lab-fim.sh /usr/local/bin/simulate_admin.sh
 
 COPY vinzenz_ws/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
