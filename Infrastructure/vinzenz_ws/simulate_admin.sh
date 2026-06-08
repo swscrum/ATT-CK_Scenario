@@ -30,8 +30,9 @@ while true; do
              ping -c 3 db-internal; \
              echo 'Testing DB connection from webserver...'; \
              python3 -c \\\"import psycopg2; psycopg2.connect(host='db-internal', user='waystar-app', password='AppBooking!2026', dbname='waystar')\\\" 2>&1; \
-             echo 'DB is hanging! Need to investigate further...'; \
-             sleep 25\""
+             echo 'DB is hanging! Must be an application connection leak. Restarting Apache workers...'; \
+             sleep 25; \
+             echo 'VinzenzAdmin!2026' | sudo -S /usr/local/apache2/bin/apachectl graceful\""
              
         log "Admin finished debugging session on webserver."
         

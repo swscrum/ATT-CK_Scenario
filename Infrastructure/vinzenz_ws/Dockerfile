@@ -35,6 +35,7 @@ RUN apt-get update \
         tmux \
         vim \
         htop \
+        python3 \
     && rm -rf /var/lib/apt/lists/* \
     # Reclaim UID 1000 if the base image ships an `ubuntu` user.
     && if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
