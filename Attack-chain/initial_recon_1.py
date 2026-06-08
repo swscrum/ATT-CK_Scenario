@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from chainlog import log
+
 DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
@@ -22,12 +24,12 @@ EXT_LIST = [".php", ".html", ".txt", ".bak", ".sh", ".cgi", ".old"]
 
 
 def _header(num: int, name: str) -> None:
-    print(f"\n=== Phase {num}: {name} ===", flush=True)
+    log(f"\n=== Phase {num}: {name} ===", flush=True)
 
 
 def _run(cmd: list[str], *, check: bool = True) -> int:
     """Stream a subprocess to stdout/stderr; return its exit code."""
-    print("$ " + " ".join(cmd), flush=True)
+    log("$ " + " ".join(cmd), flush=True)
     proc = subprocess.run(cmd, check=False)
     if check and proc.returncode != 0:
         raise SystemExit(
@@ -48,7 +50,7 @@ def phase_nmap_services(target: str, results_dir: Path) -> Path:
     out = results_dir / "nmap-services.txt"
     fullscan = results_dir / "nmap-fullscan.txt"
     if not fullscan.exists():
-        print(f"No fullscan output at {fullscan} — skipping.")
+        log(f"No fullscan output at {fullscan} — skipping.")
         out.write_text("")
         return out
 
@@ -56,12 +58,12 @@ def phase_nmap_services(target: str, results_dir: Path) -> Path:
         r"^(\d+)/tcp\s+open", fullscan.read_text(), flags=re.MULTILINE
     )
     if not ports:
-        print("No open ports from phase 1 — skipping.")
+        log("No open ports from phase 1 — skipping.")
         out.write_text("")
         return out
 
     port_list = ",".join(ports)
-    print(f"Open ports: {port_list}")
+    log(f"Open ports: {port_list}")
     _run(
         [
             "nmap", "-Pn", "-sS", "-sV", "-sC",
@@ -75,7 +77,7 @@ def phase_gobuster(target: str, results_dir: Path, wordlist: Path) -> Path:
     _header(3, "gobuster directory enumeration")
     out = results_dir / "gobuster.txt"
     if not wordlist.exists():
-        print(f"Wordlist {wordlist} not found — skipping.")
+        log(f"Wordlist {wordlist} not found — skipping.")
         out.write_text("")
         return out
     _run(
@@ -172,7 +174,7 @@ def run(
     for name in PHASES:
         call(name)
 
-    print(f"\nRecon complete. Results in {results}")
+    log(f"\nRecon complete. Results in {results}")
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:

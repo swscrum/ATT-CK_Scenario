@@ -20,12 +20,16 @@
 #   Attack-chain/results/                       (already bind-mounted via kali)
 #
 # Pre-req: images built once via `docker compose build` (or first run after
-# a Dockerfile change). This script does not pass `--build` to keep startup
-# fast; rebuild yourself when needed.
+# a Dockerfile change). The default `up -d` does NOT pass `--build`, to keep
+# startup fast. Pass --build whenever a Dockerfile or a seeded file changed
+# (e.g. after pulling new breadcrumbs) — otherwise a stale image silently
+# reuses the old contents and the chain can fail on missing seed data.
 #
 # Usage:
 #   tools/run.sh                    # full chain, snapshot + teardown after
 #   tools/run.sh --only recon       # forwarded to main.py
+#   tools/run.sh --build            # rebuild images first, then run (use
+#                                   # after a Dockerfile / seed change)
 #   tools/run.sh --keep-up          # skip teardown so the lab stays running
 #                                   # for follow-up exploration; tear down
 #                                   # later with `docker compose down`
@@ -34,10 +38,12 @@ cd "$(dirname "$0")/../Infrastructure"
 
 # -------------------------------------------------------------------- args
 KEEP_UP=0
+BUILD=0
 chain_args=()
 for arg in "$@"; do
     case "$arg" in
         --keep-up) KEEP_UP=1 ;;
+        --build)   BUILD=1 ;;
         *)         chain_args+=("$arg") ;;
     esac
 done
@@ -81,7 +87,12 @@ trap cleanup EXIT
 
 # -------------------------------------------------------------------- run
 echo "[run.sh] ensuring lab is up..."
-docker compose up -d >/dev/null
+if [ "$BUILD" -eq 1 ]; then
+    echo "[run.sh] --build: rebuilding changed images (layer cache keeps this cheap)"
+    docker compose up -d --build >/dev/null
+else
+    docker compose up -d >/dev/null
+fi
 sleep 3
 
 docker compose exec -T kali python3 /Attack-chain/main.py "${chain_args[@]}"
