@@ -1,0 +1,375 @@
+# Infrastructure workflows — how sensitive artefacts got there
+
+## 1. Purpose
+
+This document explains, for each sensitive artefact in the lab, **which person
+left it there through which everyday workflow** — not "it was seeded because the
+attack chain needs it". Audience: simulation builders, pentesters, and defenders
+(what "normal" looks like, so the attack stands out against it).
+
+Cross-references, not duplicated here:
+[scenario_story.md](./scenario_story.md) (setting + personas),
+[attack_plan.md](./attack_plan.md) (the attack chain),
+[mappings.md](./mappings.md) (MITRE technique mapping).
+
+**Snapshot note.** Point-in-time snapshot as of **2026-06-05**, not maintained as
+a live inventory. If the Dockerfiles or home templates change, re-verify against
+`Infrastructure/`.
+
+**Background personas (context only).** Three off-stage roles explain most
+artefact *origins* without being attack targets:
+
+- **Transition team / IT helpdesk** — provisions every workstation, sets the
+  interim passwords, authorizes deploy keys. Trail in
+  `ubuntu_workstation/john_home/Documents/`.
+- **Dr. M. Roy (CTO) + turnaround consultancy** — set scope and the four-week
+  deadline; appear only as names in `.../Documents/Useful contacts.md`, touch no
+  host.
+- **Key-distribution mechanism** — SSH keys are injected at build time via `COPY`
+  from `Infrastructure/shared-lab-keys/`, modeling Vinzenz's provisioning (§3.3).
+  No key is a static home file; home templates carry only `.ssh/config` and
+  `.ssh/known_hosts`.
+
+## 2. Container inventory
+
+| Container | Network(s) | IP(s) | Role | Who touches it |
+|---|---|---|---|---|
+| `router` | public / dmz / internal | 10.10.0.3 / 10.40.0.4 / 10.30.0.4 | Zone-crossing iptables router | Vinzenz (config), attacker (transit) |
+| `apache` | dmz | 10.40.0.2 | Waystar Connect webserver (CVE-2021-41773) | John (deploys), `www-data` (CGI), Vinzenz (fleet), Luke (note backups) |
+| `ubuntu_workstation` | internal | 10.30.0.5 | John's dev/staging box | John (daily), Vinzenz (fleet) |
+| `luke_ws` | internal | 10.30.0.7 | Luke's clinical box | Luke (daily), Vinzenz (fleet) |
+| `vinzenz_ws` | internal | 10.30.0.8 | Sysadmin master box | Vinzenz (exclusive) |
+| `db-internal` | internal | 10.30.0.6 | Postgres patient DB (no sshd) | web-app (INSERT), Luke (SELECT readonly), Vinzenz (superuser, via psql) |
+| `kali` | public | 10.10.0.2 | Attacker host | not part of the company model |
+
+## 3. User stories per persona
+
+Each story: what the person does, the artefacts it leaves (in-container path +
+repo `file:line`), and — where not self-evident — why it is realistic.
+
+### 3.1 John Stravidis
+
+Contracted frontend freelancer who built Waystar Connect. Works from
+`ubuntu_workstation` (`10.30.0.5`), deploys to `apache` (`10.40.0.2`). Competent
+and non-malicious; every shortcut traces back to the four-week deadline. His two
+boxes are where the attack chain begins.
+
+#### 3.1.1 Onboarded and given deploy access to apache
+
+Per the transition team's checklist (`Documents/Your first few days.md`), John
+picks up the provisioned Linux box, keeps the interim password "for now",
+generates an ed25519 keypair, and sends the pubkey to IT so they authorize him on
+the deploy host.
+
+**Artefacts left behind:**
+- `~/.ssh/id_ed25519` + `.pub` on the workstation — `ubuntu_workstation/Dockerfile:68-69`
+- `john.stravidis@apache` `authorized_keys` — `apache/Dockerfile:53`
+- `Host apache` deploy entry — `ubuntu_workstation/john_home/.ssh/config:1-5`
+- Unrotated interim password `waystar2026!` — `ubuntu_workstation/Dockerfile:58`; open reset TODO in `Documents/Your first few days.md:9-12`
+
+*Why realistic:* the interim password that "is fine for now" and never gets
+rotated is the most common small-shop credential-hygiene failure.
+
+#### 3.1.2 Clones the repo and runs the first pipeline test deploy
+
+Clones `git@apache:waystar-connect.git`, runs `npm install` / `npm run dev`, and
+ships a hello-world bundle via `rsync` to prove the pipeline end-to-end before
+real code.
+
+**Artefacts left behind:**
+- Project working tree incl. `node_modules/` — `ubuntu_workstation/john_home/projects/waystar-connect/`
+- Deploy procedure doc (exact rsync line) — `.../waystar-connect/docs/deploy.md:18-21`
+- First deploy timestamp — `apache/john_home/projects/waystar-connect/deploy.log:1-2`
+- Command trail — `ubuntu_workstation/john_home/.bash_history:19-50`
+
+*Why realistic:* proving the deploy path with a throwaway page is standard practice.
+
+#### 3.1.3 Runs the daily build-and-deploy loop
+
+Edits, `npm run build`, `npm run deploy` (aliased) — which is just
+`rsync -avz --delete dist/ john.stravidis@apache:/opt/waystar-connect/dist/`.
+
+**Artefacts left behind:**
+- `deploy` alias + `PGPASSFILE` export — `ubuntu_workstation/john_home/.bashrc:23-26`
+- Deploy history, declining file counts (polished MVP, then small fixes) — `apache/john_home/projects/waystar-connect/deploy.log:1-10`
+- Served bundle on apache — `/opt/waystar-connect/dist/` (`apache/Dockerfile:52`)
+- Command trail both boxes — `ubuntu_workstation/john_home/.bash_history:49,89`; `apache/john_home/.bash_history:1-17`
+
+*Why realistic:* a `--delete` rsync deploy with no CI is what a solo dev under
+deadline reaches for.
+
+#### 3.1.4 Chmod 777s the cron maintenance script while debugging
+
+Working a deploy-permission issue with IT helpdesk — the per-minute `cleanup.sh`
+cron job keeps overwriting the files he is testing — the fix that lands is a
+`chmod 777` on `/opt/cleanup.sh` so `www-data` can also trigger it from a
+browser-reachable test endpoint. John leaves a revert TODO, gets pulled into a UI
+fix, and never reverts. (He has no sudo on apache himself; the privileged change
+rode in on the helpdesk ticket.)
+
+**Artefacts left behind:**
+- `/opt/cleanup.sh` mode `777`, root-owned — `apache/Dockerfile:37-38`
+- In-file TODO matching John's identity + `Last edit: John Stravidis` header — `apache/cleanup.sh:11-17`
+- Per-minute root cron entry — `apache/Dockerfile:41-42`
+- Corroboration in onboarding note ("permissions looser than they should be") — `Documents/Your first few days.md:53-56`
+
+*Why realistic:* time-pressure debugging shortcuts that survive into production
+are the most-cited root cause in incident post-mortems; the TODO is the artefact
+of the intention to fix it. This is the privilege-escalation vector of the chain
+(see [attack_plan.md](./attack_plan.md)).
+
+#### 3.1.5 Wires up read-only DB access to inspect real data shapes
+
+Connects with `psql -h db-internal -U waystar-readonly`, then hand-writes a
+`.pgpass` line so `psql` stops prompting. Separately, the project shipped with a
+`.env` of vibecoded boilerplate — AI-generated alongside the MVP — that carries
+the workstation password as a "convenience" value; no script reads it, and it was
+never audited or removed.
+
+**Artefacts left behind:**
+- Read-only DB cred, self-created via `echo ... >> .pgpass` — `ubuntu_workstation/john_home/.bash_history:78-79`; file at `.../waystar-connect/.pgpass`
+- `PGPASSFILE` pointing at it — `ubuntu_workstation/john_home/.bashrc:26`
+- `.env` carrying `WS_PASS=waystar2026!`, unused boilerplate, never removed — `apache/john_home/.env:9-18`
+- `waystar-app` DB creds for the booking CGI (separate, app-owned) — `apache/Dockerfile:74-78`
+
+*Why realistic:* a developer self-creating a `.pgpass` to stop prompts is
+everyday convenience; the credential lands on disk as a direct result. The
+plaintext `WS_PASS` is the "vibecoded code, never reviewed" line from
+[scenario_story.md](./scenario_story.md) made literal — the file's own comment
+admits it was "meant to be removed before go-live".
+
+#### 3.1.6 Probes what else his deploy key can reach during onboarding
+
+Tries his key against other internal hosts out of curiosity, finds only `apache`
+accepts him, and notes in his config that "the rest are key-only and centrally
+managed."
+
+**Artefacts left behind:**
+- Probe entries for `luke_ws` / `vinzenz_ws` with explaining comment — `ubuntu_workstation/john_home/.ssh/config:7-18`
+- Failed-reach command noise (incl. hosts not in the current fleet) — `ubuntu_workstation/john_home/.bash_history:65-71`
+
+*Why realistic:* the denied attempts are themselves a SOC signal (failed
+`T1021.004` / `T1078`), and the stale config entries model how access notes
+accumulate.
+
+### 3.2 Luke Smith
+
+Psychiatrist on the clinical team. Works from `luke_ws` (`10.30.0.7`), a standard
+credentialed end-user box. Patient data is his daily work, not a guarded asset —
+which is what makes the box a high-value, low-friction target. The attacker
+reaches him only via Vinzenz (§3.3).
+
+#### 3.2.1 Reviews his caseload against the central patient DB
+
+Runs `psql` against `db-internal` as `waystar-readonly`, mostly through the
+`notes` and `mypatients` aliases. A `.pgpass` set up by the transition team
+during provisioning means he never types the password.
+
+**Artefacts left behind:**
+- Read-only DB cred — `luke_ws/luke_home/.pgpass:1` (`waystar-readonly` / `ChangeMe!2026`, same cred John holds)
+- `notes` / `mypatients` aliases — `luke_ws/luke_home/.bashrc:21-22`
+- Query trail — `luke_ws/luke_home/.bash_history:4-9`
+- `Host apache` / `Host db-internal` reach — `luke_ws/luke_home/.ssh/config:5-13`
+
+*Why realistic:* a clinician with read access plus a `.pgpass` is the default
+"credentialed end-user" posture.
+
+#### 3.2.2 Keeps an offline cache of his own patients
+
+Maintains a thin local SQLite mirror of his caseload (names, ICD-10 diagnoses,
+risk flags, session headlines), queried via the `localnotes` alias / `sqlite3`.
+
+**Artefacts left behind:**
+- Local patient cache — `/home/luke.smith/.local/share/waystar-psyc/patients.sqlite`, built from `luke_ws/patient-cache.sql` at `luke_ws/Dockerfile:70-76`
+- `localnotes` alias — `luke_ws/luke_home/.bashrc:25`
+- Cache-read commands — `luke_ws/luke_home/.bash_history:10-11`
+
+*Why realistic:* clinicians routinely keep a personal offline copy of "their"
+patients despite a central system. It is the Phase-11 local-cache loot artefact
+(T1005) and the reason patient data sits on an end-user box at all.
+
+#### 3.2.3 Backs up his session notes to the apache host
+
+Rsyncs his notes folder to a `backup/notes/` directory under his named account on
+`apache`, the one internal server he can reach, then SSHes in to confirm.
+
+**Artefacts left behind:**
+- Backup target dir — `/home/luke.smith/backup/notes/`, created at `apache/Dockerfile:104-107`
+- `luke.smith` account on apache (no sudo, password auth) — `apache/Dockerfile:104-105`
+- Rsync + follow-up `ssh apache` — `luke_ws/luke_home/.bash_history:16-17`
+
+*Why realistic:* a non-technical user improvising a backup to a server he happens
+to reach is exactly the unsanctioned data-spread that puts clinical notes on a
+DMZ-adjacent webserver. (The source `~/Documents/notes/` tree is not materialised
+— see §5.)
+
+### 3.3 Vinzenz Fedora
+
+Sole sysadmin. Works from `vinzenz_ws` (`10.30.0.8`); the only person with SSH
+reach into every host plus superuser DB access. His box is the top of the
+pyramid. His hygiene is fine for a one-person shop — one account, one key, no
+break-glass, no rotation — which is precisely the realistic weakness modeled.
+
+#### 3.3.1 Provisions a managed box (account + key + interim password)
+
+Whenever a host joins the fleet, Vinzenz creates a `vinzenz.fedora` sudoer
+account on it, drops his pubkey into that account's `authorized_keys` for future
+maintenance, sets a weak `<role>!<year>` interim password on the primary user
+(expecting them to reset it), and adds the host to his Ansible inventory. He does
+not follow up on the resets.
+
+**Artefacts left behind:**
+- His pubkey as `authorized_keys` on every host (same `vincent_admin_key.pub`) — `apache/Dockerfile:92`, `ubuntu_workstation/Dockerfile:106`, `luke_ws/Dockerfile:56`, `vinzenz_ws/Dockerfile:59`
+- `vinzenz.fedora` sudoer accounts fleet-wide — `apache/Dockerfile:89`, `ubuntu_workstation/Dockerfile:103`, `luke_ws/Dockerfile:39`
+- Unrotated interim passwords — `chpasswd` at `apache/Dockerfile:90`, `ubuntu_workstation/Dockerfile:58`, `luke_ws/Dockerfile:36`
+- Fleet manifest pointing at his private key — `vinzenz_ws/vinzenz_home/inventory.ini:4-19`
+
+*Why realistic:* a one-sysadmin shop with no rotation accumulates exactly this —
+one admin key trusted everywhere, plus interim passwords nobody resets. In the
+lab these steps are modeled by the Dockerfile `COPY`/`chpasswd` lines (§1).
+
+#### 3.3.2 Uses one unencrypted admin key for all access and automation
+
+Keeps a single ed25519 keypair as his fleet identity, stored without a passphrase
+so unattended Ansible and scripted rsync work. His `.ssh/config` maps friendly
+aliases to the right IPs and that one `IdentityFile`.
+
+**Artefacts left behind:**
+- Unencrypted cross-fleet private key — `/home/vinzenz.fedora/.ssh/id_ed25519`, placed at `vinzenz_ws/Dockerfile:55`
+- Fleet aliases all pointing at it — `vinzenz_ws/vinzenz_home/.ssh/config:1-24`
+- Inventory referencing it — `vinzenz_ws/vinzenz_home/inventory.ini:19`
+
+*Why realistic:* a passphrase-less admin key is the standard trade-off so
+automation runs unattended. It is the central loot artefact of the advanced chain
+(T1552.004): this one file yields the whole fleet.
+
+#### 3.3.3 Runs daily fleet health checks
+
+Checks each host via aliases (`check-apache`, `check-john`, `check-luke`,
+`fleet-uptime`) and an occasional `ansible all -m ping`, learning host keys on
+first contact (`accept-new`).
+
+**Artefacts left behind:**
+- Fleet-check aliases — `vinzenz_ws/vinzenz_home/.bashrc:18-21`
+- Health-check trail incl. `ansible ... -m ping` — `vinzenz_ws/vinzenz_home/.bash_history:4-12`
+- `known_hosts` learned via `accept-new` — `vinzenz_ws/vinzenz_home/.ssh/known_hosts:1-2`
+
+*Why realistic:* a sysadmin scripting morning rounds with thin SSH wrappers is
+universal.
+
+#### 3.3.4 Administers the patient DB as superuser
+
+Connects to `db-internal` as the `waystar` superuser through a `dbshell` alias,
+backed by a `.pgpass` so he is never prompted.
+
+**Artefacts left behind:**
+- Superuser DB cred — `vinzenz_ws/vinzenz_home/.pgpass:1` (`waystar` / `WaystarDB!Secure2024`)
+- `dbshell` alias — `vinzenz_ws/vinzenz_home/.bashrc:24`
+- Superuser query trail — `vinzenz_ws/vinzenz_home/.bash_history:13-15`
+
+*Why realistic:* full read+write over all patient data — a second T1005 crown
+jewel alongside the private key.
+
+#### 3.3.5 Centralises host logs for retention
+
+Rsyncs each host's persisted auth log back to a local `/srv/log-archive/` tree,
+and occasionally captures traffic / checks sockets while troubleshooting.
+
+**Artefacts left behind:**
+- Log-pull commands from `luke` and `john` — `vinzenz_ws/vinzenz_home/.bash_history:19-20`
+- Troubleshooting trail (`tcpdump`, `netstat`) — `vinzenz_ws/vinzenz_home/.bash_history:21-22`
+- Runbook/on-call notes he edits — `vinzenz_ws/vinzenz_home/.bash_history:16-17` (referenced files under `~/runbooks/`, `~/notes/` not materialised — see §5)
+
+*Why realistic:* hand-pulled log retention (no SIEM — the Linux stack is
+mid-transition) matches Waystar's stated visibility gap.
+
+## 4. Cross-container information flow
+
+The same credential or key material appearing on more than one host, and how the
+workflow spread it — the map an attacker uses to turn one foothold into many, and
+a defender uses to scope blast radius. Each row resolves to a story above.
+
+| Shared resource | Appears on | How the workflow spread it | Story |
+|---|---|---|---|
+| `vincent_admin_key` pubkey (authorized_keys) | `apache`, `ubuntu_workstation`, `luke_ws`, `vinzenz_ws` | Vinzenz authorizes one admin key on every box he provisions | §3.3.1 |
+| `vincent_admin_key` **private** | `vinzenz_ws` only | his single unencrypted identity for all SSH + automation | §3.3.2 |
+| `john_deploy_key` keypair | `ubuntu_workstation` (priv+pub+auth), `apache` (authorized_keys; **also private** — anomaly) | John's deploy authorization onto apache | §3.1.1, §5 |
+| `waystar-readonly` / `ChangeMe!2026` | `ubuntu_workstation` (`~/projects/.../.pgpass`), `luke_ws` (`~/.pgpass`) | one shared read account handed to two independent end-users | §3.1.5, §3.2.1 |
+| `waystar` superuser / `WaystarDB!Secure2024` | `vinzenz_ws` (`~/.pgpass`), `db-internal` (the role) | sysadmin keeps superuser creds on disk | §3.3.4 |
+| `waystar-app` / `AppBooking!2026` | `apache` (`/etc/waystar/db.env`), `db-internal` (the role) | booking CGI's insert-only account | §3.1.5 |
+| interim password `waystar2026!` | `ubuntu_workstation` (account), `apache` (`~/.env` `WS_PASS`) | same unrotated secret copied into a project `.env` | §3.1.1, §3.1.5 |
+| `vinzenz.fedora` sudoer account | all four Linux hosts | Vinzenz's named admin account per provisioning | §3.3.1 |
+| patient data | `db-internal` (authoritative) → `luke_ws` (`patients.sqlite`) → `apache` (`backup/notes/`) | Luke's offline cache + ad-hoc note backup | §3.2.2, §3.2.3 |
+
+- **`waystar-readonly` is the widest-spread low-privilege secret** — on two
+  end-user boxes; either leaks the same DB read access.
+- **`vinzenz_ws` is the single point of total compromise** — the only host
+  carrying both the private master key and the superuser DB cred, which is why
+  the advanced chain pivots there ([attack_plan.md](./attack_plan.md)).
+
+## 5. Identified gaps
+
+Organic-realism gaps surfaced while writing §3–§4. These are **candidate
+follow-up issues** for separate tickets, not fixed here — this document is
+read-only over the existing infrastructure.
+
+### 5.1 Consistency contradictions
+
+- **John's private key is on `apache`.** `apache/Dockerfile:54` copies the
+  **private** `john_deploy_key` to `~/.ssh/id_ed25519`, but
+  `shared-lab-keys/README.md:7-13` says it lives only on the workstation.
+  Organically apache needs only the pubkey. Re-justify (apache as a sync jump
+  host) or drop the private copy.
+- **"In-house backend lead" vs. "no in-house dev team."**
+  `.../Documents/Useful contacts.md:7` lists A. Kowalski as backend lead, but
+  [scenario_story.md](./scenario_story.md) says Waystar has none. Pick one.
+- **Luke writes notes to the DB but holds only a read account.**
+  [scenario_story.md](./scenario_story.md) has Luke writing session notes into
+  `db-internal`, yet his only credential is `waystar-readonly`
+  (`luke_ws/luke_home/.pgpass:1`). Give him a write path or reframe his DB work
+  as read-only.
+- **`cleanup.sh` edit dates predate the project.** TODOs at
+  `apache/cleanup.sh:12-19` are dated 2024-08/09, but the deploys in
+  `deploy.log` run Jan–Mar 2026. Align the dates.
+
+### 5.2 Paths referenced in history but not materialised
+
+`.bash_history` files act on paths that exist only as `.gitkeep` (or not at all)
+— a realism break and a missed loot opportunity (real notes/runbooks would be
+strong T1005 targets).
+
+- **Luke's `~/Documents/notes/`** — rsync source at `luke_ws/luke_home/.bash_history:16`; dir is only `Documents/.gitkeep`.
+- **Luke's `~/Documents/cases/case_A/treatment_plan.md`** — read at `luke_ws/luke_home/.bash_history:14-15`; does not exist.
+- **Vinzenz's `~/runbooks/2026-q2-patching.md` + `~/notes/2026-05-15_oncall.md`** — edited at `vinzenz_ws/vinzenz_home/.bash_history:16-17`; dirs are only `.gitkeep`.
+- **Vinzenz's `/srv/log-archive/luke/` + `/srv/log-archive/john/`** — rsync destinations at `vinzenz_ws/vinzenz_home/.bash_history:19-20`; path does not exist.
+
+### 5.3 Thin or planted-feeling artefacts
+
+- **`vinzenz.fedora` on `apache` has no presence beyond a key.** Only
+  `authorized_keys` (`apache/Dockerfile:92`) — no home seed, no `.bash_history`,
+  no `.ssh/config`. Reads as placed-for-the-pivot. Add a minimal home / a few
+  fleet-check commands to match his footprint elsewhere.
+- **Phantom hosts in John's history.**
+  `ubuntu_workstation/john_home/.bash_history:65-71` SSHes to `hardened-ws-1` /
+  `hardened-ws-2`, in neither `inventory.ini` nor John's `.ssh/config`. Add them
+  to the fleet model (e.g. decommissioned hosts — useful "old keys accumulate"
+  flavour) or remove the references.
+
+### 5.4 Not yet covered by a workflow story
+
+- **VNC `:5901` with no authentication** on `ubuntu_workstation`
+  (`~/.vnc/xstartup`, `ubuntu_workstation/Dockerfile:79`, `EXPOSE` 5901) is in
+  [scenario_story.md](./scenario_story.md) but has no origin story. Add one or
+  fold into onboarding.
+- **Missing earlier-sysadmin / non-technical-staff personas.** Prior-admin
+  residue (rotated keys, stale `sudoers.d/`, an `~oldadmin`) or
+  therapist/assistant accounts would raise realism, but are backed by no files —
+  noted here rather than asserted.
+
+### 5.5 Noted but not a gap
+
+- **Placeholder `known_hosts`** (`luke_ws` and `vinzenz_ws`) looks like a missing
+  trust-on-first-use step but is not: both `.ssh/config` set
+  `StrictHostKeyChecking accept-new` (`luke_ws/luke_home/.ssh/config:2`,
+  `vinzenz_ws/vinzenz_home/.ssh/config:2`), so first contact is auto-accepted
+  non-interactively. Left here so a reviewer doesn't re-flag it.
