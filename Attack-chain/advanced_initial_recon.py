@@ -54,7 +54,13 @@ HTTP_TIMEOUT = 5.0
 
 
 def _probe(url: str, *, method: str) -> tuple[int, dict[str, str], bytes]:
-    """Issue one HTTP request with the browser UA, return (status, headers, body).        """
+    """Issue one HTTP request with the browser UA, return (status, headers, body).
+
+    Never raises -- HTTP errors and timeouts come back as ``(status, {}, b'')``
+    so the caller logs the failure rather than aborting the chain. 4xx / 5xx
+    responses still carry useful headers (e.g. ``Server``) so they're
+    returned with the error code.
+    """
     req = urllib.request.Request(url, method=method, headers={"User-Agent": BROWSER_UA})
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
@@ -67,6 +73,13 @@ def _probe(url: str, *, method: str) -> tuple[int, dict[str, str], bytes]:
 
 
 def _osint_narrative(target: str) -> None:
+    """Log lines that simulate prior OSINT before any packet hits the lab.
+
+    The lab can't actually reach Shodan / Censys, so the lines are synthetic.
+    Their purpose is to surface the APT recon pattern in the chainlog and in
+    ``chain-<run_id>.json`` -- a SOC analyst should see that the operator
+    already knew what they were targeting before sending the first request.
+    """
     log("[*] Phase 0 -- OSINT (no packets to target yet)")
     log(f"    Shodan match     : Apache httpd / port 80 on {target}")
     log(f"    Cert transparency: waystar-royco.example -> {target}")
@@ -85,6 +98,9 @@ def phase_banner_grab(target: str) -> tuple[int, str]:
 
 def phase_modcgi_probe(target: str) -> int:
     """Phase 2 -- HEAD /cgi-bin/ to confirm ``mod_cgi`` is loaded.
+
+    A 403 (forbidden directory listing) means the handler is loaded; a 404
+    means it isn't and the CVE-2021-41773 exploit wouldn't have a target.
     """
     log(f"\n=== Phase 2: mod_cgi probe HEAD http://{target}/cgi-bin/ ===")
     status, _, _ = _probe(f"http://{target}/cgi-bin/", method="HEAD")
@@ -132,7 +148,12 @@ def run(
     results_dir: str | os.PathLike[str] = DEFAULT_RESULTS_DIR,
     kali_host: str = DEFAULT_KALI_HOST,
 ) -> None:
-    """Run the advanced recon flow."""
+    """Run the advanced recon flow.
+
+    Matches the call shape ``main.py`` expects for a recon step (``target``,
+    ``results_dir``, ...). ``kali_host`` is accepted to mirror the basic
+    adapter's Context fields even though this recon doesn't dial back to kali.
+    """
     results = Path(results_dir)
     results.mkdir(parents=True, exist_ok=True)
     _ = kali_host  # accepted for adapter parity
