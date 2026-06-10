@@ -1,0 +1,24 @@
+# Vim 9.1 viminfo
+|1,4
+*encoding=utf-8
+~h
+
+# Command Line History:
+:wq
+|2,0,1717843300,,"wq"
+:e /etc/cron.d/cleanup
+|2,0,1717843000,,"e /etc/cron.d/cleanup"
+:e /usr/local/apache2/conf/httpd.conf
+|2,0,1717842500,,"e /usr/local/apache2/conf/httpd.conf"
+
+# Search String History:
+?TODO
+|2,1,1717843200,,"TODO"
+
+# File marks:
+'0  1  0  /etc/cron.d/cleanup
+|4,48,1,0,1717843000,"/etc/cron.d/cleanup"
+'1  1  0  /usr/local/apache2/conf/httpd.conf
+|4,49,1,0,1717842500,"/usr/local/apache2/conf/httpd.conf"
+'2  14  0  /opt/cleanup.sh
+|4,50,14,0,1717068000,"/opt/cleanup.sh"

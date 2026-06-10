@@ -1,0 +1,8 @@
+.less-history-file:
+.search
+"error
+"cron
+"cleanup
+.shell
+tail /var/log/cleanup.log
+ps aux | grep httpd

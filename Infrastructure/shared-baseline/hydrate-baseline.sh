@@ -133,15 +133,11 @@ for tpl in "$TPL_DIR"/*.tpl; do
 
     # Ensure target dir exists, append-or-create.
     mkdir -p "$(dirname "$target")"
-    # Strip the # TARGET: header line and the # comment marker rows that follow
-    # it (any line where the FIRST character is '#' that appears BEFORE the
-    # first non-comment line). After the first non-comment line, '#' lines are
-    # part of the rendered output (dpkg/apt history files use '#' inside).
-    awk '
-        BEGIN { in_header = 1 }
-        in_header && /^#/ { next }
-        { in_header = 0; print }
-    ' "$tpl" | render_tokens >> "$target"
+    # Drop every '#'-comment line anywhere in the template (TARGET header +
+    # section dividers + inline notes). Blank lines pass through — apt
+    # history.log needs them between Start-Date blocks for readability.
+    # None of the supported target log formats start a content line with '#'.
+    awk '/^[ \t]*#/ { next } { print }' "$tpl" | render_tokens >> "$target"
 
     echo "[hydrate-baseline] persona=$PERSONA  tpl=$(basename "$tpl")  ->  $target" >&2
 done

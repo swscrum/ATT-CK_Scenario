@@ -116,28 +116,14 @@ RUN chmod +x /usr/local/bin/hydrate-baseline.sh
 # Initialise a real git repo in ~/projects/waystar-connect/ so John's
 # bash_history references (git log, git status, git pull) land against an
 # actual history rather than a "not a git repository" error. Five commits
-# spanning the past 45 days, attributed to john.stravidis.
-# Run as john.stravidis (his repo, his commits) — root-owned .git would be
-# wrong here.
-RUN cd /home/john.stravidis/projects/waystar-connect \
-    && chown -R john.stravidis:john.stravidis . \
-    && runuser -u john.stravidis -- sh -c ' \
-        cd /home/john.stravidis/projects/waystar-connect \
-        && git init -q -b main \
-        && git config --local user.email "john.stravidis@waystar-connect.dev" \
-        && git config --local user.name  "John Stravidis" \
-        && GIT_AUTHOR_DATE="$(date -u -d \"45 days ago\" +%Y-%m-%dT10:14:22Z)" GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE" \
-           sh -c "git add package.json README.md vite.config.js && git commit -q -m \"scaffold: vite + vue3 project + readme\"" \
-        && GIT_AUTHOR_DATE="$(date -u -d \"31 days ago\" +%Y-%m-%dT15:40:11Z)" GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE" \
-           sh -c "git add src/index.html src/styles.css && git commit -q -m \"ui: initial booking-form layout\"" \
-        && GIT_AUTHOR_DATE="$(date -u -d \"17 days ago\" +%Y-%m-%dT11:22:08Z)" GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE" \
-           sh -c "git add src/App.vue && git commit -q -m \"vue: wire BookingForm with focus + date fields\"" \
-        && GIT_AUTHOR_DATE="$(date -u -d \"10 days ago\" +%Y-%m-%dT16:08:55Z)" GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE" \
-           sh -c "git add src/app.js && git commit -q -m \"app.js: POST to /cgi-bin/book.py + minimal validation\"" \
-        && GIT_AUTHOR_DATE="$(date -u -d \"3 days ago\" +%Y-%m-%dT09:17:32Z)" GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE" \
-           sh -c "git add docs/deploy.md package-lock.json seed_dev_db.sql && git commit -q -m \"docs: deploy steps; pkg-lock; dev-db seed\"" \
-        && git log --oneline \
-    '
+# spanning the past 45 days, attributed to john.stravidis with author-dates
+# computed at build time relative to `date -u`. Drive the commit sequence
+# via a heredoc'd shell script written to /tmp so the quoting stays sane.
+COPY ubuntu_workstation/seed-waystar-git.sh /tmp/seed-waystar-git.sh
+RUN chown -R john.stravidis:john.stravidis /home/john.stravidis/projects/waystar-connect \
+    && chmod +x /tmp/seed-waystar-git.sh \
+    && runuser -u john.stravidis -- /tmp/seed-waystar-git.sh \
+    && rm /tmp/seed-waystar-git.sh
 
 COPY ubuntu_workstation/logind-stub.py /usr/local/bin/logind-stub.py
 # D-Bus policy that allows root to own org.freedesktop.login1 (the logind stub).

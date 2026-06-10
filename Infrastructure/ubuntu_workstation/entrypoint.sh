@@ -53,6 +53,10 @@ hydrate_john_known_hosts() {
     chmod 644 "$kh"
 }
 hydrate_john_known_hosts &
+# disown so the hydrator does NOT register in the shell's job table;
+# otherwise the trailing `wait -n` (which keeps PID 1 alive on the VNC
+# server) would pick up the hydrator's completion and exit the container.
+disown
 log "[entrypoint] john known_hosts hydrator launched in background"
 
 # Clean any stale X/ICE state left behind by a previous container start

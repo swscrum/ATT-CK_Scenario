@@ -11,6 +11,7 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
         rsync \
         python3 python3-psycopg2 \
         nmap sshpass \
+        gawk \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
@@ -91,6 +92,8 @@ RUN apt-get update \
     && useradd -m -s /bin/bash -G sudo vinzenz.fedora \
     && echo 'vinzenz.fedora:VinzenzAdmin!2026' | chpasswd \
     && mkdir -p /home/vinzenz.fedora/.ssh
+# Seed Vinzenz's apache-side home with his lived-in dotfiles + bash_history.
+COPY apache/vinzenz_home/ /home/vinzenz.fedora/
 COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_keys
 RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
     && chmod 700 /home/vinzenz.fedora/.ssh \
@@ -105,16 +108,32 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
 # ============================================================================
 RUN useradd -m -s /bin/bash luke.smith \
     && echo 'luke.smith:WaystarLuke!2026' | chpasswd \
-    && mkdir -p /home/luke.smith/backup/notes \
-    && chown -R luke.smith:luke.smith /home/luke.smith
+    && mkdir -p /home/luke.smith/backup/notes
+# Seed Luke's apache-side home (his backup-target account).
+COPY apache/luke_home/ /home/luke.smith/
+RUN chown -R luke.smith:luke.smith /home/luke.smith
 
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
 
-# Start script: launch cron and sshd, then Apache in the foreground (so the
-# container doesn't exit immediately after start).
-RUN printf '#!/bin/sh\nservice cron start\nservice ssh start\nexec httpd-foreground\n' > /usr/local/bin/start.sh \
+# Build-time activity baseline — see Infrastructure/shared-baseline/README.md
+COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
+COPY shared-baseline/templates/apache/          /usr/local/share/baseline/apache/
+RUN chmod +x /usr/local/bin/hydrate-baseline.sh
+
+# Start script: hydrate baseline, launch cron + sshd, then Apache foreground.
+# Use a heredoc instead of printf so the multi-line script is readable.
+RUN cat > /usr/local/bin/start.sh <<'EOF' \
     && chmod +x /usr/local/bin/start.sh
+#!/bin/sh
+# Apache start script. Hydrate the activity baseline BEFORE cron starts,
+# then launch services + httpd in the foreground.
+BASELINE_PERSONA=apache /usr/local/bin/hydrate-baseline.sh \
+    || echo "[start.sh] hydrate-baseline failed (non-fatal)"
+service cron start
+service ssh start
+exec httpd-foreground
+EOF
 
 CMD ["/usr/local/bin/start.sh"]
 
