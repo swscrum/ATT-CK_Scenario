@@ -35,6 +35,7 @@ RUN apt-get update \
         tmux \
         vim \
         htop \
+        python3 \
     && rm -rf /var/lib/apt/lists/* \
     # Reclaim UID 1000 if the base image ships an `ubuntu` user.
     && if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
@@ -69,8 +70,9 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
 
 # Lab File Integrity Monitor + rsyslog mirror — same pattern as john_ws.
 COPY vinzenz_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
+COPY vinzenz_ws/simulate_admin.sh  /usr/local/bin/simulate_admin.sh
 COPY vinzenz_ws/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
-RUN chmod +x /usr/local/bin/lab-fim.sh
+RUN chmod +x /usr/local/bin/lab-fim.sh /usr/local/bin/simulate_admin.sh
 
 # Build-time activity baseline. The hydrator renders date-relative tokens at
 # first boot (before rsyslog + lab-fim start), writing 14-60 days of

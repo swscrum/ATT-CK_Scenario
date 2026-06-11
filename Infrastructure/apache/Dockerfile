@@ -12,11 +12,33 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
         python3 python3-psycopg2 \
         nmap sshpass \
         gawk \
+        libcap2-bin \
+        inotify-tools \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
         || { b=$(command -v base64 2>/dev/null) && [ -n "$b" ] && ln -sf "$b" /usr/bin/base64; } \
         || true)
+
+# ============================================================================
+#  MISCONFIGURATION — MITRE ATT&CK T1548.001 (Abuse Elevation Control:
+#                                              Setuid and Setgid — file capability)
+# ----------------------------------------------------------------------------
+#  Vinzenz set cap_setuid on python3 so the booking CGI (running as www-data
+#  via mod_cgi) could chown user-uploaded session-note attachments to the
+#  app's UID. He thought the capability applied only to the CGI script; in
+#  reality file capabilities are per-binary, so EVERY invocation of
+#  /usr/bin/python3 (by any user) silently gets cap_setuid+ep. A www-data
+#  shell from CVE-2021-41773 can call os.setuid(0) and become root without
+#  touching cron, sudo, or any SUID bit — and without writing to any path
+#  the lab FIM is currently watching.
+#
+#  Drives the advanced-mode privesc step (advanced_webserver_privesc.py).
+#  Basic mode still uses the /opt/cleanup.sh cron misconfig below (T1053.003);
+#  both misconfigs coexist so both modes work from the same image.
+# ============================================================================
+RUN setcap cap_setuid,cap_setgid+ep "$(readlink -f /usr/bin/python3)" \
+    && getcap "$(readlink -f /usr/bin/python3)"
 
 # Building Apache 2.4.49 ourselves would also work, but using the upstream
 # httpd:2.4.50 image is faster and equally vulnerable to CVE-2021-41773.
@@ -116,24 +138,23 @@ RUN chown -R luke.smith:luke.smith /home/luke.smith
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
 
-# Build-time activity baseline — see Infrastructure/shared-baseline/README.md
+# Start script + lab-FIM + activity baseline.
+#  - start.sh: cron + ssh, writes capability baseline (T1548.001 detection
+#    anchor — PR #141), hydrates the activity baseline (this PR), kicks off
+#    lab-fim, exec's httpd. Lives in the source tree so it can be edited
+#    without rebaking inline shell into the Dockerfile.
+#  - lab-fim.sh: inotify watcher for the basic-mode privesc tripwire +
+#    cgi-bin webshell drop + sudoers tamper (PR #141).
+#  - hydrate-baseline.sh + templates/apache: persona-keyed log baseline
+#    (this PR) — renders 14-60 days of past auth/dpkg/apt/cleanup activity
+#    so the host doesn't boot with a clean log slate.
+COPY apache/start.sh                            /usr/local/bin/start.sh
+COPY apache/lab-fim.sh                          /usr/local/bin/lab-fim.sh
 COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
 COPY shared-baseline/templates/apache/          /usr/local/share/baseline/apache/
-RUN chmod +x /usr/local/bin/hydrate-baseline.sh
-
-# Start script: hydrate baseline, launch cron + sshd, then Apache foreground.
-# Use a heredoc instead of printf so the multi-line script is readable.
-RUN cat > /usr/local/bin/start.sh <<'EOF' \
-    && chmod +x /usr/local/bin/start.sh
-#!/bin/sh
-# Apache start script. Hydrate the activity baseline BEFORE cron starts,
-# then launch services + httpd in the foreground.
-BASELINE_PERSONA=apache /usr/local/bin/hydrate-baseline.sh \
-    || echo "[start.sh] hydrate-baseline failed (non-fatal)"
-service cron start
-service ssh start
-exec httpd-foreground
-EOF
+RUN chmod +x /usr/local/bin/start.sh \
+             /usr/local/bin/lab-fim.sh \
+             /usr/local/bin/hydrate-baseline.sh
 
 CMD ["/usr/local/bin/start.sh"]
 
