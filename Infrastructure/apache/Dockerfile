@@ -66,21 +66,23 @@ RUN printf '* * * * * root /opt/cleanup.sh\n' > /etc/cron.d/cleanup \
 
 # ============================================================================
 #  john.stravidis — frontend freelancer who built Waystar Connect.
-#  His SSH key is authorized so he can deploy from his workstation.
-#  See Documentation/scenario_story.md for the in-fiction backstory.
+#  Only his PUBLIC key is authorized here, so he can deploy IN from his
+#  workstation. The PRIVATE key deliberately does NOT live on apache: deploys
+#  flow workstation -> apache, never the reverse (see john_home/.ssh/config and
+#  shared-lab-keys/README.md), and the attack chain reads the private key from
+#  the workstation, not from here. See issue #132 and
+#  Documentation/scenario_story.md.
 # ============================================================================
 RUN useradd -m -s /bin/bash john.stravidis
 COPY apache/john_home/ /home/john.stravidis/
 COPY apache/dist/ /opt/waystar-connect/dist/
 COPY shared-lab-keys/john_deploy_key.pub /home/john.stravidis/.ssh/authorized_keys
-COPY shared-lab-keys/john_deploy_key     /home/john.stravidis/.ssh/id_ed25519
 COPY apache/john_home/projects/waystar-connect/deploy.log /opt/waystar-connect/deploy.log
 RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && mkdir -p /opt/waystar-connect/dist.prev \
     && chown -R john.stravidis:john.stravidis /opt/waystar-connect \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
-    && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
     && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts \
     && chmod 600 /home/john.stravidis/.env
 

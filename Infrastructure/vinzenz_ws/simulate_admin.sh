@@ -40,6 +40,9 @@ while true; do
         sleep 30
     fi
     
-    # Normal polling interval
-    sleep 5
+    # Normal polling interval — 60 s. The failure-detection only needs to
+    # fire within ~1 min of the bait being launched; a 5 s cadence saturates
+    # db-internal/postgresql.log with `log_connections=on` entries from
+    # vinzenz.fedora@10.30.0.8 -> waystar-app and adds no training value.
+    sleep 60
 done

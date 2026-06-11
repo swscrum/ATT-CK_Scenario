@@ -151,7 +151,7 @@ except:
         
     if not socket_path:
         log("[-] Timeout waiting for sysadmin SSH login.")
-        return {"vinzenz_shell": None}
+        return {"vinzenz_shell_sock": None}
         
     log(f"[+] WATCHER ALERT: SSH Agent socket found at {socket_path}")
 
@@ -196,7 +196,7 @@ except:
 
     return {
         # Return DummyShell so the orchestrator teardown doesn't crash on .close()
-        "vinzenz_shell": DummyShell() if vinzenz_beacon_id else None,
+        "vinzenz_shell_sock": DummyShell() if vinzenz_beacon_id else None,
         "vinzenz_beacon": vinzenz_beacon_id
     }
 
