@@ -120,6 +120,11 @@ STEP_META_ADVANCED: dict[str, dict] = {
         "techniques": ["T1505.003"],
         "color": "green",
     },
+    "advanced_lateral_movement": {
+        "tactic": "TA0008 · Lateral Movement · TA0040 · Impact",
+        "techniques": ["T1021.004", "T1556.003", "T1499.004"],
+        "color": "magenta",
+    },
 }
 
 
@@ -328,6 +333,18 @@ def _step_advanced_webserver_persistence(ctx: Context) -> dict[str, Any]:
     )
 
 
+def _step_advanced_lateral_movement(ctx: Context) -> dict[str, Any]:
+    from advanced_lateral_movement import run as advanced_lateral_run
+
+    result = advanced_lateral_run(
+        root_sliver_session=ctx.state["root_sliver_session"],
+        kali_host=ctx.kali_host,
+    )
+    if not result.get("vinzenz_shell_sock"):
+        raise RuntimeError("advanced lateral movement returned no shell for vinzenz")
+    return {"vinzenz_shell_sock": result["vinzenz_shell_sock"]}
+
+
 def _step_exploit(ctx: Context) -> dict[str, Any]:
     from initial_access import get_www_shell
 
@@ -487,10 +504,14 @@ CHAIN_BASIC: list[Step] = [
 ]
 
 # Advanced variants land per-host bundles. PR-A shipped the recon step;
-# this PR (PR-B) adds the apache-side exploit + enumeration + privesc. The
-# chain ends after webserver_privesc -- no fall-through into basic steps
-# whose state contracts expect socket handles instead of Sliver beacon IDs.
-# Next PR appends johnws_post_exploit_enum + johnws_lateral_movement.
+# PR-B (#141) added the apache-side exploit + enumeration + privesc +
+# persistence. PR-C (#144 / this PR) adds the lateral movement to
+# vinzenz_ws via SSH-agent-forwarding hijack -- that step produces a
+# socket-typed state key (``vinzenz_shell_sock``), so unlike the earlier
+# advanced steps the chain now mixes Sliver-session IDs and a raw socket
+# handle. The teardown for the lateral step closes the socket on chain
+# exit; downstream advanced steps (johnws_post_exploit_enum etc.) will
+# attach to that socket explicitly. Update this comment when those land.
 CHAIN_ADVANCED: list[Step] = [
     Step("recon", _step_advanced_recon),
     Step("exploit", _step_advanced_exploit),
@@ -508,6 +529,12 @@ CHAIN_ADVANCED: list[Step] = [
         "webserver_persistence",
         _step_advanced_webserver_persistence,
         requires=("root_sliver_session",),
+    ),
+    Step(
+        "advanced_lateral_movement",
+        _step_advanced_lateral_movement,
+        requires=("root_sliver_session",),
+        teardown=_teardown_close_socket("vinzenz_shell_sock"),
     ),
 ]
 

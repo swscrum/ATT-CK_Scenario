@@ -29,5 +29,11 @@ chmod 0644 /var/log/persist/lab-fim.log
 nohup /usr/local/bin/lab-fim.sh >> /var/log/persist/lab-fim.log 2>&1 &
 log "[entrypoint] lab-fim watcher PID $!"
 
+# Reactive Sysadmin Simulation
+touch /var/log/persist/simulate_admin.log
+chown vinzenz.fedora:vinzenz.fedora /var/log/persist/simulate_admin.log
+nohup su - vinzenz.fedora -c "/usr/local/bin/simulate_admin.sh" >> /var/log/persist/simulate_admin.log 2>&1 &
+log "[entrypoint] simulate_admin.sh watcher PID $!"
+
 # sshd in the foreground — keeps PID 1 alive.
 exec /usr/sbin/sshd -D
