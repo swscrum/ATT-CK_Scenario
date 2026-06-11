@@ -40,9 +40,13 @@ while true; do
         sleep 30
     fi
     
-    # Normal polling interval — 60 s. The failure-detection only needs to
-    # fire within ~1 min of the bait being launched; a 5 s cadence saturates
+    # Normal polling interval — 15 s. Tradeoff: 60 s was too slow for the
+    # advanced_lateral_movement chain step (it gives the simulator ~65 s
+    # to detect the bait, fire the ssh -A session, and surface the agent
+    # socket on apache); 5 s (the original) saturates
     # db-internal/postgresql.log with `log_connections=on` entries from
-    # vinzenz.fedora@10.30.0.8 -> waystar-app and adds no training value.
-    sleep 60
+    # vinzenz.fedora@10.30.0.8 -> waystar-app. 15 s detects the bait
+    # within one cycle, cuts log noise 4x vs the original, and leaves
+    # ~25 s for the debugging SSH session inside the chain's deadline.
+    sleep 15
 done
