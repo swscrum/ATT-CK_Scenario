@@ -303,12 +303,14 @@ _SESSION_HEADER_RE = re.compile(r"^\s*ID\s+[A-Z][A-Za-z]+")
 
 
 def _parse_first_id(sliver_output: str) -> str | None:
-    """Extract the first session/beacon name from a sliver-client table.
+    """Extract the last session/beacon name from a sliver-client table.
 
-    Returns the first data-row's first token, or ``None`` if no table was
-    rendered. Skips header, divider, and blank lines.
+    Returns the last data-row's first token, or ``None`` if no table was
+    rendered. Skips header, divider, blank lines, and DEAD/KILLED sessions.
+    This guarantees we pick the newest implant.
     """
     saw_header = False
+    last_id = None
     for line in sliver_output.splitlines():
         if _SESSION_HEADER_RE.search(line):
             saw_header = True
@@ -317,13 +319,13 @@ def _parse_first_id(sliver_output: str) -> str | None:
             continue
         stripped = line.strip()
         if not stripped:
-            # End of the table -- no data rows present.
-            return None
-        if set(stripped) <= set("= "):
-            # Divider row ('====  =========  ...').
             continue
-        return stripped.split()[0]
-    return None
+        if set(stripped) <= set("= "):
+            continue
+        if "[DEAD]" in stripped or "[KILLED]" in stripped:
+            continue
+        last_id = stripped.split()[0]
+    return last_id
 
 
 def _list_sliver(query: str, timeout: int = 10) -> str:

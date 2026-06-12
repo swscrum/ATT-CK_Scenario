@@ -176,7 +176,6 @@ except:
             for line in output.splitlines():
                 if target_ip in line or "vinzenz" in line.lower():
                     vinzenz_beacon_id = line.strip().split()[0]
-                    break
             if vinzenz_beacon_id:
                 break
                 
