@@ -127,7 +127,15 @@ STEP_META_ADVANCED: dict[str, dict] = {
     },
     "advanced_vinzenzws_privesc": {
         "tactic": "TA0006 · Credential Access",
-        "techniques": ["T1556.003", "T1078"],
+        # T1546.004 — Event Triggered Execution: Unix Shell Configuration
+        # Modification (the malicious ``sudo()`` function is appended to
+        # ~/.bashrc and triggers on the admin's next interactive shell).
+        # T1140 — Deobfuscate/Decode Files or Information (we base64-encode
+        # the payload before piping it through ``base64 -d >> ~/.bashrc``
+        # to dodge sliver ``execute``'s shell-quoting quirks).
+        # T1078 — Valid Accounts (the captured credential will be reused
+        # by the admin's own identity to land root in a follow-up step).
+        "techniques": ["T1546.004", "T1140", "T1078"],
         "color": "green",
     },
 }

