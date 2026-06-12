@@ -125,10 +125,10 @@ STEP_META_ADVANCED: dict[str, dict] = {
         "techniques": ["T1021.004", "T1556.003", "T1499.004"],
         "color": "magenta",
     },
-    "vinzenzws_privesc": {
+    "advanced_vinzenzws_privesc": {
         "tactic": "TA0006 · Credential Access",
         "techniques": ["T1556.003", "T1078"],
-        "color": "red",
+        "color": "green",
     },
 }
 def _step_meta(name: str, mode: str = "basic") -> dict:
@@ -464,7 +464,7 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
 
 
 def _step_advanced_vinzenzws_privesc(ctx: Context) -> dict[str, Any]:
-    from vinzenzws_privesc import run as privesc_run
+    from advanced_vinzenzws_privesc import run as privesc_run
 
     result = privesc_run(
         vinzenz_shell=ctx.state.get("vinzenz_beacon"),
@@ -556,7 +556,7 @@ CHAIN_ADVANCED: list[Step] = [
         requires=("root_sliver_session",),
     ),
     Step(
-        "vinzenzws_privesc",
+        "advanced_vinzenzws_privesc",
         _step_advanced_vinzenzws_privesc,
         requires=("vinzenz_beacon",),
     ),
