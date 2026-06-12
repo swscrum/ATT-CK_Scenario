@@ -339,15 +339,23 @@ def _step_advanced_webserver_persistence(ctx: Context) -> dict[str, Any]:
 def _step_advanced_lateral_movement(ctx: Context) -> dict[str, Any]:
     from advanced_lateral_movement import run as advanced_lateral_run
 
+    # The lateral step returns:
+    #   vinzenz_shell_sock — DummyShell stub (kept so teardown helpers don't
+    #                        crash on .close()); not used by downstream steps.
+    #   vinzenz_beacon     — Sliver beacon ID on vinzenz's workstation; this
+    #                        is the real handle the privesc step needs.
     result = advanced_lateral_run(
         root_sliver_session=ctx.state["root_sliver_session"],
         kali_host=ctx.kali_host,
     )
-    if not result.get("vinzenz_shell"):
-        raise RuntimeError("advanced lateral movement returned no shell for vinzenz")
+    vinzenz_beacon = result.get("vinzenz_beacon")
+    if not vinzenz_beacon:
+        raise RuntimeError(
+            "advanced lateral movement: vinzenz workstation beacon never checked in"
+        )
     return {
-        "vinzenz_shell": result["vinzenz_shell"],
-        "vinzenz_beacon": result.get("vinzenz_beacon"),
+        "vinzenz_shell_sock": result.get("vinzenz_shell_sock"),
+        "vinzenz_beacon":     vinzenz_beacon,
     }
 
 
@@ -466,8 +474,17 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
 def _step_advanced_vinzenzws_privesc(ctx: Context) -> dict[str, Any]:
     from advanced_vinzenzws_privesc import run as privesc_run
 
+    # ``requires=("vinzenz_beacon",)`` only checks key presence -- a None
+    # value would still pass. Belt-and-braces: validate the value here so
+    # the underlying sliver_exec() call never receives ``None`` as an
+    # implant ID.
+    vinzenz_beacon = ctx.state.get("vinzenz_beacon")
+    if not vinzenz_beacon:
+        raise RuntimeError(
+            "advanced vinzenz-ws privesc: missing vinzenz_beacon in chain state"
+        )
     result = privesc_run(
-        vinzenz_shell=ctx.state.get("vinzenz_beacon"),
+        vinzenz_beacon=vinzenz_beacon,
         kali_host=ctx.kali_host,
     )
     if not result.get("vinzenz_password_file"):

