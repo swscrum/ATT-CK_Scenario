@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import attacklog
+
 from rich.columns import Columns
 from rich.console import Console
 from rich.panel import Panel
@@ -39,6 +41,7 @@ DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
+ATTACK_LOG_DIR = Path("/Infrastructure/logs/attacker")
 
 STEP_META = {
     "recon": {
@@ -614,6 +617,14 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
     run_dir.mkdir(parents=True, exist_ok=True)
     ctx.results_dir = str(run_dir)
 
+    try:
+        attacklog.open_log(
+            ATTACK_LOG_DIR / f"attack_steps_{_sanitize_run_id(run_id)}.md",
+            {"run_id": run_id, "mode": ctx.mode, "target": ctx.target, "kali": ctx.kali_host},
+        )
+    except Exception as exc:
+        log.warning("attack log disabled — could not open: %s", exc)
+
     _print_banner(ctx, selected)
     results: list[dict] = []
     executed: list[Step] = []
@@ -634,6 +645,13 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             _print_step_header(step, i, len(selected), mode=ctx.mode)
             started = _iso_utc()
             t0 = time.perf_counter()
+            _smeta = _step_meta(step.name, ctx.mode)
+            attacklog.begin_phase(
+                step.name,
+                _smeta.get("tactic", ""),
+                _smeta.get("techniques", []),
+                started,
+            )
             delta = {}
             ok = True
             err = ""
@@ -646,6 +664,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                     elapsed = time.perf_counter() - t0
                     ended = _iso_utc()
                     _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
+                    attacklog.end_phase(step.name, ok, elapsed, ended)
                     results.append(_result_entry(step, ok=ok, started=started,
                                                  ended=ended, elapsed=elapsed,
                                                  err=err, mode=ctx.mode))
@@ -655,6 +674,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             ctx.state.update(delta)
             executed.append(step)
             _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
+            attacklog.end_phase(step.name, ok, elapsed, ended)
             results.append(_result_entry(step, ok=ok, started=started,
                                          ended=ended, elapsed=elapsed,
                                          mode=ctx.mode))
@@ -675,6 +695,10 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                 _write_ground_truth(ctx, run_id, results)
             except Exception as exc:
                 log.warning("failed to write ground-truth JSON: %s", exc)
+        try:
+            attacklog.close_log(results if results else None)
+        except Exception as exc:
+            log.warning("failed to close attack log: %s", exc)
 
     return ctx
 

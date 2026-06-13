@@ -194,6 +194,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ../Attack-chain:/Attack-chain
+      - ./logs/attacker:/Infrastructure/logs/attacker
       - ./shared-lab-keys:/shared-lab-keys:ro
     networks:
       public_net:

