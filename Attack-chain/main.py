@@ -696,7 +696,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             except Exception as exc:
                 log.warning("failed to write ground-truth JSON: %s", exc)
         try:
-            attacklog.close_log(results if results else None)
+            attacklog.close_log(results)
         except Exception as exc:
             log.warning("failed to close attack log: %s", exc)
 

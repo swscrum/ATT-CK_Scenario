@@ -15,6 +15,7 @@ Called from ``main.py``:
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import IO
 
@@ -39,8 +40,8 @@ def _append(line: str) -> None:
             if "] $ " in subline:
                 _fh.write(f"`{subline}`\n")
         _fh.flush()
-    except Exception:
-        pass
+    except OSError as exc:
+        print(f"[attacklog] write error in _append: {exc}", file=sys.stderr)
 
 
 def _append_output(output: str) -> None:
@@ -62,22 +63,28 @@ def _append_output(output: str) -> None:
             _fh.write(f"    ... ({len(lines) - _MAX_OUTPUT_LINES} more lines truncated)\n")
         _fh.write("\n")
         _fh.flush()
-    except Exception:
-        pass
+    except OSError as exc:
+        print(f"[attacklog] write error in _append_output: {exc}", file=sys.stderr)
 
 
 def open_log(path: str | Path, meta: dict) -> None:
     """Create the attack log file and write the run header."""
     global _fh, _phase_count
+    if _fh is not None:
+        _fh.close()
+        _fh = None
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     _fh = path.open("w", encoding="utf-8")
     _phase_count = 0
 
-    run_id = meta.get("run_id", "?")
-    mode   = meta.get("mode", "?")
-    target = meta.get("target", "?")
-    kali   = meta.get("kali", "?")
+    def _safe(v: object) -> str:
+        return str(v).replace("\n", " ").replace("\r", " ").replace("|", "\\|")
+
+    run_id = _safe(meta.get("run_id", "?"))
+    mode   = _safe(meta.get("mode",   "?"))
+    target = _safe(meta.get("target", "?"))
+    kali   = _safe(meta.get("kali",   "?"))
 
     _fh.write(f"# Attack Log — {run_id}\n\n")
     _fh.write(f"**Mode:** {mode} | **Target:** {target} | **Kali:** {kali}\n\n")
@@ -115,18 +122,20 @@ def close_log(results: list[dict] | None = None) -> None:
     global _fh, _phase_count
     if _fh is None:
         return
+    _fh.write("## Summary\n\n")
     if results:
-        _fh.write("## Summary\n\n")
         _fh.write("| Phase | Status | Duration | Tactic |\n")
         _fh.write("|---|---|---|---|\n")
         for r in results:
             icon = "✓" if r.get("ok") else "✗"
             _fh.write(
-                f"| {r['name'].upper()} | {icon} | {r.get('elapsed', 0):.1f}s"
+                f"| {r.get('name', '?').upper()} | {icon} | {r.get('elapsed', 0):.1f}s"
                 f" | {r.get('tactic', '')} |\n"
             )
-        _fh.write("\n")
-        _fh.flush()
+    else:
+        _fh.write("*(run ended before any step completed)*\n")
+    _fh.write("\n")
+    _fh.flush()
     _fh.close()
     _fh = None
     _phase_count = 0

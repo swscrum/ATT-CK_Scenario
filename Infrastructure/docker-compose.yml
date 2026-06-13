@@ -194,7 +194,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ../Attack-chain:/Attack-chain
-      - ./logs/attacker:/Infrastructure/logs/attacker
+      - ./logs/attacker:/Infrastructure/logs/attacker  # must run docker-compose from Infrastructure/
       - ./shared-lab-keys:/shared-lab-keys:ro
     networks:
       public_net:

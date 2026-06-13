@@ -55,10 +55,10 @@ def log(msg: str = "", *, end: str = "\n", flush: bool = False) -> None:
 _sentinel_seq = 0
 
 
-def drain(shell: socket.socket) -> None:
+def drain(shell: socket.socket, timeout: float = 0.1) -> None:
     """Discard stale bytes left in the socket buffer from a previous command."""
     prev = shell.gettimeout()
-    shell.settimeout(0.1)
+    shell.settimeout(timeout)
     while True:
         try:
             if not shell.recv(4096):
@@ -78,7 +78,7 @@ def run_remote(shell: socket.socket, cmd: str, timeout: float = 15) -> str:
     global _sentinel_seq
     log(f"$ {cmd}")
     _sentinel_seq += 1
-    sentinel = f"SENTINEL_{_sentinel_seq:04X}_END"
+    sentinel = f"SENTINEL_{_sentinel_seq:06X}_END"
 
     drain(shell)
     shell.sendall(f"{cmd}\n".encode())
@@ -88,11 +88,13 @@ def run_remote(shell: socket.socket, cmd: str, timeout: float = 15) -> str:
     prev_timeout = shell.gettimeout()
     shell.settimeout(2)
     buf = ""
+    eof = False
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             chunk = shell.recv(4096)
             if not chunk:
+                eof = True
                 break
             buf += chunk.decode(errors="replace")
         except socket.timeout:
@@ -100,6 +102,10 @@ def run_remote(shell: socket.socket, cmd: str, timeout: float = 15) -> str:
         if sentinel in buf:
             break
     shell.settimeout(prev_timeout)
+
+    if eof and sentinel not in buf:
+        log(f"[!] run_remote: connection closed before sentinel — cmd: {cmd!r}")
+        return ""
 
     if sentinel in buf:
         buf = buf[:buf.index(sentinel)]
