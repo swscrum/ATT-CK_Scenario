@@ -101,6 +101,9 @@ python3 /usr/local/bin/logind-stub.py 2>/dev/null &
 # pick it up and exit the container if the stub ever terminates.
 disown
 
+# Start rsyslog so auth.log and syslog exist and capture SSH login events.
+/usr/sbin/rsyslogd
+
 # Start sshd in the background so the container has a remote shell.
 /usr/sbin/sshd
 

