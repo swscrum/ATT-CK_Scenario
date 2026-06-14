@@ -295,8 +295,8 @@ def _phase_ssh_artifacts(john_shell):
 # ---------------------------------------------------------------------------
 
 def _phase_local_dbs(john_shell):
-    """T1005 — find local database files."""
-    log("\n[*] Local database discovery (T1005)")
+    """T1083 — locate local database files (discovery only; no data is read)."""
+    log("\n[*] Local database discovery (T1083)")
 
     db_raw = _run_remote(
         john_shell,
