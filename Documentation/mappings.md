@@ -1,4 +1,4 @@
-git p# Attack chain — Cyber Kill Chain & MITRE ATT&CK mappings
+# Attack chain — Cyber Kill Chain & MITRE ATT&CK mappings
 
 Phase numbering matches `attack_plan.md`.
 
