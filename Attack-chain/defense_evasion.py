@@ -32,13 +32,16 @@ from chainlog import log
 #     in the session buffer before the buffer is wiped.
 # =============================================================================
 
-# /tmp artefacts the attacker expects to find on apache — most are already
-# removed by prior chain steps; redundant rm calls generate visible errors.
+# /tmp artefacts the attacker expects to find on apache — each was genuinely
+# created and then removed by a prior chain step, so the redundant rm calls
+# here hit already-gone files and generate the visible "No such file" errors
+# that a blue team can correlate. Keep this list in sync with the paths the
+# upstream steps actually touch; phantom entries would still error but would
+# misrepresent the chain.
 _APACHE_TMP_ARTIFACTS = [
-    "/tmp/lp.sh",            # LinPEAS script     (removed by post_exploit_recon)
-    "/tmp/lp_out.txt",       # LinPEAS output     (removed by post_exploit_recon)
-    "/tmp/john_deploy_key",  # staged deploy key  (removed by lateral_movement)
-    "/tmp/cs-scan.gnmap",    # nmap scan results  (removed by credential_stuffing)
+    "/tmp/lp.sh",            # LinPEAS script  (created+removed by post_exploit_enumeration)
+    "/tmp/lp_out.txt",       # LinPEAS output  (created+removed by post_exploit_enumeration)
+    "/tmp/lm-scan.gnmap",    # nmap sweep      (created+removed by lateral_movement)
 ]
 
 # /tmp artefacts the attacker expects to find on john's workstation.
