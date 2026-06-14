@@ -39,7 +39,7 @@ INTERNAL_SUBNET  = "10.30.0.0/24"
 SSH_PORT         = 22
 SCAN_OUTPUT_FILE = "/tmp/lm-scan.gnmap"
 
-# Fallback password used when the creds step was skipped (--only lateral).
+# Fallback password used when the credential_access step was skipped (--only lateral).
 _FALLBACK_PASSWORD = "waystar2026!"
 
 # Pure infrastructure addresses with no user sshd worth spraying:
@@ -225,8 +225,8 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
                                 successful target and trigger the reverse shell).
         workstation_user (str): SSH username on john's workstation.
         workstation_port (int): SSH port on all targets.
-        john_password (str):    john's password from the creds step; falls back
-                                to _FALLBACK_PASSWORD when running standalone.
+        john_password (str):    john's password from the credential_access step;
+                                falls back to _FALLBACK_PASSWORD when running standalone.
 
     Returns:
         dict with:
@@ -237,7 +237,7 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
     log("\n[*] Starting lateral movement to workstation...")
 
     if john_password is None:
-        log("[!] No password from creds step — using fallback (run creds first for accurate results)")
+        log("[!] No password from credential_access step — using fallback (run credential_access first for accurate results)")
         john_password = _FALLBACK_PASSWORD
 
     # ------------------------------------------------------------------
