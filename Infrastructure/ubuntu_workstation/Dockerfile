@@ -50,11 +50,17 @@ RUN apt-get update \
     # frees UID 1000 for john so he gets the conventional first-user UID when
     # that account exists.
     && if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
-    # Create john.stravidis as the primary (and only non-root) user.
+    # Create john.stravidis as the primary non-root user. He is a frontend
+    # freelancer, NOT an administrator, so he is intentionally NOT in the sudo
+    # group — least privilege. The sysadmin account vinzenz.fedora (below) is
+    # the one with sudo. This keeps the attack chain sound: after the lateral
+    # move onto this box the attacker holds an unprivileged identity, so the
+    # defense-evasion step's attempts to wipe /var/log fail with permission
+    # denied instead of trivially succeeding via sudo.
     # Weak interim password "waystar2026!" was set by the transition team and
     # was meant to be reset before go-live — never was. Same negligence vector
     # the story already documents.
-    && useradd -m -s /bin/bash -G sudo john.stravidis \
+    && useradd -m -s /bin/bash john.stravidis \
     && echo 'john.stravidis:waystar2026!' | chpasswd \
     # Allow password authentication and disable empty passwords in sshd.
     && mkdir -p /run/sshd \
