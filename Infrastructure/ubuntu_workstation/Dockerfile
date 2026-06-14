@@ -108,6 +108,23 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
     && chmod 700 /home/vinzenz.fedora/.ssh \
     && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
 
+# Build-time activity baseline — see Infrastructure/shared-baseline/README.md
+COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
+COPY shared-baseline/templates/developer/       /usr/local/share/baseline/developer/
+RUN chmod +x /usr/local/bin/hydrate-baseline.sh
+
+# Initialise a real git repo in ~/projects/waystar-connect/ so John's
+# bash_history references (git log, git status, git pull) land against an
+# actual history rather than a "not a git repository" error. Five commits
+# spanning the past 45 days, attributed to john.stravidis with author-dates
+# computed at build time relative to `date -u`. Drive the commit sequence
+# via a heredoc'd shell script written to /tmp so the quoting stays sane.
+COPY ubuntu_workstation/seed-waystar-git.sh /tmp/seed-waystar-git.sh
+RUN chown -R john.stravidis:john.stravidis /home/john.stravidis/projects/waystar-connect \
+    && chmod +x /tmp/seed-waystar-git.sh \
+    && runuser -u john.stravidis -- /tmp/seed-waystar-git.sh \
+    && rm /tmp/seed-waystar-git.sh
+
 COPY ubuntu_workstation/logind-stub.py /usr/local/bin/logind-stub.py
 # D-Bus policy that allows root to own org.freedesktop.login1 (the logind stub).
 COPY ubuntu_workstation/dbus-logind-stub.conf /etc/dbus-1/system.d/logind-stub.conf

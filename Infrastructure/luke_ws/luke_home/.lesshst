@@ -1,0 +1,9 @@
+.less-history-file:
+.search
+"caffeine
+"panic
+"CBT
+.shell
+ls -la ~/Documents/notes/
+psql -h db-internal -U waystar-readonly
+df -h

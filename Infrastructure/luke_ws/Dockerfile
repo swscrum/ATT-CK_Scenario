@@ -81,6 +81,11 @@ COPY luke_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
 COPY luke_ws/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh
 
+# Build-time activity baseline — see Infrastructure/shared-baseline/README.md
+COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
+COPY shared-baseline/templates/clinical/        /usr/local/share/baseline/clinical/
+RUN chmod +x /usr/local/bin/hydrate-baseline.sh
+
 COPY luke_ws/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

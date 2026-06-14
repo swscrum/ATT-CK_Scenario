@@ -11,6 +11,7 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
         rsync \
         python3 python3-psycopg2 \
         nmap sshpass \
+        gawk \
         libcap2-bin \
         inotify-tools \
     && rm -rf /var/lib/apt/lists/* \
@@ -113,6 +114,8 @@ RUN apt-get update \
     && useradd -m -s /bin/bash -G sudo vinzenz.fedora \
     && echo 'vinzenz.fedora:VinzenzAdmin!2026' | chpasswd \
     && mkdir -p /home/vinzenz.fedora/.ssh
+# Seed Vinzenz's apache-side home with his lived-in dotfiles + bash_history.
+COPY apache/vinzenz_home/ /home/vinzenz.fedora/
 COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_keys
 RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
     && chmod 700 /home/vinzenz.fedora/.ssh \
@@ -127,20 +130,31 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
 # ============================================================================
 RUN useradd -m -s /bin/bash luke.smith \
     && echo 'luke.smith:WaystarLuke!2026' | chpasswd \
-    && mkdir -p /home/luke.smith/backup/notes \
-    && chown -R luke.smith:luke.smith /home/luke.smith
+    && mkdir -p /home/luke.smith/backup/notes
+# Seed Luke's apache-side home (his backup-target account).
+COPY apache/luke_home/ /home/luke.smith/
+RUN chown -R luke.smith:luke.smith /home/luke.smith
 
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
 
-# Start script + lab-FIM. start.sh launches cron, writes the capability
-# baseline, kicks off the inotify FIM watcher, then exec's httpd in the
-# foreground. lab-fim.sh is the inotify watcher itself. Both live in the
-# source tree at Infrastructure/apache/ so they can be edited without
-# rebaking inline shell into the Dockerfile.
-COPY apache/start.sh   /usr/local/bin/start.sh
-COPY apache/lab-fim.sh /usr/local/bin/lab-fim.sh
-RUN chmod +x /usr/local/bin/start.sh /usr/local/bin/lab-fim.sh
+# Start script + lab-FIM + activity baseline.
+#  - start.sh: cron + ssh, writes capability baseline (T1548.001 detection
+#    anchor — PR #141), hydrates the activity baseline (this PR), kicks off
+#    lab-fim, exec's httpd. Lives in the source tree so it can be edited
+#    without rebaking inline shell into the Dockerfile.
+#  - lab-fim.sh: inotify watcher for the basic-mode privesc tripwire +
+#    cgi-bin webshell drop + sudoers tamper (PR #141).
+#  - hydrate-baseline.sh + templates/apache: persona-keyed log baseline
+#    (this PR) — renders 14-60 days of past auth/dpkg/apt/cleanup activity
+#    so the host doesn't boot with a clean log slate.
+COPY apache/start.sh                            /usr/local/bin/start.sh
+COPY apache/lab-fim.sh                          /usr/local/bin/lab-fim.sh
+COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
+COPY shared-baseline/templates/apache/          /usr/local/share/baseline/apache/
+RUN chmod +x /usr/local/bin/start.sh \
+             /usr/local/bin/lab-fim.sh \
+             /usr/local/bin/hydrate-baseline.sh
 
 CMD ["/usr/local/bin/start.sh"]
 

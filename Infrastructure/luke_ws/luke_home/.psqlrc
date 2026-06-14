@@ -1,0 +1,16 @@
+-- luke.smith's psqlrc (clinical, waystar-readonly)
+
+\set QUIET 1
+
+\set PROMPT1 '%[%033[1;32m%]%n@%M:%/%[%033[0m%]> '
+\set PROMPT2 '%[%033[1;32m%]%/%R%[%033[0m%]> '
+
+\timing on
+\pset null '∅'
+
+-- Convenience: load my common clinical views.
+\set mypatients 'SELECT id, first_name, last_name FROM patients WHERE id IN (SELECT DISTINCT patient_id FROM session_notes WHERE therapist = \'Luke Smith\') ORDER BY last_name;'
+\set notes 'SELECT id, patient_id, session_date, session_type FROM session_notes WHERE therapist = \'Luke Smith\' ORDER BY session_date DESC LIMIT 10;'
+
+\set QUIET 0
+\echo 'Loaded ~/.psqlrc — :mypatients, :notes available'
