@@ -81,9 +81,9 @@ STEP_META = {
         "techniques": ["T1552.001", "T1213", "T1041"],
         "color": "red",
     },
-    "cleanup": {
+    "defense_evasion": {
         "tactic": "TA0005 · Defense Evasion",
-        "techniques": ["T1070", "T1070.003", "T1070.004"],
+        "techniques": ["T1070", "T1070.001", "T1070.003", "T1070.004"],
         "color": "green",
     },
 }
@@ -435,10 +435,10 @@ def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
     }
 
 
-def _step_cleanup(ctx: Context) -> dict[str, Any]:
-    from defensive_evasion import run as cleanup_run
+def _step_defense_evasion(ctx: Context) -> dict[str, Any]:
+    from defense_evasion import run as defense_evasion_run
 
-    cleanup_run(
+    defense_evasion_run(
         root_shell=ctx.state.get("root_shell"),
         john_shell=ctx.state.get("john_shell"),
     )
@@ -497,8 +497,8 @@ CHAIN_BASIC: list[Step] = [
         requires=("john_shell",),
     ),
     Step(
-        "cleanup",
-        _step_cleanup,
+        "defense_evasion",
+        _step_defense_evasion,
         optional=True,
     ),
 ]

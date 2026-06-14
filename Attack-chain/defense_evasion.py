@@ -5,7 +5,7 @@ import time
 from chainlog import log
 
 # =============================================================================
-# defensive_evasion.py — Messy and Loud Defensive Evasion
+# defense_evasion.py — Messy and Loud Defense Evasion
 # MITRE ATT&CK:
 #   T1070     – Indicator Removal (parent technique)
 #   T1070.001 – Clear Linux or Mac System Logs  (log truncation attempts)
@@ -258,7 +258,7 @@ def run(root_shell, john_shell):
         john_shell (socket | None): john.stravidis shell on ubuntu_workstation
                                     (lateral_movement step).
     """
-    log("\n[*] Starting defensive evasion (messy indicator removal) ...")
+    log("\n[*] Starting defense evasion (messy indicator removal) ...")
 
     if root_shell is not None:
         log("\n[*] ── Apache (root) ──────────────────────────────────────")
@@ -289,12 +289,12 @@ def run(root_shell, john_shell):
     else:
         log("[-] john_shell not available — skipping workstation cleanup")
 
-    log("\n[*] Defensive evasion complete — tracks incompletely covered")
+    log("\n[*] Defense evasion complete — tracks incompletely covered")
 
 
 # ---------------------------------------------------------------------------
 # Standalone test mode
-# Usage: docker compose exec kali python3 /Attack-chain/defensive_evasion.py
+# Usage: docker compose exec kali python3 /Attack-chain/defense_evasion.py
 # Pre-conditions:
 #   root shell listening on kali port 5555  (apache → kali)
 #   john shell listening on kali port 6666  (workstation → kali)
