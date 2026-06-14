@@ -61,7 +61,7 @@ STEP_META = {
         "techniques": ["T1053.003", "T1068"],
         "color": "red",
     },
-    "creds": {
+    "credential_access": {
         "tactic": "TA0006 · Credential Access",
         "techniques": ["T1552.001"],
         "color": "blue",
@@ -376,12 +376,12 @@ def _step_privesc(ctx: Context) -> dict[str, Any]:
     return {"root_shell": root_shell}
 
 
-def _step_creds(ctx: Context) -> dict[str, Any]:
-    from credential_stuffing import run as creds_run
+def _step_credential_access(ctx: Context) -> dict[str, Any]:
+    from credential_access import run as credential_access_run
 
-    result = creds_run(ctx.state["root_shell"])
+    result = credential_access_run(ctx.state["root_shell"])
     if not result.get("john_password"):
-        raise RuntimeError("credential discovery found no usable password on apache")
+        raise RuntimeError("credential access found no usable password on apache")
     return {"john_password": result["john_password"]}
 
 
@@ -476,8 +476,8 @@ CHAIN_BASIC: list[Step] = [
         teardown=_teardown_close_socket("root_shell"),
     ),
     Step(
-        "creds",
-        _step_creds,
+        "credential_access",
+        _step_credential_access,
         requires=("root_shell",),
     ),
     Step(
