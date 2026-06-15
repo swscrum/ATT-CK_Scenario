@@ -12,7 +12,7 @@ from chainlog import log, run_remote
 #   T1552.001 – Credentials In Files        (read ~/.pgpass for DB credentials)
 #   T1082     – System Information Discovery (enumerate tables via information_schema)
 #   T1213     – Data from Information Repositories (psql dump of all discovered tables)
-#   T1041     – Exfiltration Over C2 Channel (HTTP POST back to kali)
+#   T1048.003 – Exfiltration Over Unencrypted Non-C2 Protocol (HTTP POST back to kali)
 # =============================================================================
 
 KALI_HOST        = "10.10.0.2"

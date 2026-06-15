@@ -9,7 +9,7 @@ from advanced_initial_access import sliver_exec
 # MITRE ATT&CK:
 #   T1546.004 - Event Triggered Execution: Unix Shell Configuration Modification
 #   T1140     - Deobfuscate/Decode Files or Information (base64)
-#   T1078     - Valid Accounts (Root access, downstream)
+#   T1078.003 - Valid Accounts: Local Accounts (Root access, downstream)
 # -----------------------------------------------------------------------------
 # Executes FROM kali, driving the sliver beacon running on vinzenz's
 # workstation. It appends a malicious ``sudo()`` shell function to

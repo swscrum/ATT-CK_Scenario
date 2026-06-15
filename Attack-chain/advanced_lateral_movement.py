@@ -10,8 +10,8 @@ from advanced_initial_access import sliver_exec, _list_sliver
 # =============================================================================
 # advanced_lateral_movement.py — Sysadmin Baiting & SSH Agent Hijacking
 # MITRE ATT&CK:
-#   T1499.004 - Endpoint Denial of Service: Application or System Exploitation (Connection Pool Exhaustion)
-#   T1556.003 - Modify Authentication Process: Pluggable Authentication Modules (SSH Agent Hijacking)
+#   T1499.003 - Endpoint Denial of Service: Application Exhaustion Flood (Connection Pool Exhaustion)
+#   T1563.001 - Remote Service Session Hijacking: SSH Hijacking (SSH Agent Hijacking)
 #   T1021.004 - Remote Services: SSH (Pivot to Workstation)
 # -----------------------------------------------------------------------------
 # All phases execute FROM apache via the root reverse shell.
