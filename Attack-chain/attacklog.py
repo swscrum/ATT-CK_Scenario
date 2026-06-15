@@ -1,9 +1,14 @@
-"""Attacker-POV markdown logger for the attack chain.
+"""Attacker-POV logger for the attack chain.
 
-Creates one ``attack_steps_<run_id>.md`` file per run in
-``/Infrastructure/logs/attacker/``.  Written in real-time: every ``log()``
-call in the chain tees here via ``_append()``.  Structured by attack phase
-with MITRE ATT&CK annotations.
+Creates two files per run in ``/Infrastructure/logs/attacker/``:
+
+  attack_steps_<run_id>.md   — structured markdown with MITRE ATT&CK annotations,
+                               command output, and a summary table.  For human review.
+  attack_steps_<run_id>.log  — syslog-style key=value structured log, one line per
+                               command.  Designed for ingestion into Splunk / SIEM tools.
+
+Log line format (matches the lab's auth.log / syslog convention):
+  2026-06-15T14:25:35.123456+00:00 kali attacker[<run_id>]: phase=RECON tactic="..." cmd="..."
 
 Called from ``main.py``:
     import attacklog
@@ -16,14 +21,34 @@ Called from ``main.py``:
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO
 
-_fh: IO[str] | None = None
+_fh: IO[str] | None = None        # markdown file handle
+_log_fh: IO[str] | None = None    # structured .log file handle
 _phase_count: int = 0
-
+_run_id: str = ""
+_current_phase: str = ""
+_current_tactic: str = ""
 
 _MAX_OUTPUT_LINES = 20
+
+
+def _log_cmd(cmd: str) -> None:
+    """Write one structured syslog-style entry to the .log file."""
+    if _log_fh is None:
+        return
+    try:
+        ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        cmd_escaped = cmd.replace('"', '\\"')
+        _log_fh.write(
+            f'{ts} kali attacker[{_run_id}]: '
+            f'phase={_current_phase} tactic="{_current_tactic}" cmd="{cmd_escaped}"\n'
+        )
+        _log_fh.flush()
+    except OSError as exc:
+        print(f"[attacklog] write error in _log_cmd: {exc}", file=sys.stderr)
 
 
 def _append(line: str) -> None:
@@ -39,6 +64,8 @@ def _append(line: str) -> None:
         for subline in line.split("\n"):
             if "] $ " in subline:
                 _fh.write(f"`{subline}`\n")
+                cmd = subline[subline.index("] $ ") + 4:]
+                _log_cmd(cmd)
         _fh.flush()
     except OSError as exc:
         print(f"[attacklog] write error in _append: {exc}", file=sys.stderr)
@@ -68,25 +95,29 @@ def _append_output(output: str) -> None:
 
 
 def open_log(path: str | Path, meta: dict) -> None:
-    """Create the attack log file and write the run header."""
-    global _fh, _phase_count
-    if _fh is not None:
-        _fh.close()
-        _fh = None
+    """Create the markdown and structured log files and write the run header."""
+    global _fh, _log_fh, _phase_count, _run_id, _current_phase, _current_tactic
+    for fh in (_fh, _log_fh):
+        if fh is not None:
+            fh.close()
+    _fh = _log_fh = None
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     _fh = path.open("w", encoding="utf-8")
+    _log_fh = path.with_suffix(".log").open("w", encoding="utf-8")
     _phase_count = 0
+    _current_phase = ""
+    _current_tactic = ""
 
     def _safe(v: object) -> str:
         return str(v).replace("\n", " ").replace("\r", " ").replace("|", "\\|")
 
-    run_id = _safe(meta.get("run_id", "?"))
-    mode   = _safe(meta.get("mode",   "?"))
-    target = _safe(meta.get("target", "?"))
-    kali   = _safe(meta.get("kali",   "?"))
+    _run_id = _safe(meta.get("run_id", "?"))
+    mode    = _safe(meta.get("mode",   "?"))
+    target  = _safe(meta.get("target", "?"))
+    kali    = _safe(meta.get("kali",   "?"))
 
-    _fh.write(f"# Attack Log — {run_id}\n\n")
+    _fh.write(f"# Attack Log — {_run_id}\n\n")
     _fh.write(f"**Mode:** {mode} | **Target:** {target} | **Kali:** {kali}\n\n")
     _fh.write("---\n\n")
     _fh.flush()
@@ -94,10 +125,12 @@ def open_log(path: str | Path, meta: dict) -> None:
 
 def begin_phase(name: str, tactic: str, techniques: list[str], started: str) -> None:
     """Write the phase header section to the attack log."""
-    global _phase_count
+    global _phase_count, _current_phase, _current_tactic
     if _fh is None:
         return
     _phase_count += 1
+    _current_phase = name.upper()
+    _current_tactic = tactic
     tech_str = " · ".join(f"`{t}`" for t in techniques) if techniques else "—"
     _fh.write(f"## Phase {_phase_count} — {name.upper()}\n\n")
     _fh.write("| | |\n|---|---|\n")
@@ -118,8 +151,8 @@ def end_phase(name: str, ok: bool, elapsed: float, ended: str) -> None:
 
 
 def close_log(results: list[dict] | None = None) -> None:
-    """Write the summary table and close the file."""
-    global _fh, _phase_count
+    """Write the summary table and close both log files."""
+    global _fh, _log_fh, _phase_count, _run_id, _current_phase, _current_tactic
     if _fh is None:
         return
     _fh.write("## Summary\n\n")
@@ -138,4 +171,10 @@ def close_log(results: list[dict] | None = None) -> None:
     _fh.flush()
     _fh.close()
     _fh = None
+    if _log_fh is not None:
+        _log_fh.close()
+        _log_fh = None
     _phase_count = 0
+    _run_id = ""
+    _current_phase = ""
+    _current_tactic = ""
