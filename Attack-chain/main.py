@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import attacklog
+
 from rich.columns import Columns
 from rich.console import Console
 from rich.panel import Panel
@@ -39,6 +41,7 @@ DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
+ATTACK_LOG_DIR = Path("/Infrastructure/logs/attacker")
 
 STEP_META = {
     "recon": {
@@ -61,7 +64,7 @@ STEP_META = {
         "techniques": ["T1053.003", "T1068"],
         "color": "red",
     },
-    "creds": {
+    "credential_access": {
         "tactic": "TA0006 · Credential Access",
         "techniques": ["T1552.001"],
         "color": "blue",
@@ -81,9 +84,9 @@ STEP_META = {
         "techniques": ["T1552.001", "T1213", "T1041"],
         "color": "red",
     },
-    "cleanup": {
+    "defense_evasion": {
         "tactic": "TA0005 · Defense Evasion",
-        "techniques": ["T1070", "T1070.003", "T1070.004"],
+        "techniques": ["T1070", "T1070.001", "T1070.003", "T1070.004"],
         "color": "green",
     },
 }
@@ -394,12 +397,12 @@ def _step_privesc(ctx: Context) -> dict[str, Any]:
     return {"root_shell": root_shell}
 
 
-def _step_creds(ctx: Context) -> dict[str, Any]:
-    from credential_stuffing import run as creds_run
+def _step_credential_access(ctx: Context) -> dict[str, Any]:
+    from credential_access import run as credential_access_run
 
-    result = creds_run(ctx.state["root_shell"])
+    result = credential_access_run(ctx.state["root_shell"])
     if not result.get("john_password"):
-        raise RuntimeError("credential discovery found no usable password on apache")
+        raise RuntimeError("credential access found no usable password on apache")
     return {"john_password": result["john_password"]}
 
 
@@ -453,10 +456,10 @@ def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
     }
 
 
-def _step_cleanup(ctx: Context) -> dict[str, Any]:
-    from defensive_evasion import run as cleanup_run
+def _step_defense_evasion(ctx: Context) -> dict[str, Any]:
+    from defense_evasion import run as defense_evasion_run
 
-    cleanup_run(
+    defense_evasion_run(
         root_shell=ctx.state.get("root_shell"),
         john_shell=ctx.state.get("john_shell"),
     )
@@ -517,8 +520,8 @@ CHAIN_BASIC: list[Step] = [
         teardown=_teardown_close_socket("root_shell"),
     ),
     Step(
-        "creds",
-        _step_creds,
+        "credential_access",
+        _step_credential_access,
         requires=("root_shell",),
     ),
     Step(
@@ -538,8 +541,8 @@ CHAIN_BASIC: list[Step] = [
         requires=("john_shell",),
     ),
     Step(
-        "cleanup",
-        _step_cleanup,
+        "defense_evasion",
+        _step_defense_evasion,
         optional=True,
     ),
 ]
@@ -657,6 +660,14 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
     run_dir.mkdir(parents=True, exist_ok=True)
     ctx.results_dir = str(run_dir)
 
+    try:
+        attacklog.open_log(
+            ATTACK_LOG_DIR / f"attack_steps_{_sanitize_run_id(run_id)}.md",
+            {"run_id": run_id, "mode": ctx.mode, "target": ctx.target, "kali": ctx.kali_host},
+        )
+    except Exception as exc:
+        log.warning("attack log disabled — could not open: %s", exc)
+
     _print_banner(ctx, selected)
     results: list[dict] = []
     executed: list[Step] = []
@@ -677,6 +688,13 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             _print_step_header(step, i, len(selected), mode=ctx.mode)
             started = _iso_utc()
             t0 = time.perf_counter()
+            _smeta = _step_meta(step.name, ctx.mode)
+            attacklog.begin_phase(
+                step.name,
+                _smeta.get("tactic", ""),
+                _smeta.get("techniques", []),
+                started,
+            )
             delta = {}
             ok = True
             err = ""
@@ -689,6 +707,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                     elapsed = time.perf_counter() - t0
                     ended = _iso_utc()
                     _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
+                    attacklog.end_phase(step.name, ok, elapsed, ended)
                     results.append(_result_entry(step, ok=ok, started=started,
                                                  ended=ended, elapsed=elapsed,
                                                  err=err, mode=ctx.mode))
@@ -698,6 +717,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             ctx.state.update(delta)
             executed.append(step)
             _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
+            attacklog.end_phase(step.name, ok, elapsed, ended)
             results.append(_result_entry(step, ok=ok, started=started,
                                          ended=ended, elapsed=elapsed,
                                          mode=ctx.mode))
@@ -718,6 +738,10 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                 _write_ground_truth(ctx, run_id, results)
             except Exception as exc:
                 log.warning("failed to write ground-truth JSON: %s", exc)
+        try:
+            attacklog.close_log(results)
+        except Exception as exc:
+            log.warning("failed to close attack log: %s", exc)
 
     return ctx
 

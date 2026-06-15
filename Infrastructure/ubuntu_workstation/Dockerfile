@@ -50,11 +50,17 @@ RUN apt-get update \
     # frees UID 1000 for john so he gets the conventional first-user UID when
     # that account exists.
     && if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
-    # Create john.stravidis as the primary (and only non-root) user.
+    # Create john.stravidis as the primary non-root user. He is a frontend
+    # freelancer, NOT an administrator, so he is intentionally NOT in the sudo
+    # group — least privilege. The sysadmin account vinzenz.fedora (below) is
+    # the one with sudo. This keeps the attack chain sound: after the lateral
+    # move onto this box the attacker holds an unprivileged identity, so the
+    # defense-evasion step's attempts to wipe /var/log fail with permission
+    # denied instead of trivially succeeding via sudo.
     # Weak interim password "waystar2026!" was set by the transition team and
     # was meant to be reset before go-live — never was. Same negligence vector
     # the story already documents.
-    && useradd -m -s /bin/bash -G sudo john.stravidis \
+    && useradd -m -s /bin/bash john.stravidis \
     && echo 'john.stravidis:waystar2026!' | chpasswd \
     # Allow password authentication and disable empty passwords in sshd.
     && mkdir -p /run/sshd \
@@ -107,6 +113,23 @@ COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_
 RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
     && chmod 700 /home/vinzenz.fedora/.ssh \
     && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
+
+# Build-time activity baseline — see Infrastructure/shared-baseline/README.md
+COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
+COPY shared-baseline/templates/developer/       /usr/local/share/baseline/developer/
+RUN chmod +x /usr/local/bin/hydrate-baseline.sh
+
+# Initialise a real git repo in ~/projects/waystar-connect/ so John's
+# bash_history references (git log, git status, git pull) land against an
+# actual history rather than a "not a git repository" error. Five commits
+# spanning the past 45 days, attributed to john.stravidis with author-dates
+# computed at build time relative to `date -u`. Drive the commit sequence
+# via a heredoc'd shell script written to /tmp so the quoting stays sane.
+COPY ubuntu_workstation/seed-waystar-git.sh /tmp/seed-waystar-git.sh
+RUN chown -R john.stravidis:john.stravidis /home/john.stravidis/projects/waystar-connect \
+    && chmod +x /tmp/seed-waystar-git.sh \
+    && runuser -u john.stravidis -- /tmp/seed-waystar-git.sh \
+    && rm /tmp/seed-waystar-git.sh
 
 COPY ubuntu_workstation/logind-stub.py /usr/local/bin/logind-stub.py
 # D-Bus policy that allows root to own org.freedesktop.login1 (the logind stub).

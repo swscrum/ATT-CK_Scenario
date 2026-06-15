@@ -1,0 +1,11 @@
+.less-history-file:
+.search
+"npm
+"TODO
+"WS_PASS
+"vite
+"deploy
+.shell
+npm outdated
+git log --oneline
+tail -f /var/log/syslog

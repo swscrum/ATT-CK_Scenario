@@ -90,6 +90,15 @@ COPY vinzenz_ws/simulate_admin.sh  /usr/local/bin/simulate_admin.sh
 COPY vinzenz_ws/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh /usr/local/bin/simulate_admin.sh
 
+# Build-time activity baseline. The hydrator renders date-relative tokens at
+# first boot (before rsyslog + lab-fim start), writing 14-60 days of
+# believable past activity into /var/log/{auth.log,dpkg.log,apt/history.log,
+# syslog}. Idempotent across container restarts via /var/lib/baseline-hydrated.
+# See Infrastructure/shared-baseline/README.md.
+COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
+COPY shared-baseline/templates/sysadmin/        /usr/local/share/baseline/sysadmin/
+RUN chmod +x /usr/local/bin/hydrate-baseline.sh
+
 COPY vinzenz_ws/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

@@ -7,6 +7,16 @@ set -e
 # Timestamped console logging (UTC ISO-8601, matches the attack-chain output).
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 
+# Build-time activity baseline — render persona-keyed log templates into
+# /var/log/{auth.log,dpkg.log,apt/history.log,cleanup.log} so the host
+# comes up with 14-60 days of believable past activity. Idempotent across
+# restarts via /var/lib/baseline-hydrated. Must run BEFORE cron + lab-fim
+# so the baseline entries are in place before any watcher could surface
+# them as runtime modifications. See Infrastructure/shared-baseline/README.md.
+BASELINE_PERSONA=apache /usr/local/bin/hydrate-baseline.sh 2>&1 \
+    | while read -r line; do log "$line"; done \
+    || log "[start] hydrate-baseline failed (non-fatal)"
+
 # Cron daemon — fires /opt/cleanup.sh every minute as root (the
 # intentional misconfiguration that drives the basic-mode lab privesc).
 service cron start

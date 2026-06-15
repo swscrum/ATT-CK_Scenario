@@ -151,7 +151,7 @@ Lab seeding requirement: bake these into `Infrastructure/apache/`.
 
 #### Phase 3.5 — Internal host discovery + credential stuffing
 
-Status: ✓ implemented in `Attack-chain/credential_stuffing.py`.
+Status: ✓ implemented across two chain steps — step 1 below (reading john's `.env`, Credential Access / T1552.001) lives in `Attack-chain/credential_access.py`; steps 2–3 (internal nmap sweep and the password spray / credential stuffing, T1018 / T1046 / T1110.004) live in `Attack-chain/lateral_movement.py`.
 
 Before the attacker has any IP for John's workstation in hand, they:
 
