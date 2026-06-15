@@ -128,9 +128,20 @@ STEP_META_ADVANCED: dict[str, dict] = {
         "techniques": ["T1021.004", "T1556.003", "T1499.004"],
         "color": "magenta",
     },
+    "advanced_vinzenzws_privesc": {
+        "tactic": "TA0006 · Credential Access",
+        # T1546.004 — Event Triggered Execution: Unix Shell Configuration
+        # Modification (the malicious ``sudo()`` function is appended to
+        # ~/.bashrc and triggers on the admin's next interactive shell).
+        # T1140 — Deobfuscate/Decode Files or Information (we base64-encode
+        # the payload before piping it through ``base64 -d >> ~/.bashrc``
+        # to dodge sliver ``execute``'s shell-quoting quirks).
+        # T1078 — Valid Accounts (the captured credential will be reused
+        # by the admin's own identity to land root in a follow-up step).
+        "techniques": ["T1546.004", "T1140", "T1078"],
+        "color": "green",
+    },
 }
-
-
 def _step_meta(name: str, mode: str = "basic") -> dict:
     """Return the TTP-metadata dict for ``name`` under the requested ``mode``.
 
@@ -339,13 +350,20 @@ def _step_advanced_webserver_persistence(ctx: Context) -> dict[str, Any]:
 def _step_advanced_lateral_movement(ctx: Context) -> dict[str, Any]:
     from advanced_lateral_movement import run as advanced_lateral_run
 
+    # The lateral step returns ``vinzenz_beacon`` -- the Sliver beacon ID on
+    # vinzenz's workstation. The earlier draft also returned a DummyShell
+    # stub under ``vinzenz_shell_sock`` for a teardown that no longer
+    # exists; that handle has been dropped.
     result = advanced_lateral_run(
         root_sliver_session=ctx.state["root_sliver_session"],
         kali_host=ctx.kali_host,
     )
-    if not result.get("vinzenz_shell_sock"):
-        raise RuntimeError("advanced lateral movement returned no shell for vinzenz")
-    return {"vinzenz_shell_sock": result["vinzenz_shell_sock"]}
+    vinzenz_beacon = result.get("vinzenz_beacon")
+    if not vinzenz_beacon:
+        raise RuntimeError(
+            "advanced lateral movement: vinzenz workstation beacon never checked in"
+        )
+    return {"vinzenz_beacon": vinzenz_beacon}
 
 
 def _step_exploit(ctx: Context) -> dict[str, Any]:
@@ -460,6 +478,29 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
     return _close
 
 
+def _step_advanced_vinzenzws_privesc(ctx: Context) -> dict[str, Any]:
+    from advanced_vinzenzws_privesc import run as privesc_run
+
+    # ``requires=("vinzenz_beacon",)`` only checks key presence -- a None
+    # value would still pass. Belt-and-braces: validate the value here so
+    # the underlying sliver_exec() call never receives ``None`` as an
+    # implant ID.
+    vinzenz_beacon = ctx.state.get("vinzenz_beacon")
+    if not vinzenz_beacon:
+        raise RuntimeError(
+            "advanced vinzenz-ws privesc: missing vinzenz_beacon in chain state"
+        )
+    result = privesc_run(
+        vinzenz_beacon=vinzenz_beacon,
+        kali_host=ctx.kali_host,
+    )
+    if not result.get("vinzenz_password_file"):
+        raise RuntimeError("sudo phishing on vinzenz's workstation failed to drop password file")
+    return {
+        "vinzenz_password_file": result["vinzenz_password_file"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Chain definition
 # ---------------------------------------------------------------------------
@@ -508,13 +549,11 @@ CHAIN_BASIC: list[Step] = [
 
 # Advanced variants land per-host bundles. PR-A shipped the recon step;
 # PR-B (#141) added the apache-side exploit + enumeration + privesc +
-# persistence. PR-C (#144 / this PR) adds the lateral movement to
-# vinzenz_ws via SSH-agent-forwarding hijack -- that step produces a
-# socket-typed state key (``vinzenz_shell_sock``), so unlike the earlier
-# advanced steps the chain now mixes Sliver-session IDs and a raw socket
-# handle. The teardown for the lateral step closes the socket on chain
-# exit; downstream advanced steps (johnws_post_exploit_enum etc.) will
-# attach to that socket explicitly. Update this comment when those land.
+# persistence. PR-C (#144) added the lateral movement to vinzenz_ws via
+# SSH-agent-forwarding hijack. PR-D (#152) added the sudo-phish on
+# vinzenz's workstation; it consumes the ``vinzenz_beacon`` state key
+# the lateral step produces. All advanced-step state values are Sliver
+# session/beacon IDs (strings) -- no socket handles, no teardown.
 CHAIN_ADVANCED: list[Step] = [
     Step("recon", _step_advanced_recon),
     Step("exploit", _step_advanced_exploit),
@@ -537,7 +576,11 @@ CHAIN_ADVANCED: list[Step] = [
         "advanced_lateral_movement",
         _step_advanced_lateral_movement,
         requires=("root_sliver_session",),
-        teardown=_teardown_close_socket("vinzenz_shell_sock"),
+    ),
+    Step(
+        "advanced_vinzenzws_privesc",
+        _step_advanced_vinzenzws_privesc,
+        requires=("vinzenz_beacon",),
     ),
 ]
 

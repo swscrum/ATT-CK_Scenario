@@ -68,6 +68,22 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
                  /home/vinzenz.fedora/.ssh/known_hosts \
     && chmod 600 /home/vinzenz.fedora/.pgpass
 
+# -----------------------------------------------------------------------------
+# Sloppy-operator pattern: Vinzenz caches his sudo password in a hidden
+# config file so simulate_admin.sh and the apt-get cron don't have to
+# prompt. 0600 + owned by vinzenz.fedora so only he (and root) can read.
+# This intentionally replaces the earlier ``echo PASSWORD | sudo -S ...``
+# pattern, which exposed the credential in ``ps aux`` argv. Now the
+# password lives on disk only, and the maintenance scripts redirect it
+# into ``sudo -S`` via stdin. Side benefit: an attacker who lands code
+# exec as vinzenz.fedora can ``cat`` the token instead of waiting for
+# the T1546.004 sudo-phish to fire -- realistic looting opportunity.
+# -----------------------------------------------------------------------------
+RUN install -d -m 700 -o vinzenz.fedora -g vinzenz.fedora /home/vinzenz.fedora/.config \
+    && echo 'VinzenzAdmin!2026' > /home/vinzenz.fedora/.config/.maint_token \
+    && chown vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora/.config/.maint_token \
+    && chmod 600 /home/vinzenz.fedora/.config/.maint_token
+
 # Lab File Integrity Monitor + rsyslog mirror — same pattern as john_ws.
 COPY vinzenz_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
 COPY vinzenz_ws/simulate_admin.sh  /usr/local/bin/simulate_admin.sh
