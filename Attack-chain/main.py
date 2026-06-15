@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import attacklog
+
 from rich.columns import Columns
 from rich.console import Console
 from rich.panel import Panel
@@ -39,6 +41,7 @@ DEFAULT_TARGET = "router"
 DEFAULT_RESULTS_DIR = "/Attack-chain/results"
 DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
+ATTACK_LOG_DIR = Path("/Infrastructure/logs/attacker")
 
 # Pacing — controls how realistic the attacker-side dwells are.
 #   speed = realistic_seconds / wall_clock_seconds (higher → faster demo)
@@ -66,7 +69,7 @@ STEP_META = {
         "techniques": ["T1190", "T1059.004"],
         "color": "yellow",
     },
-    "post_exploit_recon": {
+    "post_exploit_enumeration": {
         "tactic": "TA0007 · Discovery",
         "techniques": ["T1082", "T1087.001", "T1057", "T1053.003", "T1016", "T1552.001"],
         "color": "blue",
@@ -76,14 +79,14 @@ STEP_META = {
         "techniques": ["T1053.003", "T1068"],
         "color": "red",
     },
-    "creds": {
-        "tactic": "TA0006 · Credential Access · TA0007 · Discovery",
-        "techniques": ["T1552.001", "T1018", "T1046", "T1110.004"],
+    "credential_access": {
+        "tactic": "TA0006 · Credential Access",
+        "techniques": ["T1552.001"],
         "color": "blue",
     },
     "lateral": {
-        "tactic": "TA0008 · Lateral Movement",
-        "techniques": ["T1110", "T1110.001", "T1552.001", "T1021.004", "T1078"],
+        "tactic": "TA0007 · Discovery · TA0008 · Lateral Movement",
+        "techniques": ["T1018", "T1046", "T1110.004", "T1021.004", "T1078"],
         "color": "magenta",
     },
     "enumeration_john_ws": {
@@ -96,8 +99,74 @@ STEP_META = {
         "techniques": ["T1552.001", "T1213", "T1041"],
         "color": "red",
     },
-    "cleanup": {"tactic": "operator hygiene", "techniques": [], "color": "green"},
+    "defense_evasion": {
+        "tactic": "TA0005 · Defense Evasion",
+        "techniques": ["T1070", "T1070.001", "T1070.003", "T1070.004"],
+        "color": "green",
+    },
 }
+
+# Advanced-mode overrides: when a step name appears here AND ctx.mode ==
+# "advanced", _step_meta() returns the entry below instead of the one in
+# STEP_META. Steps without an advanced variant fall through to STEP_META so
+# they keep rendering correctly while their advanced PRs are pending.
+STEP_META_ADVANCED: dict[str, dict] = {
+    "recon": {
+        "tactic": "TA0043 · Reconnaissance",
+        "techniques": ["T1595.002", "T1592.002", "T1590.005", "T1583.006"],
+        "color": "cyan",
+    },
+    "exploit": {
+        "tactic": "TA0001 · Initial Access",
+        "techniques": ["T1190", "T1059.006", "T1620", "T1036.005", "T1071.001"],
+        "color": "yellow",
+    },
+    "webserver_post_exploit_enum": {
+        "tactic": "TA0007 · Discovery",
+        "techniques": ["T1082", "T1087.001", "T1057", "T1083",
+                       "T1548.001", "T1016"],
+        "color": "blue",
+    },
+    "webserver_privesc": {
+        "tactic": "TA0004 · Privilege Escalation · TA0006 · Credential Access",
+        "techniques": ["T1548.001", "T1068", "T1620", "T1036.005",
+                       "T1552.001", "T1552.004"],
+        "color": "red",
+    },
+    "webserver_persistence": {
+        "tactic": "TA0003 · Persistence",
+        "techniques": ["T1505.003"],
+        "color": "green",
+    },
+    "advanced_lateral_movement": {
+        "tactic": "TA0008 · Lateral Movement · TA0040 · Impact",
+        "techniques": ["T1021.004", "T1556.003", "T1499.004"],
+        "color": "magenta",
+    },
+    "advanced_vinzenzws_privesc": {
+        "tactic": "TA0006 · Credential Access",
+        # T1546.004 — Event Triggered Execution: Unix Shell Configuration
+        # Modification (the malicious ``sudo()`` function is appended to
+        # ~/.bashrc and triggers on the admin's next interactive shell).
+        # T1140 — Deobfuscate/Decode Files or Information (we base64-encode
+        # the payload before piping it through ``base64 -d >> ~/.bashrc``
+        # to dodge sliver ``execute``'s shell-quoting quirks).
+        # T1078 — Valid Accounts (the captured credential will be reused
+        # by the admin's own identity to land root in a follow-up step).
+        "techniques": ["T1546.004", "T1140", "T1078"],
+        "color": "green",
+    },
+}
+def _step_meta(name: str, mode: str = "basic") -> dict:
+    """Return the TTP-metadata dict for ``name`` under the requested ``mode``.
+
+    Advanced mode prefers ``STEP_META_ADVANCED``; missing entries fall back
+    to ``STEP_META`` so unchanged basic-only steps keep their meta while
+    their per-step advanced PRs land.
+    """
+    if mode == "advanced" and name in STEP_META_ADVANCED:
+        return STEP_META_ADVANCED[name]
+    return STEP_META.get(name, {})
 
 
 @dataclass
@@ -152,8 +221,8 @@ def _print_banner(ctx: Context, steps: list[Step]) -> None:
     console.print()
 
 
-def _print_step_header(step: Step, index: int, total: int) -> None:
-    meta = STEP_META.get(step.name, {})
+def _print_step_header(step: Step, index: int, total: int, mode: str = "basic") -> None:
+    meta = _step_meta(step.name, mode)
     color = meta.get("color", "white")
     tactic = meta.get("tactic", "")
     techniques = "  ".join(f"[dim]{t}[/dim]" for t in meta.get("techniques", []))
@@ -168,10 +237,10 @@ def _print_step_header(step: Step, index: int, total: int) -> None:
 
 
 def _print_step_result(
-    step: Step, elapsed: float, success: bool, error: str = ""
+    step: Step, elapsed: float, success: bool, error: str = "", mode: str = "basic"
 ) -> None:
     console.print()
-    meta = STEP_META.get(step.name, {})
+    meta = _step_meta(step.name, mode)
     color = meta.get("color", "white")
     ts = f"[dim][{_iso_utc()}][/dim]  "
     if success:
@@ -216,7 +285,7 @@ def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
     log.info("wrote ground truth: %s", out_path)
 
 
-def _print_summary(results: list[dict]) -> None:
+def _print_summary(results: list[dict], mode: str = "basic") -> None:
     console.print(Rule("[bold white]CHAIN SUMMARY[/bold white]", style="dim white"))
     console.print()
 
@@ -228,7 +297,7 @@ def _print_summary(results: list[dict]) -> None:
     table.add_column("Techniques", style="dim")
 
     for r in results:
-        meta = STEP_META.get(r["name"], {})
+        meta = _step_meta(r["name"], mode)
         color = meta.get("color", "white")
         status = f"[green]✓ ok[/green]" if r["ok"] else f"[red]✗ failed[/red]"
         techniques = " · ".join(meta.get("techniques", []))
@@ -260,6 +329,78 @@ def _step_recon(ctx: Context) -> dict[str, Any]:
     return {"recon_results": ctx.results_dir}
 
 
+def _step_advanced_recon(ctx: Context) -> dict[str, Any]:
+    from advanced_initial_recon import run as advanced_recon_run
+
+    advanced_recon_run(
+        target=ctx.target,
+        results_dir=ctx.results_dir,
+        kali_host=ctx.kali_host,
+    )
+    return {"recon_results": ctx.results_dir}
+
+
+def _step_advanced_exploit(ctx: Context) -> dict[str, Any]:
+    from advanced_initial_access import run as advanced_exploit_run
+
+    result = advanced_exploit_run(target_ip=ctx.target, kali_ip=ctx.kali_host)
+    if not result.get("sliver_session"):
+        raise RuntimeError("advanced exploit returned no Sliver session")
+    return {
+        "sliver_session": result["sliver_session"],
+        "sliver_beacon":  result.get("sliver_beacon"),
+    }
+
+
+def _step_advanced_webserver_post_exploit_enum(ctx: Context) -> dict[str, Any]:
+    from advanced_webserver_post_exploit_enum import run as enum_run
+
+    return enum_run(
+        sliver_session_id=ctx.state["sliver_session"],
+        sliver_beacon_id=ctx.state.get("sliver_beacon"),
+        kali_host=ctx.kali_host,
+    )
+
+
+def _step_advanced_webserver_privesc(ctx: Context) -> dict[str, Any]:
+    from advanced_webserver_privesc import run as privesc_run
+
+    return privesc_run(
+        sliver_session_id=ctx.state["sliver_session"],
+        cap_binary=ctx.state["cap_binary"],
+        kali_host=ctx.kali_host,
+        results_dir=ctx.results_dir,
+    )
+
+
+def _step_advanced_webserver_persistence(ctx: Context) -> dict[str, Any]:
+    from advanced_webserver_persistence import run as persistence_run
+
+    return persistence_run(
+        root_sliver_session=ctx.state["root_sliver_session"],
+        kali_host=ctx.kali_host,
+    )
+
+
+def _step_advanced_lateral_movement(ctx: Context) -> dict[str, Any]:
+    from advanced_lateral_movement import run as advanced_lateral_run
+
+    # The lateral step returns ``vinzenz_beacon`` -- the Sliver beacon ID on
+    # vinzenz's workstation. The earlier draft also returned a DummyShell
+    # stub under ``vinzenz_shell_sock`` for a teardown that no longer
+    # exists; that handle has been dropped.
+    result = advanced_lateral_run(
+        root_sliver_session=ctx.state["root_sliver_session"],
+        kali_host=ctx.kali_host,
+    )
+    vinzenz_beacon = result.get("vinzenz_beacon")
+    if not vinzenz_beacon:
+        raise RuntimeError(
+            "advanced lateral movement: vinzenz workstation beacon never checked in"
+        )
+    return {"vinzenz_beacon": vinzenz_beacon}
+
+
 def _step_exploit(ctx: Context) -> dict[str, Any]:
     from initial_access import get_www_shell
 
@@ -269,12 +410,12 @@ def _step_exploit(ctx: Context) -> dict[str, Any]:
     return {"www_shell": www_shell}
 
 
-def _step_post_exploit_recon(ctx: Context) -> dict[str, Any]:
-    from post_exploit_recon import run as recon_run
+def _step_post_exploit_enumeration(ctx: Context) -> dict[str, Any]:
+    from post_exploit_enumeration import run as enum_run
 
-    findings = recon_run(www_shell=ctx.state["www_shell"], kali_host=ctx.kali_host, use_linpeas=ctx.linpeas)
+    findings = enum_run(www_shell=ctx.state["www_shell"], kali_host=ctx.kali_host, use_linpeas=ctx.linpeas)
     if not findings.get("cron_script"):
-        raise RuntimeError("post-exploit recon found no writable cron script — cannot escalate")
+        raise RuntimeError("post-exploit enumeration found no writable cron script — cannot escalate")
     return findings
 
 
@@ -291,18 +432,13 @@ def _step_privesc(ctx: Context) -> dict[str, Any]:
     return {"root_shell": root_shell}
 
 
-def _step_creds(ctx: Context) -> dict[str, Any]:
-    from credential_stuffing import run as creds_run
+def _step_credential_access(ctx: Context) -> dict[str, Any]:
+    from credential_access import run as credential_access_run
 
-    result = creds_run(ctx.state["root_shell"])
-    if not result.get("john_ip"):
-        raise RuntimeError("credential stuffing found no usable account on the internal subnet")
-    return {
-        "john_ip": result["john_ip"],
-        "john_password": result["john_password"],
-        "creds_scan": result.get("scanned_hosts", []),
-        "creds_successes": result.get("successes", []),
-    }
+    result = credential_access_run(ctx.state["root_shell"])
+    if not result.get("john_password"):
+        raise RuntimeError("credential access found no usable password on apache")
+    return {"john_password": result["john_password"]}
 
 
 def _step_lateral(ctx: Context) -> dict[str, Any]:
@@ -311,9 +447,7 @@ def _step_lateral(ctx: Context) -> dict[str, Any]:
     result = lateral_run(
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
-        workstation_ip=ctx.state.get("john_ip"),
-        other_targets=ctx.state.get("creds_scan", []),
-        john_ip=ctx.state.get("john_ip"),
+        john_password=ctx.state.get("john_password"),
         pacing_speed=ctx.pacing_speed,
     )
     if result["john_shell"] is None:
@@ -321,7 +455,6 @@ def _step_lateral(ctx: Context) -> dict[str, Any]:
     return {
         "john_shell": result["john_shell"],
         "failed_lateral_targets": result["failed_lateral_targets"],
-        "failed_lateral_key_failures": result["failed_lateral_key_failures"],
         "failed_lateral_password_failures": result["failed_lateral_password_failures"],
     }
 
@@ -359,6 +492,16 @@ def _step_exfiltrate(ctx: Context) -> dict[str, Any]:
     }
 
 
+def _step_defense_evasion(ctx: Context) -> dict[str, Any]:
+    from defense_evasion import run as defense_evasion_run
+
+    defense_evasion_run(
+        root_shell=ctx.state.get("root_shell"),
+        john_shell=ctx.state.get("john_shell"),
+    )
+    return {}
+
+
 def _teardown_close_socket(key: str) -> Callable[[Context], None]:
     def _close(ctx: Context) -> None:
         sock = ctx.state.get(key)
@@ -369,6 +512,29 @@ def _teardown_close_socket(key: str) -> Callable[[Context], None]:
                 log.warning("failed to close %s: %s", key, exc)
 
     return _close
+
+
+def _step_advanced_vinzenzws_privesc(ctx: Context) -> dict[str, Any]:
+    from advanced_vinzenzws_privesc import run as privesc_run
+
+    # ``requires=("vinzenz_beacon",)`` only checks key presence -- a None
+    # value would still pass. Belt-and-braces: validate the value here so
+    # the underlying sliver_exec() call never receives ``None`` as an
+    # implant ID.
+    vinzenz_beacon = ctx.state.get("vinzenz_beacon")
+    if not vinzenz_beacon:
+        raise RuntimeError(
+            "advanced vinzenz-ws privesc: missing vinzenz_beacon in chain state"
+        )
+    result = privesc_run(
+        vinzenz_beacon=vinzenz_beacon,
+        kali_host=ctx.kali_host,
+    )
+    if not result.get("vinzenz_password_file"):
+        raise RuntimeError("sudo phishing on vinzenz's workstation failed to drop password file")
+    return {
+        "vinzenz_password_file": result["vinzenz_password_file"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -384,8 +550,8 @@ CHAIN_BASIC: list[Step] = [
     Step("exploit", _step_exploit, dwell_before=15 * 60,
          teardown=_teardown_close_socket("www_shell")),
     Step(
-        "post_exploit_recon",
-        _step_post_exploit_recon,
+        "post_exploit_enumeration",
+        _step_post_exploit_enumeration,
         dwell_before=10 * 60,
         requires=("www_shell",),
     ),
@@ -397,8 +563,8 @@ CHAIN_BASIC: list[Step] = [
         teardown=_teardown_close_socket("root_shell"),
     ),
     Step(
-        "creds",
-        _step_creds,
+        "credential_access",
+        _step_credential_access,
         dwell_before=10 * 60,
         requires=("root_shell",),
     ),
@@ -406,7 +572,7 @@ CHAIN_BASIC: list[Step] = [
         "lateral",
         _step_lateral,
         dwell_before=2 * 3600,
-        requires=("root_shell",),  # john_ip optional: used if present, else deploy.log fallback
+        requires=("root_shell",),  # john_password optional: falls back to hardcoded default
         teardown=_teardown_close_socket("john_shell"),
     ),
     Step(
@@ -421,11 +587,49 @@ CHAIN_BASIC: list[Step] = [
         dwell_before=45 * 60,    # staging data + chunked exfil are deliberately slow
         requires=("john_shell",),
     ),
+    Step(
+        "defense_evasion",
+        _step_defense_evasion,
+        optional=True,
+    ),
 ]
 
-# Advanced mode reuses the basic chain until stealthier per-step variants land;
-# swap entries in CHAIN_ADVANCED as they're implemented.
-CHAIN_ADVANCED: list[Step] = list(CHAIN_BASIC)
+# Advanced variants land per-host bundles. PR-A shipped the recon step;
+# PR-B (#141) added the apache-side exploit + enumeration + privesc +
+# persistence. PR-C (#144) added the lateral movement to vinzenz_ws via
+# SSH-agent-forwarding hijack. PR-D (#152) added the sudo-phish on
+# vinzenz's workstation; it consumes the ``vinzenz_beacon`` state key
+# the lateral step produces. All advanced-step state values are Sliver
+# session/beacon IDs (strings) -- no socket handles, no teardown.
+CHAIN_ADVANCED: list[Step] = [
+    Step("recon", _step_advanced_recon),
+    Step("exploit", _step_advanced_exploit),
+    Step(
+        "webserver_post_exploit_enum",
+        _step_advanced_webserver_post_exploit_enum,
+        requires=("sliver_session",),
+    ),
+    Step(
+        "webserver_privesc",
+        _step_advanced_webserver_privesc,
+        requires=("sliver_session", "cap_binary"),
+    ),
+    Step(
+        "webserver_persistence",
+        _step_advanced_webserver_persistence,
+        requires=("root_sliver_session",),
+    ),
+    Step(
+        "advanced_lateral_movement",
+        _step_advanced_lateral_movement,
+        requires=("root_sliver_session",),
+    ),
+    Step(
+        "advanced_vinzenzws_privesc",
+        _step_advanced_vinzenzws_privesc,
+        requires=("vinzenz_beacon",),
+    ),
+]
 
 CHAINS: dict[str, list[Step]] = {
     "basic": CHAIN_BASIC,
@@ -477,9 +681,9 @@ def _select(steps, *, only, start, stop) -> list[Step]:
 
 
 def _result_entry(step: Step, *, ok: bool, started: str, ended: str,
-                  elapsed: float, err: str = "") -> dict:
+                  elapsed: float, err: str = "", mode: str = "basic") -> dict:
     """Build one structured ground-truth record for a single step."""
-    meta = STEP_META.get(step.name, {})
+    meta = _step_meta(step.name, mode)
     entry = {
         "name": step.name,
         "ok": ok,
@@ -502,6 +706,14 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
     run_dir = Path(ctx.results_dir) / f"run-{_sanitize_run_id(run_id)}"
     run_dir.mkdir(parents=True, exist_ok=True)
     ctx.results_dir = str(run_dir)
+
+    try:
+        attacklog.open_log(
+            ATTACK_LOG_DIR / f"attack_steps_{_sanitize_run_id(run_id)}.md",
+            {"run_id": run_id, "mode": ctx.mode, "target": ctx.target, "kali": ctx.kali_host},
+        )
+    except Exception as exc:
+        log.warning("attack log disabled — could not open: %s", exc)
 
     _print_banner(ctx, selected)
     results: list[dict] = []
@@ -540,9 +752,17 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             elif wait > 0:
                 time.sleep(wait)
 
-            _print_step_header(step, i, len(selected))
+            _print_step_header(step, i, len(selected), mode=ctx.mode)
             started = _iso_utc()
             t0 = time.perf_counter()
+            _smeta = _step_meta(step.name, ctx.mode)
+            attacklog.begin_phase(
+                step.name,
+                _smeta.get("tactic", ""),
+                _smeta.get("techniques", []),
+                started,
+            )
+            delta = {}
             ok = True
             err = ""
             try:
@@ -553,17 +773,21 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                 if not step.optional:
                     elapsed = time.perf_counter() - t0
                     ended = _iso_utc()
-                    _print_step_result(step, elapsed, ok, err)
+                    _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
+                    attacklog.end_phase(step.name, ok, elapsed, ended)
                     results.append(_result_entry(step, ok=ok, started=started,
-                                                 ended=ended, elapsed=elapsed, err=err))
+                                                 ended=ended, elapsed=elapsed,
+                                                 err=err, mode=ctx.mode))
                     raise
             elapsed = time.perf_counter() - t0
             ended = _iso_utc()
             ctx.state.update(delta)
             executed.append(step)
-            _print_step_result(step, elapsed, ok, err)
+            _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
+            attacklog.end_phase(step.name, ok, elapsed, ended)
             results.append(_result_entry(step, ok=ok, started=started,
-                                         ended=ended, elapsed=elapsed))
+                                         ended=ended, elapsed=elapsed,
+                                         mode=ctx.mode))
             # No trailing cosmetic sleep — dwell_before of the NEXT step
             # handles inter-step pacing now.
 
@@ -577,11 +801,15 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                 log.warning("teardown %s failed: %s", step.name, exc)
 
         if results:
-            _print_summary(results)
+            _print_summary(results, mode=ctx.mode)
             try:
                 _write_ground_truth(ctx, run_id, results)
             except Exception as exc:
                 log.warning("failed to write ground-truth JSON: %s", exc)
+        try:
+            attacklog.close_log(results)
+        except Exception as exc:
+            log.warning("failed to close attack log: %s", exc)
 
     return ctx
 
@@ -644,7 +872,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def _list_steps(mode: str = DEFAULT_MODE) -> None:
     console.print(Rule(f"[dim]configured steps ({mode})[/dim]", style="dim"))
     for step in CHAINS[mode]:
-        meta = STEP_META.get(step.name, {})
+        meta = _step_meta(step.name, mode)
         color = meta.get("color", "white")
         reqs = (
             f"  [dim]requires: {', '.join(step.requires)}[/dim]"

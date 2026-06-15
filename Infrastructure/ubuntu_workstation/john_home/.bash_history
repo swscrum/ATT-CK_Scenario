@@ -10,8 +10,6 @@ ls -la
 cat ~/Documents/'Welcome to Waystar Royco.md'
 cat ~/Documents/'Your first few days.md'
 cat ~/Documents/'Useful contacts.md'
-sudo apt update
-sudo apt install -y curl wget vim less htop tree
 node --version
 npm --version
 mkdir -p ~/projects
@@ -58,8 +56,6 @@ ls -lah ~/Documents/
 cat ~/Documents/'Project brief — Waystar Connect.md'
 vim docs/deploy.md
 git push
-sudo apt update
-sudo apt install -y vim less
 top
 df -h
 ssh hardened-ws-1

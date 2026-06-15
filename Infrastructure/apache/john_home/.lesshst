@@ -1,0 +1,8 @@
+.less-history-file:
+.search
+"DEPLOY
+"WS_PASS
+"rsync
+.shell
+tail /opt/waystar-connect/deploy.log
+ls -la /opt/waystar-connect/dist/

@@ -89,6 +89,13 @@ RUN chmod +x /usr/local/bin/lab-fim.sh
 COPY shared-lab-keys/lab-ca.crt /usr/local/share/ca-certificates/waystar-lab-ca.crt
 RUN update-ca-certificates >/dev/null 2>&1
 
+# Build-time activity baseline — pre-seeds /var/log with 14-60 days of
+# believable past activity (clinical persona). See
+# Infrastructure/shared-baseline/README.md.
+COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
+COPY shared-baseline/templates/clinical/        /usr/local/share/baseline/clinical/
+RUN chmod +x /usr/local/bin/hydrate-baseline.sh
+
 # Workstation activity simulator — runs as luke.smith from the entrypoint
 # when ACTIVITY_ENABLED=1. Generates the clinical-user baseline (psql to
 # db-internal, vim on session notes) so the attacker's eventual exfil

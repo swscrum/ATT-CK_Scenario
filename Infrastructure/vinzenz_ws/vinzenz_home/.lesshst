@@ -1,0 +1,14 @@
+.less-history-file:
+.search
+"sudo
+"TODO
+"cleanup
+"vinzenz.fedora
+"Lock
+"upgradable
+"libcap2
+"openssh-server
+.shell
+sudo grep MODIFY /var/log/persist/lab-fim.log | tail
+sudo apt list --upgradable
+journalctl -u sshd -n 100

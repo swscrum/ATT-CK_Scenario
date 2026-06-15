@@ -11,10 +11,15 @@
 set -u
 
 WATCH_PATHS=(
-    /opt/cleanup.sh                       # T1053.003 — privesc tripwire
+    /opt/cleanup.sh                       # T1053.003 — basic-mode privesc tripwire
     /etc/cron.d/cleanup                   # T1053.003 — cron schedule tamper
+    /etc/sudoers                          # T1548.003 — sudo policy tamper (future-proof)
+    /etc/sudoers.d                        # T1548.003 — sudoers.d drop-in (future-proof)
     /usr/local/apache2/cgi-bin            # T1190 / T1505.003 — webshell drop
 )
+# Note: file capabilities (T1548.001) are stored as extended attributes and
+# are not reliably surfaced by inotify event masks; the start.sh capability
+# baseline + diff is the right tool for that detection class, not FIM.
 
 EXISTING=()
 for p in "${WATCH_PATHS[@]}"; do

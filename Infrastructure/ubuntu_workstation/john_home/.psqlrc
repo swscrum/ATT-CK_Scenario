@@ -1,0 +1,12 @@
+-- john.stravidis's psqlrc (developer, waystar-readonly creds)
+
+\set QUIET 1
+
+-- Developer prompt: user@host:db>
+\set PROMPT1 '%[%033[1;36m%]%n@%M:%/%[%033[0m%]> '
+\set PROMPT2 '%[%033[1;36m%]%/%R%[%033[0m%]> '
+
+\timing on
+\pset null '∅'
+
+\set QUIET 0

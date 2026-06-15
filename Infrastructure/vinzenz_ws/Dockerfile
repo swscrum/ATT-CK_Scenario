@@ -69,10 +69,36 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
                  /home/vinzenz.fedora/.ssh/known_hosts \
     && chmod 600 /home/vinzenz.fedora/.pgpass
 
+# -----------------------------------------------------------------------------
+# Sloppy-operator pattern: Vinzenz caches his sudo password in a hidden
+# config file so simulate_admin.sh and the apt-get cron don't have to
+# prompt. 0600 + owned by vinzenz.fedora so only he (and root) can read.
+# This intentionally replaces the earlier ``echo PASSWORD | sudo -S ...``
+# pattern, which exposed the credential in ``ps aux`` argv. Now the
+# password lives on disk only, and the maintenance scripts redirect it
+# into ``sudo -S`` via stdin. Side benefit: an attacker who lands code
+# exec as vinzenz.fedora can ``cat`` the token instead of waiting for
+# the T1546.004 sudo-phish to fire -- realistic looting opportunity.
+# -----------------------------------------------------------------------------
+RUN install -d -m 700 -o vinzenz.fedora -g vinzenz.fedora /home/vinzenz.fedora/.config \
+    && echo 'VinzenzAdmin!2026' > /home/vinzenz.fedora/.config/.maint_token \
+    && chown vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora/.config/.maint_token \
+    && chmod 600 /home/vinzenz.fedora/.config/.maint_token
+
 # Lab File Integrity Monitor + rsyslog mirror — same pattern as john_ws.
 COPY vinzenz_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
+COPY vinzenz_ws/simulate_admin.sh  /usr/local/bin/simulate_admin.sh
 COPY vinzenz_ws/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
-RUN chmod +x /usr/local/bin/lab-fim.sh
+RUN chmod +x /usr/local/bin/lab-fim.sh /usr/local/bin/simulate_admin.sh
+
+# Build-time activity baseline. The hydrator renders date-relative tokens at
+# first boot (before rsyslog + lab-fim start), writing 14-60 days of
+# believable past activity into /var/log/{auth.log,dpkg.log,apt/history.log,
+# syslog}. Idempotent across container restarts via /var/lib/baseline-hydrated.
+# See Infrastructure/shared-baseline/README.md.
+COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
+COPY shared-baseline/templates/sysadmin/        /usr/local/share/baseline/sysadmin/
+RUN chmod +x /usr/local/bin/hydrate-baseline.sh
 
 # Trust the lab internal CA so curl/wget against fake_internet domains
 # (github.com, archive.ubuntu.com, etc.) works WITHOUT -k.

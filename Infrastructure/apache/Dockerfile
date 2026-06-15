@@ -14,11 +14,33 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
         nmap sshpass \
         rsyslog \
         openssl \
+        gawk \
+        libcap2-bin \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
         || { b=$(command -v base64 2>/dev/null) && [ -n "$b" ] && ln -sf "$b" /usr/bin/base64; } \
         || true)
+
+# ============================================================================
+#  MISCONFIGURATION — MITRE ATT&CK T1548.001 (Abuse Elevation Control:
+#                                              Setuid and Setgid — file capability)
+# ----------------------------------------------------------------------------
+#  Vinzenz set cap_setuid on python3 so the booking CGI (running as www-data
+#  via mod_cgi) could chown user-uploaded session-note attachments to the
+#  app's UID. He thought the capability applied only to the CGI script; in
+#  reality file capabilities are per-binary, so EVERY invocation of
+#  /usr/bin/python3 (by any user) silently gets cap_setuid+ep. A www-data
+#  shell from CVE-2021-41773 can call os.setuid(0) and become root without
+#  touching cron, sudo, or any SUID bit — and without writing to any path
+#  the lab FIM is currently watching.
+#
+#  Drives the advanced-mode privesc step (advanced_webserver_privesc.py).
+#  Basic mode still uses the /opt/cleanup.sh cron misconfig below (T1053.003);
+#  both misconfigs coexist so both modes work from the same image.
+# ============================================================================
+RUN setcap cap_setuid,cap_setgid+ep "$(readlink -f /usr/bin/python3)" \
+    && getcap "$(readlink -f /usr/bin/python3)"
 
 # Building Apache 2.4.49 ourselves would also work, but using the upstream
 # httpd:2.4.50 image is faster and equally vulnerable to CVE-2021-41773.
@@ -47,21 +69,23 @@ RUN printf '* * * * * root /opt/cleanup.sh\n' > /etc/cron.d/cleanup \
 
 # ============================================================================
 #  john.stravidis — frontend freelancer who built Waystar Connect.
-#  His SSH key is authorized so he can deploy from his workstation.
-#  See Documentation/scenario_story.md for the in-fiction backstory.
+#  Only his PUBLIC key is authorized here, so he can deploy IN from his
+#  workstation. The PRIVATE key deliberately does NOT live on apache: deploys
+#  flow workstation -> apache, never the reverse (see john_home/.ssh/config and
+#  shared-lab-keys/README.md), and the attack chain reads the private key from
+#  the workstation, not from here. See issue #132 and
+#  Documentation/scenario_story.md.
 # ============================================================================
 RUN useradd -m -s /bin/bash john.stravidis
 COPY apache/john_home/ /home/john.stravidis/
 COPY apache/dist/ /opt/waystar-connect/dist/
 COPY shared-lab-keys/john_deploy_key.pub /home/john.stravidis/.ssh/authorized_keys
-COPY shared-lab-keys/john_deploy_key     /home/john.stravidis/.ssh/id_ed25519
 COPY apache/john_home/projects/waystar-connect/deploy.log /opt/waystar-connect/deploy.log
 RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && mkdir -p /opt/waystar-connect/dist.prev \
     && chown -R john.stravidis:john.stravidis /opt/waystar-connect \
     && chmod 700 /home/john.stravidis/.ssh \
     && chmod 600 /home/john.stravidis/.ssh/authorized_keys \
-    && chmod 600 /home/john.stravidis/.ssh/id_ed25519 \
     && chmod 644 /home/john.stravidis/.ssh/config /home/john.stravidis/.ssh/known_hosts \
     && chmod 600 /home/john.stravidis/.env
 
@@ -92,10 +116,20 @@ RUN apt-get update \
     && useradd -m -s /bin/bash -G sudo vinzenz.fedora \
     && echo 'vinzenz.fedora:VinzenzAdmin!2026' | chpasswd \
     && mkdir -p /home/vinzenz.fedora/.ssh
+# Seed Vinzenz's apache-side home with his lived-in dotfiles + bash_history.
+COPY apache/vinzenz_home/ /home/vinzenz.fedora/
 COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_keys
 RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
     && chmod 700 /home/vinzenz.fedora/.ssh \
-    && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
+    && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys \
+    # Same sloppy-operator sudo cache as on vinzenz_ws (see comment in
+    # Infrastructure/vinzenz_ws/Dockerfile). simulate_admin.sh's SSH-into-
+    # apache branch redirects this file into ``sudo -S`` so the password
+    # doesn't appear in the apache container's argv either.
+    && install -d -m 700 -o vinzenz.fedora -g vinzenz.fedora /home/vinzenz.fedora/.config \
+    && echo 'VinzenzAdmin!2026' > /home/vinzenz.fedora/.config/.maint_token \
+    && chown vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora/.config/.maint_token \
+    && chmod 600 /home/vinzenz.fedora/.config/.maint_token
 
 # ============================================================================
 #  luke.smith — psychiatrist's named account on this host.
@@ -106,18 +140,14 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
 # ============================================================================
 RUN useradd -m -s /bin/bash luke.smith \
     && echo 'luke.smith:WaystarLuke!2026' | chpasswd \
-    && mkdir -p /home/luke.smith/backup/notes \
-    && chown -R luke.smith:luke.smith /home/luke.smith
+    && mkdir -p /home/luke.smith/backup/notes
+# Seed Luke's apache-side home (his backup-target account).
+COPY apache/luke_home/ /home/luke.smith/
+RUN chown -R luke.smith:luke.smith /home/luke.smith
 
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
 
-# Start script: launches cron + sshd, then the inotify-based File Integrity
-# Monitor that watches /opt/cleanup.sh (the privesc tripwire), then hands
-# off to Apache in the foreground. The watcher's output lands in
-# /usr/local/apache2/logs/lab-fim.log, which is bind-mounted to the host
-# so a SIEM agent can ingest it — the central detection signal for
-# T1053.003 + T1068.
 # TLS — server cert signed by the lab internal CA (same CA that signs
 # fake_internet's multi-SAN cert). Workstations trust the lab CA, so
 # they validate apache's cert without `-k`. Earlier iteration used a
@@ -154,9 +184,24 @@ RUN openssl req -new -newkey rsa:2048 -nodes \
     && chmod 644 /usr/local/apache2/conf/server.crt \
     && rm -f /tmp/lab-ca.key /tmp/lab-ca.crt /tmp/server.csr /tmp/server.san /tmp/lab-ca.srl
 
-COPY apache/start.sh   /usr/local/bin/start.sh
-COPY apache/lab-fim.sh /usr/local/bin/lab-fim.sh
-RUN chmod +x /usr/local/bin/start.sh /usr/local/bin/lab-fim.sh
+# Start script + lab-FIM + activity baseline.
+#  - start.sh: launches rsyslog + cron + sshd, writes capability baseline
+#    (T1548.001 detection anchor — PR #141), hydrates the activity baseline
+#    (this PR), kicks off lab-fim, exec's httpd. Lives in the source tree
+#    so it can be edited without rebaking inline shell into the Dockerfile.
+#  - lab-fim.sh: inotify watcher for /opt/cleanup.sh privesc tripwire +
+#    cgi-bin webshell drop + sudoers tamper (PR #141). Writes
+#    /usr/local/apache2/logs/lab-fim.log (bind-mounted to host for SIEM).
+#  - hydrate-baseline.sh + templates/apache: persona-keyed log baseline
+#    (this PR) — renders 14-60 days of past auth/dpkg/apt/cleanup activity
+#    so the host doesn't boot with a clean log slate.
+COPY apache/start.sh                            /usr/local/bin/start.sh
+COPY apache/lab-fim.sh                          /usr/local/bin/lab-fim.sh
+COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
+COPY shared-baseline/templates/apache/          /usr/local/share/baseline/apache/
+RUN chmod +x /usr/local/bin/start.sh \
+             /usr/local/bin/lab-fim.sh \
+             /usr/local/bin/hydrate-baseline.sh
 
 # Mirror auth.log + syslog into /usr/local/apache2/logs/ (the bind-mounted
 # dir) so sshd auth events from luke.smith and vinzenz.fedora baseline

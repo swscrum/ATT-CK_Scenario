@@ -15,6 +15,14 @@ Attack-chain/results/*
 Infrastructure/logs/**/*
 !Infrastructure/logs/**/.gitkeep
 
+# Runtime drop from the advanced T1505.003 persistence step.
+# advanced_webserver_persistence.py uploads payloads/health_check.cgi into
+# /usr/local/apache2/cgi-bin/ via Sliver; because that directory is bind-
+# mounted to ./apache/cgi-bin on the host, the runtime drop persists into
+# the working tree. Tracking it would defeat the persistence semantics
+# (the chain would "drop" a file that already exists at build time).
+Infrastructure/apache/cgi-bin/health_check.cgi
+
 # Python bytecode
 __pycache__/
 *.pyc

