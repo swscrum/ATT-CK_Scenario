@@ -78,12 +78,11 @@ services:
     ports:
       - "5901:5901"
     volumes:
-      # Persist workstation logs. Direct /var/log bind mount — same shape
-      # a real production Ubuntu host would have. rsyslog writes
-      # syslog/auth.log/kern.log here; the inotify FIM watcher writes
-      # lab-fim.log here. The entrypoint chowns the dir to root:syslog
-      # so rsyslog can drop files normally.
-      - ./logs/workstation:/var/log
+      # Persist workstation logs (rsyslog mirrors syslog + auth.log to
+      # /var/log/persist, and the inotify FIM watcher writes lab-fim.log
+      # there; sshd VERBOSE → auth.log). /var/log itself is NOT bind-mounted
+      # to avoid changing host directory ownership.
+      - ./logs/workstation:/var/log/persist
     networks:
       internal_net:
         ipv4_address: 10.30.0.5

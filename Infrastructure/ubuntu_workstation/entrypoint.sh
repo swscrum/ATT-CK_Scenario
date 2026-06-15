@@ -52,11 +52,6 @@ python3 /usr/local/bin/logind-stub.py 2>/dev/null &
 # pick it up and exit the container if the stub ever terminates.
 disown
 
-# /var/log is bind-mounted from the host (./logs/workstation on host); the
-# mount inherits host ownership (uid 1000), so we restore the standard
-# Ubuntu root:syslog ownership before rsyslog tries to write. /var/log/audit
-# is set up in advance for any future auditd plugin even though the lab
-# currently uses inotify for FIM.
 # Pin DNS resolution to lab_dns (10.30.0.10) instead of Docker's embedded
 # resolver. Why: workstation activity_sim hits "internet" domains like
 # github.com / archive.ubuntu.com / registry.npmjs.org — these must
@@ -72,35 +67,35 @@ nameserver 10.30.0.10
 options edns0 timeout:2 attempts:2
 EOF
 
-chown root:syslog /var/log
-chmod 0775 /var/log
-# Also reset ownership on existing log FILES inside /var/log — bind mounts
-# preserve old ownership across container restarts, and rsyslog (running as
-# user `syslog`) silently fails to append to files it can't open for write.
-# Without this, auth.log / syslog stay frozen at whatever the last run wrote
-# and no new sshd events are recorded. The `|| true` keeps existing files
-# we don't recognise alone.
-chown -R syslog:adm /var/log/*.log /var/log/syslog 2>/dev/null || true
-chmod 0640 /var/log/*.log /var/log/syslog 2>/dev/null || true
-mkdir -p /var/log/audit
-chown root:adm /var/log/audit
-chmod 0750 /var/log/audit
+# Persisted log directory (bind-mounted from host as /var/log/persist).
+# rsyslog drop-in 40-lab-persist.conf mirrors auth.log + syslog into here;
+# lab-fim writes its own log here too. /var/log itself stays container-
+# local with standard root:syslog ownership -- this keeps the HOST side of
+# the bind mount writable by uid 1000 and avoids the PR #69 regression
+# (chowning the host dir to root requires `sudo` to clean between runs and
+# fails under rootless Docker). Matches the pattern luke_ws + vinzenz_ws
+# (and main) already use.
+mkdir -p /var/log/persist
+chown root:syslog /var/log/persist
+chmod 0775 /var/log/persist
+touch /var/log/persist/lab-fim.log && chmod 0644 /var/log/persist/lab-fim.log
 
 # Start the real Linux logging daemon so /var/log/{syslog,auth.log,kern.log}
-# populate the way they would on a production Ubuntu box. Ubuntu 24.04 ships
-# systemd-only unit files inside the image, so we invoke the binary directly.
+# populate the way they would on a production Ubuntu box, and the drop-in
+# at /etc/rsyslog.d/40-lab-persist.conf mirrors auth+syslog to
+# /var/log/persist/ for SIEM ingest. Ubuntu 24.04 ships systemd-only unit
+# files inside the image, so we invoke the binary directly.
 rsyslogd \
     || echo "[entrypoint] rsyslogd failed to start"
 
 # inotify-based File Integrity Monitor. Writes one structured line per
 # filesystem event on the watched paths (john's ~/.ssh, ~/.bash_history,
-# /var/mail, /etc/{passwd,shadow,sudoers,…}) to /var/log/lab-fim.log.
+# /var/mail, /etc/{passwd,shadow,sudoers,…}) to /var/log/persist/lab-fim.log.
 # Stands in for auditd, which can't register with the kernel audit
 # subsystem inside this Docker host. Wazuh-FIM uses inotify the same way
 # when auditd is unavailable, so the SIEM-side experience matches a real
 # Linux EDR.
-touch /var/log/lab-fim.log && chmod 0644 /var/log/lab-fim.log
-nohup /usr/local/bin/lab-fim.sh >> /var/log/lab-fim.log 2>&1 &
+nohup /usr/local/bin/lab-fim.sh >> /var/log/persist/lab-fim.log 2>&1 &
 echo "[entrypoint] lab-fim watcher PID $!"
 
 # Activity simulator — runs as john.stravidis (the daily-user persona) when

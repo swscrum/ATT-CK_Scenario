@@ -103,8 +103,13 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
 # inotify-based File Integrity Monitor and an rsyslog snippet that opens
 # file-create perms enough for an operator on the host to read the logs
 # without sudo (group/ownership stays realistic — root:syslog 0644).
-COPY ubuntu_workstation/lab-fim.sh          /usr/local/bin/lab-fim.sh
-COPY ubuntu_workstation/01-lab-perms.conf   /etc/rsyslog.d/01-lab-perms.conf
+# 40-lab-persist.conf is the rsyslog drop-in that mirrors auth.log + syslog
+# into /var/log/persist (the host-bind-mounted directory). /var/log itself
+# stays container-local; this is the safe pattern PR #69 introduced — see
+# the entrypoint's "Persisted log directory" block for context.
+COPY ubuntu_workstation/lab-fim.sh           /usr/local/bin/lab-fim.sh
+COPY ubuntu_workstation/01-lab-perms.conf    /etc/rsyslog.d/01-lab-perms.conf
+COPY ubuntu_workstation/40-lab-persist.conf  /etc/rsyslog.d/40-lab-persist.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh
 
 # Trust the lab internal CA so `curl https://github.com` against
