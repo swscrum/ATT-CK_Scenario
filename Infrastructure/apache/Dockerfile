@@ -116,7 +116,15 @@ RUN apt-get update \
 COPY shared-lab-keys/vincent_admin_key.pub /home/vinzenz.fedora/.ssh/authorized_keys
 RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
     && chmod 700 /home/vinzenz.fedora/.ssh \
-    && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys
+    && chmod 600 /home/vinzenz.fedora/.ssh/authorized_keys \
+    # Same sloppy-operator sudo cache as on vinzenz_ws (see comment in
+    # Infrastructure/vinzenz_ws/Dockerfile). simulate_admin.sh's SSH-into-
+    # apache branch redirects this file into ``sudo -S`` so the password
+    # doesn't appear in the apache container's argv either.
+    && install -d -m 700 -o vinzenz.fedora -g vinzenz.fedora /home/vinzenz.fedora/.config \
+    && echo 'VinzenzAdmin!2026' > /home/vinzenz.fedora/.config/.maint_token \
+    && chown vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora/.config/.maint_token \
+    && chmod 600 /home/vinzenz.fedora/.config/.maint_token
 
 # ============================================================================
 #  luke.smith — psychiatrist's named account on this host.

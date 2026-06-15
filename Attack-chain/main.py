@@ -347,11 +347,10 @@ def _step_advanced_webserver_persistence(ctx: Context) -> dict[str, Any]:
 def _step_advanced_lateral_movement(ctx: Context) -> dict[str, Any]:
     from advanced_lateral_movement import run as advanced_lateral_run
 
-    # The lateral step returns:
-    #   vinzenz_shell_sock — DummyShell stub (kept so teardown helpers don't
-    #                        crash on .close()); not used by downstream steps.
-    #   vinzenz_beacon     — Sliver beacon ID on vinzenz's workstation; this
-    #                        is the real handle the privesc step needs.
+    # The lateral step returns ``vinzenz_beacon`` -- the Sliver beacon ID on
+    # vinzenz's workstation. The earlier draft also returned a DummyShell
+    # stub under ``vinzenz_shell_sock`` for a teardown that no longer
+    # exists; that handle has been dropped.
     result = advanced_lateral_run(
         root_sliver_session=ctx.state["root_sliver_session"],
         kali_host=ctx.kali_host,
@@ -361,10 +360,7 @@ def _step_advanced_lateral_movement(ctx: Context) -> dict[str, Any]:
         raise RuntimeError(
             "advanced lateral movement: vinzenz workstation beacon never checked in"
         )
-    return {
-        "vinzenz_shell_sock": result.get("vinzenz_shell_sock"),
-        "vinzenz_beacon":     vinzenz_beacon,
-    }
+    return {"vinzenz_beacon": vinzenz_beacon}
 
 
 def _step_exploit(ctx: Context) -> dict[str, Any]:
@@ -550,13 +546,11 @@ CHAIN_BASIC: list[Step] = [
 
 # Advanced variants land per-host bundles. PR-A shipped the recon step;
 # PR-B (#141) added the apache-side exploit + enumeration + privesc +
-# persistence. PR-C (#144 / this PR) adds the lateral movement to
-# vinzenz_ws via SSH-agent-forwarding hijack -- that step produces a
-# socket-typed state key (``vinzenz_shell_sock``), so unlike the earlier
-# advanced steps the chain now mixes Sliver-session IDs and a raw socket
-# handle. The teardown for the lateral step closes the socket on chain
-# exit; downstream advanced steps (johnws_post_exploit_enum etc.) will
-# attach to that socket explicitly. Update this comment when those land.
+# persistence. PR-C (#144) added the lateral movement to vinzenz_ws via
+# SSH-agent-forwarding hijack. PR-D (#152) added the sudo-phish on
+# vinzenz's workstation; it consumes the ``vinzenz_beacon`` state key
+# the lateral step produces. All advanced-step state values are Sliver
+# session/beacon IDs (strings) -- no socket handles, no teardown.
 CHAIN_ADVANCED: list[Step] = [
     Step("recon", _step_advanced_recon),
     Step("exploit", _step_advanced_exploit),
