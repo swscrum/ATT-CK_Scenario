@@ -176,7 +176,7 @@ stage_local_files() {{
         # Find all regular files, excluding .cache
         sudo find "$udir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
             # Compute relative path under home
-            relpath="${filepath#$udir/}"
+            relpath="${{filepath#$udir/}}"
             # Target dir structure under staging
             reldir=$(dirname "$relpath")
             mkdir -p "$ustage/$reldir"
@@ -244,7 +244,7 @@ for udir in /home/* /root; do
     mkdir -p "$ustage"
     
     sudo find "$udir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
-        relpath="${filepath#$udir/}"
+        relpath="${{filepath#$udir/}}"
         reldir=$(dirname "$relpath")
         mkdir -p "$ustage/$reldir"
         
