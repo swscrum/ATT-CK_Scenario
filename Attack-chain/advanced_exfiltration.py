@@ -162,7 +162,7 @@ build_remote_harvest_script() {{
 mkdir -p /tmp/harvest
 
 # Unified pipeline function: finds files, replicates structure, processes them, and stages them
-process_and_stage() {
+process_and_stage() {{
     local src_dir="$1"
     local stage_dir="$2"
     [ -d "$src_dir" ] || return 0
@@ -178,7 +178,7 @@ process_and_stage() {
         # Chainable pipeline operation (gzip-compression for now)
         sudo gzip -c "$filepath" > "$stage_dir/$relpath.gz" 2>/dev/null || true
     done
-}
+}}
 
 # 1. Credentials and system logs
 mkdir -p /tmp/harvest/system
