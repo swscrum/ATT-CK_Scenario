@@ -169,7 +169,7 @@ process_and_stage() {
     
     sudo find "$src_dir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
         # Compute path relative to source directory
-        local relpath="${filepath#$src_dir/}"
+        local relpath="${{filepath#$src_dir/}}"
         local reldir=$(dirname "$relpath")
         
         # Replicate directory structure
