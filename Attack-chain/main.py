@@ -148,14 +148,6 @@ STEP_META_ADVANCED: dict[str, dict] = {
         "techniques": ["T1041", "T1567"],
         "color": "cyan",
     },
-    "advanced_restoration": {
-        "tactic": "TA0040 · Impact (Recovery)",
-        # T1490 — Inhibit System Recovery (used in reverse here — the step
-        # decrypts files the exfil phase encrypted in-place, restoring the
-        # lab environment for repeat demo runs).
-        "techniques": ["T1490"],
-        "color": "green",
-    },
     "advanced_cleanup_backdoor": {
         "tactic": "TA0005 · Defense Evasion · TA0003 · Persistence",
         # Defense Evasion family:
@@ -557,34 +549,6 @@ def _step_advanced_exfiltration(ctx: Context) -> dict[str, Any]:
     return result
 
 
-def _step_advanced_restoration(ctx: Context) -> dict[str, Any]:
-    from rich.prompt import Confirm
-    from advanced_restoration import run as restore_run
-
-    log.info("")
-    console.print(Panel(
-        "[bold yellow]Phase 9: Environment Restoration[/bold yellow]\n\n"
-        "All data has been successfully encrypted on target hosts.\n"
-        "Do you want to restore the environment to its original state using the private key?\n"
-        "  [green]y/yes[/green] - Decrypt all files and restore database.\n"
-        "  [red]n/no[/red]  - Leave files encrypted (e.g., for forensic exercises).",
-        border_style="yellow",
-    ))
-    do_restore = Confirm.ask("Proceed with restoration?")
-    if not do_restore:
-        log.info("[*] User opted to skip restoration. Environment remains encrypted.")
-        return {"restore_success": False}
-
-    result = restore_run(
-        root_sliver_session=ctx.state["root_sliver_session"],
-        vinzenz_beacon=ctx.state.get("vinzenz_beacon"),
-        results_dir=ctx.results_dir,
-    )
-    if not result.get("restore_success"):
-        raise RuntimeError("Advanced environment restoration failed")
-    return result
-
-
 def _step_advanced_cleanup_backdoor(ctx: Context) -> dict[str, Any]:
     """Final stealth-cleanup + backdoor step of the advanced chain.
 
@@ -700,12 +664,6 @@ CHAIN_ADVANCED: list[Step] = [
         "advanced_exfiltration",
         _step_advanced_exfiltration,
         requires=("root_sliver_session", "vinzenz_beacon"),
-    ),
-    Step(
-        "advanced_restoration",
-        _step_advanced_restoration,
-        requires=("root_sliver_session", "vinzenz_beacon"),
-        optional=True,
     ),
     Step(
         "advanced_cleanup_backdoor",
