@@ -176,6 +176,11 @@ STEP_META_ADVANCED: dict[str, dict] = {
                        "T1053.003", "T1543.002", "T1098.004"],
         "color": "red",
     },
+    "advanced_restoration": {
+        "tactic": "TA0040 · Impact (Recovery)",
+        "techniques": ["T1490", "T1491.001"],
+        "color": "green",
+    },
 }
 def _step_meta(name: str, mode: str = "basic") -> dict:
     """Return the TTP-metadata dict for ``name`` under the requested ``mode``.
@@ -579,6 +584,18 @@ def _step_advanced_cleanup_backdoor(ctx: Context) -> dict[str, Any]:
     )
 
 
+def _step_advanced_restoration(ctx: Context) -> dict[str, Any]:
+    from advanced_restoration import run as restore_run
+
+    result = restore_run(
+        root_sliver_session=ctx.state["root_sliver_session"],
+        vinzenz_beacon=ctx.state.get("vinzenz_beacon"),
+        results_dir=ctx.results_dir,
+    )
+    # restore_success=False means user chose N — not a chain error
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Chain definition
 # ---------------------------------------------------------------------------
@@ -668,6 +685,12 @@ CHAIN_ADVANCED: list[Step] = [
     Step(
         "advanced_cleanup_backdoor",
         _step_advanced_cleanup_backdoor,
+        requires=("root_sliver_session", "vinzenz_beacon"),
+        optional=True,
+    ),
+    Step(
+        "advanced_restoration",
+        _step_advanced_restoration,
         requires=("root_sliver_session", "vinzenz_beacon"),
         optional=True,
     ),
