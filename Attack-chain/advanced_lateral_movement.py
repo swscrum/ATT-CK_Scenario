@@ -104,7 +104,7 @@ except:
         import random
         for _ in range(120):
             try:
-                urllib.request.urlopen("http://10.30.0.2/cgi-bin/stats.cgi", timeout=0.1)
+                urllib.request.urlopen("http://10.40.0.2/cgi-bin/stats.cgi", timeout=0.1)
             except:
                 pass
             time.sleep(random.uniform(0.05, 0.2))
@@ -128,7 +128,7 @@ except:
             "sshpass -p 'VinzenzAdmin!2026' ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
             "vinzenz.fedora@10.30.0.8 "
             "\"ssh -A -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
-            "vinzenz.fedora@10.30.0.2 'sleep 20'\""
+            "vinzenz.fedora@10.40.0.2 'sleep 20'\""
         )
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
