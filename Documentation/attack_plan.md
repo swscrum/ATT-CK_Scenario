@@ -51,18 +51,18 @@ What advanced adds for the SOC trainee: the **sysadmin-key-theft** detection bea
 | Privilege Escalation | (existing) cron + chmod 777 | T1053.003 |
 | Credential Access | deploy creds in files on apache | T1552.001 |
 | Discovery + Credential Access | nmap sweep + sshpass spray from apache | T1018, T1046, T1110.004 |
-| Lateral Movement | SSH to John | T1021.004, T1078 |
+| Lateral Movement | SSH to John | T1021.004, T1078.003 |
 | Persistence | authorized_keys + systemd user unit | T1098.004, T1543.002 |
 | Command & Control | encrypted reverse tunnel | T1572, T1071.001 |
 | Discovery | files, accounts, history on John's box | T1083, T1087, T1518 |
 | Lateral (failed) | brute force on hardened boxes | T1110 (detected/denied) |
 | Discovery | Luke artefacts | T1083, T1087 |
 | Credential Access | Luke's personal SSH key | T1552.004 |
-| Lateral Movement | SSH to Luke | T1021.004, T1078 |
+| Lateral Movement | SSH to Luke | T1021.004, T1078.003 |
 | Collection | mail mining for sysadmin coords | T1114.001 |
 | Initial Access (phase 2) | spearphishing attachment to Vinzenz | T1566.001 |
 | Execution | user opens attachment (sim) | T1204.002 |
-| Lateral / Privesc | sysadmin shell | T1078 |
+| Lateral / Privesc | sysadmin shell | T1078.003 |
 | Collection | DB + session notes | T1005, T1213 |
 | Exfiltration | over C2 tunnel | T1041 |
 | Defense Evasion | selective log grep-out, history rotation, artefact shred, false-flag drops | T1485, T1070.002, T1070.003, T1070.004, T1565.001 |

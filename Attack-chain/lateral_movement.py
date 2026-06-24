@@ -13,7 +13,7 @@ from chainlog import drain, log, run_remote, send_command
 #   T1046     – Network Service Discovery  (ssh service enumeration)
 #   T1110.004 – Brute Force: Credential Stuffing  (reuse john's password on all hosts)
 #   T1021.004 – Remote Services: SSH       (password-auth SSH to john's workstation)
-#   T1078     – Valid Accounts             (reuse of john.stravidis identity)
+#   T1078.003 – Valid Accounts: Local Accounts (reuse of john.stravidis identity)
 # -----------------------------------------------------------------------------
 # All phases execute FROM apache via the root reverse shell.
 #
@@ -181,7 +181,7 @@ def run(root_shell, kali_host=KALI_HOST, workstation_ip=WORKSTATION_IP,
         log(f"[+] Discovered {len(discovered)} live SSH host(s): {', '.join(discovered)}")
 
     # ------------------------------------------------------------------
-    # Phase 2 — Credential stuffing (T1110.004 / T1078)
+    # Phase 2 — Credential stuffing (T1110.004 / T1078.003)
     # Try john's password on every discovered host in NMAP order.
     # Only john's workstation is expected to accept it.
     # ------------------------------------------------------------------

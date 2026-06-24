@@ -56,7 +56,7 @@ STEP_META = {
     },
     "post_exploit_enumeration": {
         "tactic": "TA0007 · Discovery",
-        "techniques": ["T1082", "T1087.001", "T1057", "T1053.003", "T1016", "T1552.001"],
+        "techniques": ["T1082", "T1087.001", "T1057", "T1053.003", "T1016", "T1552.001", "T1562.003"],
         "color": "blue",
     },
     "privesc": {
@@ -71,7 +71,7 @@ STEP_META = {
     },
     "lateral": {
         "tactic": "TA0007 · Discovery · TA0008 · Lateral Movement",
-        "techniques": ["T1018", "T1046", "T1110.004", "T1021.004", "T1078"],
+        "techniques": ["T1018", "T1046", "T1110.004", "T1021.004", "T1078.003"],
         "color": "magenta",
     },
     "enumeration_john_ws": {
@@ -81,7 +81,7 @@ STEP_META = {
     },
     "exfiltrate": {
         "tactic": "TA0009 · Collection · TA0010 · Exfiltration",
-        "techniques": ["T1552.001", "T1213", "T1041"],
+        "techniques": ["T1552.001", "T1213", "T1048.003"],
         "color": "red",
     },
     "defense_evasion": {
@@ -109,7 +109,7 @@ STEP_META_ADVANCED: dict[str, dict] = {
     "webserver_post_exploit_enum": {
         "tactic": "TA0007 · Discovery",
         "techniques": ["T1082", "T1087.001", "T1057", "T1083",
-                       "T1548.001", "T1016"],
+                       "T1016"],
         "color": "blue",
     },
     "webserver_privesc": {
@@ -125,7 +125,7 @@ STEP_META_ADVANCED: dict[str, dict] = {
     },
     "advanced_lateral_movement": {
         "tactic": "TA0008 · Lateral Movement · TA0040 · Impact",
-        "techniques": ["T1021.004", "T1556.003", "T1499.004"],
+        "techniques": ["T1021.004", "T1563.001", "T1499.003"],
         "color": "magenta",
     },
     "advanced_vinzenzws_privesc": {
@@ -136,9 +136,9 @@ STEP_META_ADVANCED: dict[str, dict] = {
         # T1140 — Deobfuscate/Decode Files or Information (we base64-encode
         # the payload before piping it through ``base64 -d >> ~/.bashrc``
         # to dodge sliver ``execute``'s shell-quoting quirks).
-        # T1078 — Valid Accounts (the captured credential will be reused
+        # T1078.003 — Valid Accounts: Local Accounts (the captured credential will be reused
         # by the admin's own identity to land root in a follow-up step).
-        "techniques": ["T1546.004", "T1140", "T1078"],
+        "techniques": ["T1546.004", "T1140", "T1078.003"],
         "color": "green",
     },
     "advanced_exfiltration": {

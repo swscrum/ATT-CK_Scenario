@@ -80,8 +80,13 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 
 | Phase | Step | Technique | Where it bites |
 |---|---|---|---|
+| 13 | `advanced_exfiltration` | [T1005](https://attack.mitre.org/techniques/T1005/) Data from Local System | session-notes file tree and home directories |
+| 13 | `advanced_exfiltration` | [T1213](https://attack.mitre.org/techniques/T1213/) Data from Information Repositories | the patient DB |
+| 13 | `advanced_exfiltration` | [T1560.001](https://attack.mitre.org/techniques/T1560/001/) Archive Collected Data: Archive via Utility | tar/gzip/AES-pack of harvested files |
 | 13 | `advanced_exfiltration` | [T1041](https://attack.mitre.org/techniques/T1041/) Exfiltration Over C2 Channel | patient DB + home dirs exfil over HTTP POST to kali receiver |
 | 13 | `advanced_exfiltration` | [T1567](https://attack.mitre.org/techniques/T1567/) Exfiltration Over Web Service | one-shot HTTP staging server on kali |
+| 14 | `exfiltrate` (basic) | [T1048.003](https://attack.mitre.org/techniques/T1048/003/) Exfiltration Over Unencrypted Non-C2 Protocol | (basic mode) HTTP POST directly to kali without established C2 tunnel |
+| 14 | `exfiltrate` (basic) | [T1030](https://attack.mitre.org/techniques/T1030/) Data Transfer Size Limits | chunking the upload |
 | 15 | `advanced_cleanup_backdoor` | [T1070.002](https://attack.mitre.org/techniques/T1070/002/) Indicator Removal: Clear Linux/Mac System Logs | selective grep-out of attacker entries from auth logs (not truncation) |
 | 15 | `advanced_cleanup_backdoor` | [T1070.003](https://attack.mitre.org/techniques/T1070/003/) Indicator Removal: Clear Command History | history rotation with plausible vinzenz commands (not deletion) |
 | 15 | `advanced_cleanup_backdoor` | [T1070.004](https://attack.mitre.org/techniques/T1070/004/) Indicator Removal: File Deletion | `shred -n 3` of staged artefacts + free-space fill |
