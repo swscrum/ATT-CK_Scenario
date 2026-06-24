@@ -78,16 +78,19 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 
 ### Group E — Objectives
 
-| Phase | Technique | Where it bites |
-|---|---|---|
-| 13 | [T1005](https://attack.mitre.org/techniques/T1005/) Data from Local System | session-notes file tree |
-| 13 | [T1213](https://attack.mitre.org/techniques/T1213/) Data from Information Repositories | the patient DB |
-| 13 | [T1560.001](https://attack.mitre.org/techniques/T1560/001/) Archive Collected Data: Archive via Utility | tar/gzip/AES-pack |
-| 14 | [T1041](https://attack.mitre.org/techniques/T1041/) Exfiltration Over C2 Channel | piped through the tunnel from phase 5 |
-| 14 | [T1030](https://attack.mitre.org/techniques/T1030/) Data Transfer Size Limits | chunking the upload |
-| 15 | [T1490](https://attack.mitre.org/techniques/T1490/) Inhibit System Recovery | revoke backup keys, kill backup timers, delete recent snapshots |
-| 15 | [T1486](https://attack.mitre.org/techniques/T1486/) Data Encrypted for Impact | the actual ransomware encryption |
-| 15 | [T1491.001](https://attack.mitre.org/techniques/T1491/001/) Defacement: Internal Defacement | ransom note dropped per host / per directory |
+| Phase | Step | Technique | Where it bites |
+|---|---|---|---|
+| 13 | `advanced_exfiltration` | [T1041](https://attack.mitre.org/techniques/T1041/) Exfiltration Over C2 Channel | patient DB + home dirs exfil over HTTP POST to kali receiver |
+| 13 | `advanced_exfiltration` | [T1567](https://attack.mitre.org/techniques/T1567/) Exfiltration Over Web Service | one-shot HTTP staging server on kali |
+| 15 | `advanced_cleanup_backdoor` | [T1070.002](https://attack.mitre.org/techniques/T1070/002/) Indicator Removal: Clear Linux/Mac System Logs | selective grep-out of attacker entries from auth logs (not truncation) |
+| 15 | `advanced_cleanup_backdoor` | [T1070.003](https://attack.mitre.org/techniques/T1070/003/) Indicator Removal: Clear Command History | history rotation with plausible vinzenz commands (not deletion) |
+| 15 | `advanced_cleanup_backdoor` | [T1070.004](https://attack.mitre.org/techniques/T1070/004/) Indicator Removal: File Deletion | `shred -n 3` of staged artefacts + free-space fill |
+| 15 | `advanced_cleanup_backdoor` | [T1485](https://attack.mitre.org/techniques/T1485/) Data Destruction | secure wipe of /tmp staged files on apache and vinzenz_ws |
+| 15 | `advanced_cleanup_backdoor` | [T1565.001](https://attack.mitre.org/techniques/T1565/001/) Data Manipulation: Stored Data Manipulation | false-flag artefacts: Lazarus AppleJeus bytes (apache), APT28 Cyrillic taunt (vinzenz_ws), FIN7 staging script |
+| 15 | `advanced_cleanup_backdoor` | [T1098.004](https://attack.mitre.org/techniques/T1098/004/) Account Manipulation: SSH Authorized Keys | single extra ed25519 entry in `~vinzenz.fedora/.ssh/authorized_keys`, masquerading as `ansible-deploy@cm-prod` |
+| 15 | `advanced_cleanup_backdoor` | [T1491.001](https://attack.mitre.org/techniques/T1491/001/) Defacement: Internal Defacement | `ran_wall.jpg` uploaded kali→vinzenz_ws→john_ws via Sliver+SCP; set as XFCE4 wallpaper via xfconf-query on John's VNC desktop `:5901` |
+| 16 | `advanced_restoration` | [T1490](https://attack.mitre.org/techniques/T1490/) Inhibit System Recovery | reversed — openssl CMS decryption of all `.enc` files network-wide + DB restoration (lab-reset path) |
+| 16 | `advanced_restoration` | [T1491.001](https://attack.mitre.org/techniques/T1491/001/) Defacement: Internal Defacement | reversed — XFCE4 wallpaper reset to default after successful decryption |
 
 ## Detection notes per technique
 
@@ -111,8 +114,12 @@ For SOC training and customer SIEM/EDR demos, what *should* fire on each techniq
 | T1018 / T1046 internal scanning | NetFlow / NIDS | bursts of SYN to many hosts/ports on internal subnet originating from a non-scanner host | `logs/router/ulog-iptables.log` (every SYN crosses FORWARD and gets NFLOG-tagged) |
 | T1114.001 mail collection | auditd file watch on `/var/mail/`, `~/Maildir/` | unusual reads of mail files outside the user's normal MUA process | `logs/workstation/lab-fim.log` (lab-fim watches `/var/mail`) |
 | T1566.001 + T1204.002 spearphishing chain | mail server logs + EDR (process spawn) | mail with executable attachment; process spawn of attachment payload from mail-processor / MUA | not yet implemented |
-| T1486 ransomware encryption | EDR (file syscalls) + filesystem audit | high-rate file rename + size-similar rewrites across many directories; ransom-note file pattern | not yet implemented |
-| T1490 inhibit recovery | auditd | systemd timer/service disable; deletion of backup files | not yet implemented |
+| T1070.002/.003/.004 log scrubbing + history rotation | auditd file watch on `/var/log/auth.log`, `~/.bash_history` | selective line deletions from auth log (diff against known-good baseline); history file rewritten within seconds of login | `logs/workstation/auth.log`, `logs/vinzenz_ws/auth.log` (scrubbed lines absent from attacker ground-truth window) |
+| T1485 data destruction | EDR (file syscalls) + lab-fim | `shred` on /tmp files; `dd if=/dev/urandom` free-space fill | `logs/workstation/lab-fim.log` (lab-fim watches `/tmp` for the implant drops); attacker ground truth JSON records which files were wiped |
+| T1565.001 false-flag artefacts | threat intel correlation | Lazarus/APT28/FIN7 signatures appearing simultaneously at breach time on unrelated hosts | attacker ground truth JSON names each dropped file and its false attribution |
+| T1098.004 SSH authorized_keys | EDR file watch on `~/.ssh/authorized_keys` | extra entry appended outside provisioning; comment format (`ansible-deploy@cm-prod`) inconsistent with real provisioning key | `logs/vinzenz_ws/lab-fim.log` (lab-fim watches `~vinzenz.fedora/.ssh/`) |
+| T1491.001 internal defacement | EDR / VNC session capture | wallpaper change via xfconf-query at unusual hour; `/tmp/ran_wall.jpg` file on john_ws | `logs/workstation/lab-fim.log` (lab-fim watches `/tmp`); VNC session at `localhost:5901` shows ransom image |
+| T1490 inhibit recovery (reversed) | — | not a detection target — this is the lab-reset path for repeat demo runs | — |
 
 These are minimum-viable detection signals — in a fuller implementation each would map to a concrete Wazuh rule, Sigma rule, or Suricata signature. That mapping is step-4 work; this table is the input.
 
@@ -133,7 +140,8 @@ Wazuh's File Integrity Monitoring module uses inotify under the hood when auditd
 ## Coverage summary
 
 - **Cyber Kill Chain phases**: 7 of 7 covered.
-- **ATT&CK Tactics touched**: Reconnaissance, Resource Development (implicit), Initial Access, Execution, Persistence, Privilege Escalation, Defense Evasion (light), Credential Access, Discovery, Lateral Movement, Collection, Command and Control, Exfiltration, Impact — 12 of 14 enterprise tactics. (Resource Development and Defense Evasion are the lighter ones; Defense Evasion grows naturally as the chain matures.)
-- **Distinct ATT&CK techniques referenced**: ~30, spanning common SOC training territory (cron persistence, SSH lateral, browser-cred theft, spearphishing, ransomware impact).
+- **ATT&CK Tactics touched**: Reconnaissance, Resource Development (implicit), Initial Access, Execution, Persistence, Privilege Escalation, Defense Evasion, Credential Access, Discovery, Lateral Movement, Collection, Command and Control, Exfiltration, Impact — all 14 enterprise tactics covered. Defense Evasion is now substantive: selective log scrubbing, history rotation, artefact shredding, and false-flag attribution misdirection are all implemented in `advanced_cleanup_backdoor`.
+- **Distinct ATT&CK techniques referenced**: ~35, spanning common SOC training territory (cron persistence, SSH lateral, browser-cred theft, spearphishing, log scrubbing, false-flag attribution, ransomware-style impact, defacement).
+- **Single stealthy backdoor**: the advanced chain plants exactly one persistence mechanism — an SSH authorized_keys entry on vinzenz_ws masquerading as an Ansible deploy key (T1098.004). Three-backdoor designs were reduced to one for realism: a disciplined APT minimises footprint.
 
 This is enough breadth to genuinely exercise EDR + SIEM + NIDS, which is the customer brief's stated rationale (slide 5, "EDR & SIEM & NIDS & …").

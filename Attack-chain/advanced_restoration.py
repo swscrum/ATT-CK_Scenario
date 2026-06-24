@@ -79,19 +79,30 @@ def _beacon_exec_wait(beacon_id: str, command: str, *,
 
 def _reset_wallpaper(vinzenz_beacon: str) -> None:
     """Reset XFCE wallpaper to default on ubuntu_workstation (removes ransom note)."""
+    _inner = (
+        "#!/bin/sh\n"
+        "export DISPLAY=:1\n"
+        "DBUS=$(cat /run/user/$(id -u)/.dbus_addr 2>/dev/null)\n"
+        "if [ -z \"$DBUS\" ]; then\n"
+        "    SESS_PID=$(pgrep -x xfce4-session 2>/dev/null | head -1)\n"
+        "    DBUS=$(cat /proc/${SESS_PID}/environ 2>/dev/null"
+        " | tr '\\0' '\\n' | grep ^DBUS_SESSION_BUS_ADDRESS= | cut -d= -f2-)\n"
+        "fi\n"
+        "[ -n \"$DBUS\" ] && export DBUS_SESSION_BUS_ADDRESS=\"$DBUS\"\n"
+        "KEYS=$(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep last-image)\n"
+        "for KEY in $KEYS; do\n"
+        "    xfconf-query -c xfce4-desktop -p \"$KEY\" -r 2>/dev/null || true\n"
+        "done\n"
+        f"rm -f {WALLPAPER_REMOTE} 2>/dev/null || true\n"
+        "echo WALLPAPER_RESET\n"
+    )
+    _inner_b64 = base64.b64encode(_inner.encode()).decode()
     reset_script = (
-        "JOHN_UID=$(id -u john.stravidis 2>/dev/null); "
-        "SESS_PID=$(pgrep -u john.stravidis -x xfce4-session 2>/dev/null | head -1); "
-        "DBUS_ADDR=$(cat /proc/${SESS_PID}/environ 2>/dev/null "
-        "| tr '\\0' '\\n' | grep ^DBUS_SESSION_BUS_ADDRESS= | cut -d= -f2-); "
-        '[ -z "$DBUS_ADDR" ] && DBUS_ADDR="unix:path=/run/user/${JOHN_UID}/bus"; '
-        "echo 'VinzenzAdmin!2026' | sudo -S -u john.stravidis -- "
-        'env DISPLAY=:1 DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" '
-        "xfconf-query -c xfce4-desktop "
-        "-p /backdrop/screen0/monitor0/workspace0/last-image "
-        "-r 2>/dev/null || true; "
-        f"rm -f {WALLPAPER_REMOTE} 2>/dev/null || true; "
-        "echo WALLPAPER_RESET"
+        f"printf '%s' '{_inner_b64}' | base64 -d > /tmp/.wp_reset.sh; "
+        "chmod 755 /tmp/.wp_reset.sh; "
+        "echo 'VinzenzAdmin!2026' | sudo -S su - john.stravidis"
+        " -c '/tmp/.wp_reset.sh' 2>/dev/null; "
+        "rm -f /tmp/.wp_reset.sh"
     )
     b64 = base64.b64encode(reset_script.encode()).decode()
     ssh_cmd = (
@@ -441,7 +452,11 @@ def run(root_sliver_session: str, vinzenz_beacon: str, results_dir: str) -> dict
         style="yellow",
     ))
     _console.print()
-    do_restore = Confirm.ask("[bold yellow]Decrypt now[/bold yellow]")
+    try:
+        do_restore = Confirm.ask("[bold yellow]Decrypt now[/bold yellow]")
+    except EOFError:
+        log("[*] Non-interactive mode — run manually to answer the ransom prompt")
+        return {"restore_success": False, "skipped": "non-interactive"}
 
     if not do_restore:
         log("[*] User declined restoration. Environment remains encrypted.")

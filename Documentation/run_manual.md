@@ -111,8 +111,11 @@ resume-from-disk.
 | `webserver_persistence` | TA0003 · T1505.003 | `root_sliver_session` | — |
 | `advanced_lateral_movement` | TA0008/TA0040 · T1021.004, T1556.003, T1499.004 | `root_sliver_session` | `vinzenz_beacon` |
 | `advanced_vinzenzws_privesc` | TA0006 · T1546.004, T1140, T1078 | `vinzenz_beacon` | — |
+| `advanced_exfiltration` | TA0010 · T1041, T1567 | `root_sliver_session`, `vinzenz_beacon` | — |
+| `advanced_cleanup_backdoor` | TA0005/TA0003 · T1485, T1070.002, T1070.003, T1070.004, T1565.001, T1098.004 | `root_sliver_session`, `vinzenz_beacon` | — |
+| `advanced_restoration` | TA0040 (Recovery) · T1490, T1491.001 | `root_sliver_session`, `vinzenz_beacon` | — |
 
-Advanced mode has no `defense_evasion` step.
+Advanced mode has no `defense_evasion` step. `advanced_restoration` is optional and interactive — it prompts the operator to confirm decryption; in non-interactive/automated runs it gracefully skips.
 
 ## Logs
 

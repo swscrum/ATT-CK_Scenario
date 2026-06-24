@@ -164,16 +164,11 @@ STEP_META_ADVANCED: dict[str, dict] = {
         #             Cyrillic taunt on vinzenz_ws, FIN7 Cobalt-Strike-
         #             profile staging script — misdirect attribution).
         # Persistence family:
-        # T1053.003 — Scheduled Task/Job: Cron (apache backdoor via
-        #             /etc/cron.d/apt-cache-refresh, hourly).
-        # T1543.002 — Create or Modify System Process: Systemd Service
-        #             (vinzenz_ws lab-update-agent.service + .timer).
         # T1098.004 — Account Manipulation: SSH Authorized Keys (extra
         #             entry in vinzenz.fedora's authorized_keys masquerading
         #             as ansible-deploy@cm-prod).
         "techniques": ["T1485", "T1070.002", "T1070.003", "T1070.004",
-                       "T1565.001",
-                       "T1053.003", "T1543.002", "T1098.004"],
+                       "T1565.001", "T1098.004"],
         "color": "red",
     },
     "advanced_restoration": {
