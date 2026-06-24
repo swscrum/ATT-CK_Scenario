@@ -10,7 +10,7 @@
 #   ~/.ssh/id_ed25519        T1552.004 — unsecured private key theft
 #   ~/.bash_history          T1070.003 — clear shell history
 #   ~/.pgpass                T1552.001 — credentials in files (DB superuser!)
-#   ~/inventory.ini          T1018    — remote system discovery breadcrumb
+#   ~/inventory.ini          T1005    — data from local system (fleet inventory)
 #   /var/mail/               T1114.001 — local email collection
 #   /etc/{passwd,...}        T1136 / T1098 — account ops
 set -u

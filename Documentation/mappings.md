@@ -83,7 +83,8 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 | 13 | [T1005](https://attack.mitre.org/techniques/T1005/) Data from Local System | session-notes file tree |
 | 13 | [T1213](https://attack.mitre.org/techniques/T1213/) Data from Information Repositories | the patient DB |
 | 13 | [T1560.001](https://attack.mitre.org/techniques/T1560/001/) Archive Collected Data: Archive via Utility | tar/gzip/AES-pack |
-| 14 | [T1041](https://attack.mitre.org/techniques/T1041/) Exfiltration Over C2 Channel | piped through the tunnel from phase 5 |
+| 14 | [T1041](https://attack.mitre.org/techniques/T1041/) Exfiltration Over C2 Channel | (advanced mode) piped through the tunnel from phase 5 |
+| 14 | [T1048.003](https://attack.mitre.org/techniques/T1048/003/) Exfiltration Over Unencrypted Non-C2 Protocol | (basic mode) HTTP POST directly to kali without established C2 tunnel |
 | 14 | [T1030](https://attack.mitre.org/techniques/T1030/) Data Transfer Size Limits | chunking the upload |
 | 15 | [T1490](https://attack.mitre.org/techniques/T1490/) Inhibit System Recovery | revoke backup keys, kill backup timers, delete recent snapshots |
 | 15 | [T1486](https://attack.mitre.org/techniques/T1486/) Data Encrypted for Impact | the actual ransomware encryption |
