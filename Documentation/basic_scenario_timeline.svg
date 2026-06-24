@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="528" viewBox="0 0 960 528" font-family="Helvetica,Arial,sans-serif">
+<rect width="960" height="528" fill="#fff"/>
+<text x="480.0" y="32" text-anchor="middle" font-size="20" font-weight="700" fill="#1a1a2e">Basic Scenario &#8212; Execution Timeline</text>
+<text x="480.0" y="52" text-anchor="middle" font-size="12" fill="#666">run 2026-06-24T18:19:16Z &#183; mode basic &#183; total 159s</text>
+<line x1="210.0" y1="64" x2="210.0" y2="482" stroke="#eee"/>
+<text x="210.0" y="500" text-anchor="middle" font-size="11" fill="#999">0s</text>
+<line x1="341.1" y1="64" x2="341.1" y2="482" stroke="#eee"/>
+<text x="341.1" y="500" text-anchor="middle" font-size="11" fill="#999">30s</text>
+<line x1="472.3" y1="64" x2="472.3" y2="482" stroke="#eee"/>
+<text x="472.3" y="500" text-anchor="middle" font-size="11" fill="#999">60s</text>
+<line x1="603.4" y1="64" x2="603.4" y2="482" stroke="#eee"/>
+<text x="603.4" y="500" text-anchor="middle" font-size="11" fill="#999">90s</text>
+<line x1="734.5" y1="64" x2="734.5" y2="482" stroke="#eee"/>
+<text x="734.5" y="500" text-anchor="middle" font-size="11" fill="#999">120s</text>
+<line x1="865.7" y1="64" x2="865.7" y2="482" stroke="#eee"/>
+<text x="865.7" y="500" text-anchor="middle" font-size="11" fill="#999">150s</text>
+<text x="198" y="93.0" text-anchor="end" font-size="12.5" font-weight="600" fill="#222">recon</text>
+<rect x="210.0" y="72" width="60.5" height="34" rx="5" fill="#4C78A8"/>
+<text x="240.3" y="93.0" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">13.8s</text>
+<text x="198" y="137.0" text-anchor="end" font-size="12.5" font-weight="600" fill="#222">exploit</text>
+<rect x="271.2" y="116" width="4.5" height="34" rx="5" fill="#E4A93C"/>
+<text x="280.7" y="137.0" font-size="11.5" fill="#444">1.0s</text>
+<text x="198" y="181.0" text-anchor="end" font-size="12.5" font-weight="600" fill="#222">post_exploit_enumeration</text>
+<rect x="279.9" y="160" width="301.9" height="34" rx="5" fill="#54A24B"/>
+<text x="430.9" y="181.0" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">69.1s</text>
+<text x="198" y="225.0" text-anchor="end" font-size="12.5" font-weight="600" fill="#222">privesc</text>
+<rect x="581.5" y="204" width="99.7" height="34" rx="5" fill="#D6604D"/>
+<text x="631.4" y="225.0" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">22.8s</text>
+<text x="198" y="269.0" text-anchor="end" font-size="12.5" font-weight="600" fill="#222">credential_access</text>
+<rect x="686.4" y="248" width="18.4" height="34" rx="5" fill="#8B6BB7"/>
+<text x="709.9" y="269.0" font-size="11.5" fill="#444">4.2s</text>
+<text x="198" y="313.0" text-anchor="end" font-size="12.5" font-weight="600" fill="#222">lateral</text>
+<rect x="708.3" y="292" width="64.8" height="34" rx="5" fill="#54A24B"/>
+<text x="740.7" y="313.0" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">14.8s</text>
+<text x="198" y="357.0" text-anchor="end" font-size="12.5" font-weight="600" fill="#222">enumeration_john_ws</text>
+<rect x="773.9" y="336" width="50.0" height="34" rx="5" fill="#54A24B"/>
+<text x="798.9" y="357.0" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">11.4s</text>
+<text x="198" y="401.0" text-anchor="end" font-size="12.5" font-weight="600" fill="#222">exfiltrate</text>
+<rect x="826.3" y="380" width="36.0" height="34" rx="5" fill="#E68A2E"/>
+<text x="867.3" y="401.0" font-size="11.5" fill="#444">8.2s</text>
+<text x="198" y="445.0" text-anchor="end" font-size="12.5" font-weight="600" fill="#222">defense_evasion</text>
+<rect x="865.7" y="424" width="39.5" height="34" rx="5" fill="#2A9D8F"/>
+<text x="910.1" y="445.0" font-size="11.5" fill="#444">9.0s</text>
+</svg>
