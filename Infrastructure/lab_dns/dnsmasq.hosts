@@ -1,0 +1,50 @@
+# dnsmasq.hosts — canonical "what resolves to what" for the lab.
+#
+# Format: one entry per line, `<IP>  <hostname> [hostname ...]`.
+# This file is the ONLY source of DNS for workstations (no upstream
+# forwarding). Anything not listed here NXDOMAINs.
+
+# ─────────────────────────────────────────────────────── Lab containers
+# Workstations used to get these via Docker's embedded DNS. Since we
+# override their /etc/resolv.conf to point at lab_dns, we have to provide
+# them here. If you add a new lab container that workstations talk to,
+# add it here too.
+10.10.0.2     kali
+10.10.0.3     router
+10.30.0.4     router-internal
+10.40.0.4     router-dmz
+10.40.0.2     apache
+10.30.0.6     db-internal
+
+# ─────────────────────────────────────────────────────── Fake "internet" — workstation outbound baseline
+# Real-looking public domains that workstations browse, query, or
+# package-manage. All resolve to the single fake_internet container,
+# which serves nginx with a multi-SAN cert covering every name below.
+# fake_internet listens on :80 (apt repo metadata) AND :443 (everything
+# else), so the workstation traffic shape is realistic.
+
+# Package mirrors — `apt update`, `apt list --upgradable`.
+10.10.0.11    archive.ubuntu.com
+10.10.0.11    security.ubuntu.com
+
+# npm / GitHub / GitHub content — developer-persona outbound.
+10.10.0.11    registry.npmjs.org
+10.10.0.11    github.com
+10.10.0.11    api.github.com
+10.10.0.11    raw.githubusercontent.com
+
+# Corporate messaging — sysadmin + clinical baseline.
+10.10.0.11    slack.com
+10.10.0.11    api.slack.com
+
+# Connectivity / NTP-style probes — modern Linux distros constantly
+# poll these to detect captive portals + time drift.
+10.10.0.11    connectivity-check.ubuntu.com
+10.10.0.11    time.cloudflare.com
+
+# ─────────────────────────────────────────────────────── Corporate intranet
+# Pretend internal Waystar resource that Luke (clinical) periodically
+# checks. Routes back to apache (the DMZ web tier) so it shares the
+# real CGI + booking infrastructure — also gives an internal-DMZ
+# baseline flow that's separate from the external-domain shape.
+10.40.0.2     intranet.waystar.local

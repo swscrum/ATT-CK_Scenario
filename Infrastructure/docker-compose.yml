@@ -8,6 +8,12 @@ services:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.rp_filter=0
       - net.ipv4.conf.default.rp_filter=0
+    volumes:
+      # Persist router logs (ulogd2 writes NFLOG packet captures to
+      # /var/log/ulog-iptables.log; rsyslog/kernel events also land in
+      # /var/log/kern.log when populated). Direct /var/log mount matches
+      # how a real edge firewall ships its logs off-box.
+      - ./logs/router:/var/log
     networks:
       public_net:
         ipv4_address: 10.10.0.3
@@ -37,6 +43,7 @@ services:
     # goes through the router's iptables DNAT as intended.
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./apache/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
       - ./apache/cgi-bin:/usr/local/apache2/cgi-bin
@@ -63,6 +70,11 @@ services:
     container_name: ubuntu_workstation
     cap_add:
       - NET_ADMIN
+    environment:
+      # Drives activity_sim.py inside this container. Set to "1" by
+      # tools/run.sh when --pacing realistic; "0" in fast mode so CI
+      # doesn't generate baseline noise that's never read.
+      ACTIVITY_ENABLED: "${ACTIVITY_ENABLED:-0}"
     ports:
       - "5901:5901"
     volumes:
@@ -89,6 +101,8 @@ services:
     container_name: luke_ws
     cap_add:
       - NET_ADMIN
+    environment:
+      ACTIVITY_ENABLED: "${ACTIVITY_ENABLED:-0}"
     volumes:
       # Mirror of the workstation logging pattern. rsyslog inside the
       # container writes /var/log/syslog + /var/log/auth.log as usual;
@@ -113,6 +127,8 @@ services:
     container_name: vinzenz_ws
     cap_add:
       - NET_ADMIN
+    environment:
+      ACTIVITY_ENABLED: "${ACTIVITY_ENABLED:-0}"
     volumes:
       - ./logs/vinzenz_ws:/var/log/persist
     networks:
@@ -160,6 +176,147 @@ services:
     networks:
       internal_net:
         ipv4_address: 10.30.0.6
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────
+  # lab_dns — workstation DNS resolver. Replaces Docker's embedded DNS for
+  # the three internal workstations so their lookups for fake "internet"
+  # domains (github.com, archive.ubuntu.com, etc.) resolve to fake_internet,
+  # AND so every query gets logged. Dual-homed on internal_net + public_net.
+  # See Infrastructure/lab_dns/dnsmasq.hosts for the canonical resolution
+  # table.
+  # ──────────────────────────────────────────────────────────────────────
+
+  lab_dns:
+    build: ./lab_dns
+    container_name: lab_dns
+    cap_add:
+      - NET_ADMIN
+    networks:
+      internal_net:
+        ipv4_address: 10.30.0.10
+      public_net:
+        ipv4_address: 10.10.0.10
+    depends_on:
+      - router
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────
+  # fake_internet — single-IP simulation of "the internet" for workstation
+  # outbound traffic. Routes by Host header to return realistic shapes per
+  # "domain" (github API JSON, npm registry JSON, apt InRelease text, etc).
+  # All domains terminate here via lab_dns. Cert signed by lab CA so
+  # workstation curl/wget succeeds without -k.
+  # ──────────────────────────────────────────────────────────────────────
+
+  fake_internet:
+    build:
+      context: .
+      dockerfile: fake_internet/Dockerfile
+    container_name: fake_internet
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      # Bind nginx logs to host so the SIEM can see workstation outbound
+      # request shapes (host header, path, status, client IP, UA).
+      - ./logs/fake_internet:/var/log/nginx
+    networks:
+      public_net:
+        ipv4_address: 10.10.0.11
+    depends_on:
+      - router
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Background noise — four containers sharing the same image, each driven
+  # by NOISE_PERSONA. Different IPs + monomorphic behaviour per persona
+  # means a SOC trainee can't filter by IP or by UA alone; they have to
+  # learn behavioural pattern analysis. See Infrastructure/noise_user_sim/
+  # noise.py PERSONAS dict for full per-persona config.
+  # ──────────────────────────────────────────────────────────────────────
+
+  noise_user_sim:
+    build: ./noise_user_sim
+    container_name: noise_user_sim
+    cap_add:
+      # NET_ADMIN for the `ip route add 10.40.0.0/24` at startup so the
+      # container can reach apache via the router. Real internet hosts have
+      # this routing implicitly via their default gateway.
+      - NET_ADMIN
+    environment:
+      # Set to "1" only when run.sh receives --pacing realistic. With "0"
+      # the container stays up (signal.pause) but generates no traffic, so
+      # we don't pollute fast-mode runs with background HTTP.
+      NOISE_ENABLED: "${NOISE_ENABLED:-0}"
+      NOISE_PERSONA: "general"
+      NOISE_TARGET: "router"
+    networks:
+      # public_net at 10.10.0.5 — DIFFERENT from kali (10.10.0.2). General
+      # human browsing: LEGIT_PATHS, HUMAN_UAS, 30-120s intervals, 3 threads.
+      public_net:
+        ipv4_address: 10.10.0.5
+    depends_on:
+      - router
+      - apache
+    restart: unless-stopped
+
+  noise_monitor:
+    build: ./noise_user_sim
+    container_name: noise_monitor
+    cap_add:
+      - NET_ADMIN
+    environment:
+      NOISE_ENABLED: "${NOISE_ENABLED:-0}"
+      NOISE_PERSONA: "monitor"
+      NOISE_TARGET: "router"
+    networks:
+      # Uptime monitor: hits /api/health every ~60s with a single UA.
+      # Distinctive cadence — exactly the kind of regular-interval traffic
+      # a SOC analyst sees from Pingdom/UptimeRobot/etc.
+      public_net:
+        ipv4_address: 10.10.0.6
+    depends_on:
+      - router
+      - apache
+    restart: unless-stopped
+
+  noise_scanner:
+    build: ./noise_user_sim
+    container_name: noise_scanner
+    cap_add:
+      - NET_ADMIN
+    environment:
+      NOISE_ENABLED: "${NOISE_ENABLED:-0}"
+      NOISE_PERSONA: "scanner"
+      NOISE_TARGET: "router"
+    networks:
+      # Internet background scanner: PROBE_PATHS + BOT_UAS, 60-300s intervals.
+      # 404-yielding probes that look suspicious but are NOT the attacker.
+      # Teaches "suspicious surface anomaly != malicious".
+      public_net:
+        ipv4_address: 10.10.0.7
+    depends_on:
+      - router
+      - apache
+    restart: unless-stopped
+
+  noise_mobile:
+    build: ./noise_user_sim
+    container_name: noise_mobile
+    cap_add:
+      - NET_ADMIN
+    environment:
+      NOISE_ENABLED: "${NOISE_ENABLED:-0}"
+      NOISE_PERSONA: "mobile"
+      NOISE_TARGET: "router"
+    networks:
+      # Mobile browsing: same paths as general but mobile UAs and sparse
+      # cadence (300-900s). Teaches that legit cadence varies wildly.
+      public_net:
+        ipv4_address: 10.10.0.8
+    depends_on:
+      - router
+      - apache
     restart: unless-stopped
 
   kali:

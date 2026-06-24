@@ -10,6 +10,16 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 ip route add 10.10.0.0/24 via 10.30.0.4 || true
 ip route add 10.40.0.0/24 via 10.30.0.4 || true
 
+# Pin DNS resolution to lab_dns (10.30.0.10) instead of Docker's embedded
+# resolver. Vinzenz's sysadmin activity hits archive.ubuntu.com / github.com
+# / api.github.com / time.cloudflare.com; only lab_dns resolves those.
+# Other container names (apache, john, luke, db-internal) are mirrored
+# into lab_dns's hostfile.
+cat > /etc/resolv.conf <<EOF
+nameserver 10.30.0.10
+options edns0 timeout:2 attempts:2
+EOF
+
 # /var/log/persist is bind-mounted from the host; rsyslog runs as syslog
 # user and needs write access. Match ownership/perm to what rsyslog
 # expects on a stock Ubuntu box.
@@ -88,11 +98,29 @@ chmod 0644 /var/log/persist/lab-fim.log
 nohup /usr/local/bin/lab-fim.sh >> /var/log/persist/lab-fim.log 2>&1 &
 log "[entrypoint] lab-fim watcher PID $!"
 
-# Reactive Sysadmin Simulation
+# Reactive Sysadmin Simulation — fires the DB-down ssh-into-apache bait
+# the advanced_lateral_movement chain step depends on. Started before
+# activity_sim so its DB-probe loop is up early.
 touch /var/log/persist/simulate_admin.log
 chown vinzenz.fedora:vinzenz.fedora /var/log/persist/simulate_admin.log
 nohup su - vinzenz.fedora -c "/usr/local/bin/simulate_admin.sh" >> /var/log/persist/simulate_admin.log 2>&1 &
 log "[entrypoint] simulate_admin.sh watcher PID $!"
+
+# Activity simulator — runs as vinzenz.fedora (the daily-user persona) when
+# ACTIVITY_ENABLED=1 (set by tools/run.sh in --pacing realistic). This is
+# the BIGGEST realism win: Vinzenz's ssh-out commands generate the baseline
+# of "Accepted publickey for vinzenz.fedora" entries on apache, john_ws,
+# luke_ws — so the attacker's eventual stolen-key SSH activity (advanced
+# chain) has a non-zero baseline to hide in, instead of being the ONLY
+# vinzenz.fedora session anywhere on the fleet.
+nohup runuser -u vinzenz.fedora -- \
+    env ACTIVITY_ENABLED="${ACTIVITY_ENABLED:-0}" \
+        ACTIVITY_PERSONA=sysadmin \
+        ACTIVITY_HOME=/home/vinzenz.fedora \
+        HOME=/home/vinzenz.fedora \
+    python3 -u /usr/local/bin/activity_sim.py \
+        >> /var/log/persist/activity_sim.log 2>&1 &
+log "[entrypoint] activity_sim (sysadmin) PID $!"
 
 # sshd in the foreground — keeps PID 1 alive.
 exec /usr/sbin/sshd -D

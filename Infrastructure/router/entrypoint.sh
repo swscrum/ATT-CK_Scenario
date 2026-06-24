@@ -62,8 +62,14 @@ iptables -t nat -F
 if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PUBLIC_IF" ]; then
     log "Konfiguriere Routing und NAT..."
 
-    # 1. DNAT: external :80 → apache (now living in DMZ).
-    iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination $APACHE_IP:80
+    # 1. DNAT: only PUBLIC-facing :80 / :443 → apache. Scoped to `-i PUBLIC_IF`
+    # so it only fires for traffic ARRIVING from the external zone (kali,
+    # noise_* containers). Without this scope the rule also catches
+    # Internal→External flows (workstation → fake_internet on :443),
+    # silently rewriting them to apache and breaking the simulated
+    # outbound-internet baseline.
+    iptables -t nat -A PREROUTING -i $PUBLIC_IF -p tcp --dport 80  -j DNAT --to-destination $APACHE_IP:80
+    iptables -t nat -A PREROUTING -i $PUBLIC_IF -p tcp --dport 443 -j DNAT --to-destination $APACHE_IP:443
 
     # 2. MASQUERADE: outgoing traffic on every interface gets source-rewritten.
     iptables -t nat -A POSTROUTING -o $PUBLIC_IF   -j MASQUERADE
@@ -74,8 +80,11 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PU
     iptables -P FORWARD DROP
     iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
-    # External → DMZ: only the CVE-2021-41773 attack path (HTTP to apache).
-    iptables -A FORWARD -i $PUBLIC_IF   -o $DMZ_IF      -p tcp -d $APACHE_IP --dport 80 -j ACCEPT
+    # External → DMZ: the CVE-2021-41773 attack path. HTTP for legacy
+    # clients (apache redirects to HTTPS for non-cgi-bin paths), HTTPS
+    # for the production-realistic transport. Both terminate at apache.
+    iptables -A FORWARD -i $PUBLIC_IF   -o $DMZ_IF      -p tcp -d $APACHE_IP --dport 80  -j ACCEPT
+    iptables -A FORWARD -i $PUBLIC_IF   -o $DMZ_IF      -p tcp -d $APACHE_IP --dport 443 -j ACCEPT
 
     # External → Internal: realistic perimeter posture. The current attack
     # chain pivots in via apache (External → DMZ → Internal) and does NOT
@@ -101,6 +110,11 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PU
         -j NFLOG --nflog-prefix "FW-EXT-PROBE-DB: "    --nflog-group 1
     iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 5901 \
         -j NFLOG --nflog-prefix "FW-EXT-PROBE-VNC: "   --nflog-group 1
+    # HTTPS probes — external scanners regularly fingerprint :443 looking
+    # for misconfigured internal services. Apache itself lives on dmz_net
+    # not internal_net, so any External→Internal :443 attempt is anomalous.
+    iptables -A FORWARD -i $PUBLIC_IF   -o $INTERNAL_IF -p tcp --dport 443 \
+        -j NFLOG --nflog-prefix "FW-EXT-PROBE-HTTPS: " --nflog-group 1
     # Explicit DROP for everything else External → Internal. Catches the
     # remaining probes (other ports, UDP, weird protocols) AND makes the
     # firewall intent visible in `iptables -nvL` packet counters.
@@ -135,7 +149,21 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PU
     iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 27017     -j ACCEPT
     iptables -A FORWARD -i $DMZ_IF      -o $INTERNAL_IF -p tcp --dport 5900:5901 -j ACCEPT
 
-    # Internal → External: workstation outbound (future C2 / phases 5+).
+    # Internal → External: workstation outbound. Tagged with named NFLOG
+    # prefixes per port so the SIEM can see the WORKSTATION BASELINE
+    # (DNS to lab_dns, HTTPS to fake_internet, plain HTTP for apt repos)
+    # AS DISTINCT FROM the future attacker C2 (which would be one of
+    # these same ports — same tag — but to a non-baseline destination IP
+    # or carrying a non-baseline payload). Each NFLOG rule is
+    # non-terminating; the ACCEPT below ends the chain.
+    iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF -p udp --dport 53 \
+        -j NFLOG --nflog-prefix "FW-INT-OUT-DNS: "   --nflog-group 1
+    iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF -p tcp --dport 53 \
+        -j NFLOG --nflog-prefix "FW-INT-OUT-DNS: "   --nflog-group 1
+    iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF -p tcp --dport 443 \
+        -j NFLOG --nflog-prefix "FW-INT-OUT-HTTPS: " --nflog-group 1
+    iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF -p tcp --dport 80 \
+        -j NFLOG --nflog-prefix "FW-INT-OUT-HTTP: "  --nflog-group 1
     iptables -A FORWARD -i $INTERNAL_IF -o $PUBLIC_IF   -j ACCEPT
 
     # Internal → DMZ: symmetric mirror of the DMZ → Internal block above.

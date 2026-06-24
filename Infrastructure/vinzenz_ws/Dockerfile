@@ -25,6 +25,7 @@ RUN apt-get update \
         iproute2 \
         iputils-ping \
         ca-certificates \
+        curl \
         rsyslog \
         inotify-tools \
         postgresql-client \
@@ -98,6 +99,19 @@ RUN chmod +x /usr/local/bin/lab-fim.sh /usr/local/bin/simulate_admin.sh
 COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
 COPY shared-baseline/templates/sysadmin/        /usr/local/share/baseline/sysadmin/
 RUN chmod +x /usr/local/bin/hydrate-baseline.sh
+
+# Trust the lab internal CA so curl/wget against fake_internet domains
+# (github.com, archive.ubuntu.com, etc.) works WITHOUT -k.
+COPY shared-lab-keys/lab-ca.crt /usr/local/share/ca-certificates/waystar-lab-ca.crt
+RUN update-ca-certificates >/dev/null 2>&1
+
+# Workstation activity simulator — runs as vinzenz.fedora from the entrypoint
+# when ACTIVITY_ENABLED=1. CRUCIAL persona: Vinzenz SSHes out to apache,
+# john_ws, luke_ws during normal maintenance, generating the baseline of
+# "Accepted publickey for vinzenz.fedora" entries on those hosts that the
+# attacker's stolen-key activity (advanced chain) needs to hide in.
+COPY lab-activity-sim/activity_sim.py /usr/local/bin/activity_sim.py
+RUN chmod +x /usr/local/bin/activity_sim.py
 
 COPY vinzenz_ws/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

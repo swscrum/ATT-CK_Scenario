@@ -43,6 +43,21 @@ DEFAULT_KALI_HOST = "10.10.0.2"
 DEFAULT_WORDLIST = "/usr/share/wordlists/dirb/common.txt"
 ATTACK_LOG_DIR = Path("/Infrastructure/logs/attacker")
 
+# Pacing — controls how realistic the attacker-side dwells are.
+#   speed = realistic_seconds / wall_clock_seconds (higher → faster demo)
+#
+# fast       — current dev behaviour, full chain in ~3 s (no noise/diurnal)
+# realistic  — real-time dwells PLUS a background noise generator and a
+#              diurnal timestamp rewriter post-process; the rewriter stretches
+#              the snapshotted log window into a synthetic workday so a ~30 min
+#              wall-clock run reads as ~8 h on the SIEM dashboard without
+#              losing event ordering or relative spacing.
+PACING_MODES: dict[str, dict[str, Any]] = {
+    "fast":      {"speed": 100_000, "noise": False, "diurnal": False},
+    "realistic": {"speed":       1, "noise": True,  "diurnal": True},
+}
+DEFAULT_PACING = "fast"
+
 STEP_META = {
     "recon": {
         "tactic": "TA0043 · Reconnaissance",
@@ -199,6 +214,12 @@ class Context:
     wordlist: str = DEFAULT_WORDLIST
     mode: str = "basic"
     linpeas: bool = True
+    # Pacing — set from PACING_MODES in main(). pacing_speed is the divisor
+    # step modules apply to their attacker-decided sleeps (think-time,
+    # rate-limits). Infrastructure-bound sleeps (cron firing window, mail
+    # processor delay, SSH handshake) MUST NOT use this — they're physical.
+    pacing: str = DEFAULT_PACING
+    pacing_speed: float = float(PACING_MODES[DEFAULT_PACING]["speed"])
     state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -209,6 +230,11 @@ class Step:
     requires: tuple[str, ...] = ()
     optional: bool = False
     teardown: Callable[[Context], None] | None = None
+    # Realistic seconds of attacker idle BEFORE this step. Scaled by
+    # ctx.pacing_speed at run time. 0 means "fire immediately after the
+    # previous step." Recon is naturally 0; later phases reflect typical
+    # APT pacing (10s of minutes to hours between distinct moves).
+    dwell_before: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +248,8 @@ def _print_banner(ctx: Context, steps: list[Step]) -> None:
         f"[dim]Mode:[/dim] [bold cyan]{ctx.mode}[/bold cyan]   "
         f"[dim]Target:[/dim] [bold cyan]{ctx.target}[/bold cyan]   "
         f"[dim]Kali:[/dim] [bold cyan]{ctx.kali_host}[/bold cyan]   "
+        f"[dim]Pacing:[/dim] [bold cyan]{ctx.pacing}[/bold cyan] "
+        f"[dim](speed {ctx.pacing_speed:g}×)[/dim]   "
         f"[dim]Steps:[/dim] [bold white]{', '.join(s.name for s in steps)}[/bold white]"
     )
     console.print(Panel(meta, title=title, border_style="dim white", padding=(0, 2)))
@@ -284,6 +312,8 @@ def _write_ground_truth(ctx: Context, run_id: str, results: list[dict]) -> None:
         "mode": ctx.mode,
         "target": ctx.target,
         "kali": ctx.kali_host,
+        "pacing": ctx.pacing,
+        "pacing_speed": ctx.pacing_speed,
         "steps": results,
     }
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -325,7 +355,12 @@ def _print_summary(results: list[dict], mode: str = "basic") -> None:
 def _step_recon(ctx: Context) -> dict[str, Any]:
     from initial_recon_1 import run as recon_run
 
-    recon_run(target=ctx.target, results_dir=ctx.results_dir, wordlist=ctx.wordlist)
+    recon_run(
+        target=ctx.target,
+        results_dir=ctx.results_dir,
+        wordlist=ctx.wordlist,
+        pacing=ctx.pacing,
+    )
     return {"recon_results": ctx.results_dir}
 
 
@@ -448,6 +483,7 @@ def _step_lateral(ctx: Context) -> dict[str, Any]:
         root_shell=ctx.state["root_shell"],
         kali_host=ctx.kali_host,
         john_password=ctx.state.get("john_password"),
+        pacing_speed=ctx.pacing_speed,
     )
     if result["john_shell"] is None:
         raise RuntimeError("lateral movement returned no john.stravidis shell")
@@ -596,38 +632,49 @@ def _step_advanced_restoration(ctx: Context) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 CHAIN_BASIC: list[Step] = [
-    Step("recon", _step_recon),
-    Step("exploit", _step_exploit, teardown=_teardown_close_socket("www_shell")),
+    # dwell_before is in REALISTIC seconds. Scaled by ctx.pacing_speed at run time:
+    #   fast      → divided by 100 000 (≈ no wait)
+    #   realistic → divided by       1 (the real wait, post-process diurnal-stretched)
+    # Numbers reflect typical APT pacing: tens of minutes between distinct moves.
+    Step("recon", _step_recon, dwell_before=0),
+    Step("exploit", _step_exploit, dwell_before=15 * 60,
+         teardown=_teardown_close_socket("www_shell")),
     Step(
         "post_exploit_enumeration",
         _step_post_exploit_enumeration,
+        dwell_before=10 * 60,
         requires=("www_shell",),
     ),
     Step(
         "privesc",
         _step_privesc,
+        dwell_before=30 * 60,
         requires=("www_shell", "cron_script"),
         teardown=_teardown_close_socket("root_shell"),
     ),
     Step(
         "credential_access",
         _step_credential_access,
+        dwell_before=10 * 60,
         requires=("root_shell",),
     ),
     Step(
         "lateral",
         _step_lateral,
+        dwell_before=2 * 3600,
         requires=("root_shell",),  # john_password optional: falls back to hardcoded default
         teardown=_teardown_close_socket("john_shell"),
     ),
     Step(
         "enumeration_john_ws",
         _step_enumeration_john_ws,
+        dwell_before=20 * 60,    # attacker just landed; takes ~20 min to enumerate the new host
         requires=("john_shell",),
     ),
     Step(
         "exfiltrate",
         _step_exfiltrate,
+        dwell_before=45 * 60,    # staging data + chunked exfil are deliberately slow
         requires=("john_shell",),
     ),
     Step(
@@ -645,47 +692,58 @@ CHAIN_BASIC: list[Step] = [
 # the lateral step produces. All advanced-step state values are Sliver
 # session/beacon IDs (strings) -- no socket handles, no teardown.
 CHAIN_ADVANCED: list[Step] = [
-    Step("recon", _step_advanced_recon),
-    Step("exploit", _step_advanced_exploit),
+    # dwell_before mirrors CHAIN_BASIC semantics: realistic APT seconds,
+    # divided by ctx.pacing_speed at run time.  Advanced dwells are longer
+    # than basic — this is a targeted, patient operator.
+    Step("recon", _step_advanced_recon, dwell_before=0),
+    Step("exploit", _step_advanced_exploit, dwell_before=20 * 60),
     Step(
         "webserver_post_exploit_enum",
         _step_advanced_webserver_post_exploit_enum,
+        dwell_before=10 * 60,
         requires=("sliver_session",),
     ),
     Step(
         "webserver_privesc",
         _step_advanced_webserver_privesc,
+        dwell_before=25 * 60,
         requires=("sliver_session", "cap_binary"),
     ),
     Step(
         "webserver_persistence",
         _step_advanced_webserver_persistence,
+        dwell_before=15 * 60,
         requires=("root_sliver_session",),
     ),
     Step(
         "advanced_lateral_movement",
         _step_advanced_lateral_movement,
+        dwell_before=3 * 3600,          # APT waits hours before moving laterally
         requires=("root_sliver_session",),
     ),
     Step(
         "advanced_vinzenzws_privesc",
         _step_advanced_vinzenzws_privesc,
+        dwell_before=30 * 60,
         requires=("vinzenz_beacon",),
     ),
     Step(
         "advanced_exfiltration",
         _step_advanced_exfiltration,
+        dwell_before=45 * 60,           # stage + compress data before exfil
         requires=("root_sliver_session", "vinzenz_beacon"),
     ),
     Step(
         "advanced_cleanup_backdoor",
         _step_advanced_cleanup_backdoor,
+        dwell_before=20 * 60,
         requires=("root_sliver_session", "vinzenz_beacon"),
         optional=True,
     ),
     Step(
         "advanced_restoration",
         _step_advanced_restoration,
+        dwell_before=15 * 60,
         requires=("root_sliver_session", "vinzenz_beacon"),
         optional=True,
     ),
@@ -779,6 +837,12 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
     results: list[dict] = []
     executed: list[Step] = []
 
+    # Background noise no longer runs in this process — it now lives in the
+    # dedicated ``noise_user_sim`` container (public_net 10.10.0.5), which is
+    # started by docker compose with NOISE_ENABLED=1 when tools/run.sh is
+    # invoked with --pacing realistic. Keeping the source IP off kali means a
+    # SOC trainee can't filter the attacker out by src_ip alone.
+
     try:
         for i, step in enumerate(selected, 1):
             missing = [k for k in step.requires if k not in ctx.state]
@@ -791,6 +855,20 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                     log.warning(msg)
                     continue
                 raise RuntimeError(msg)
+
+            # Attacker-side dwell before firing this step. Honest:
+            #   wall_clock = step.dwell_before / ctx.pacing_speed
+            # For fast mode the divisor is so large the sleep rounds to zero.
+            wait = step.dwell_before / ctx.pacing_speed
+            if wait >= 0.5:
+                console.print(
+                    f"[dim]· dwell {wait:.1f}s "
+                    f"(realistic {step.dwell_before // 60} min, "
+                    f"pacing={ctx.pacing}, speed={ctx.pacing_speed:g}×)[/dim]"
+                )
+                time.sleep(wait)
+            elif wait > 0:
+                time.sleep(wait)
 
             _print_step_header(step, i, len(selected), mode=ctx.mode)
             started = _iso_utc()
@@ -837,7 +915,8 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             results.append(_result_entry(step, ok=ok, started=started,
                                          ended=ended, elapsed=elapsed,
                                          mode=ctx.mode))
-            time.sleep(0.5)
+            # No trailing cosmetic sleep — dwell_before of the NEXT step
+            # handles inter-step pacing now.
 
     finally:
         for step in reversed(executed):
@@ -881,6 +960,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "scenario variant to execute, case-insensitive; "
             "aliases: basic/b, advanced/a/adv (default: basic)"
+        ),
+    )
+    p.add_argument(
+        "--pacing",
+        choices=list(PACING_MODES),
+        default=DEFAULT_PACING,
+        help=(
+            "How realistically attacker-chosen dwells are paced. "
+            "fast = instant (dev/CI); "
+            "realistic = real-time dwells + background noise + diurnal "
+            "timestamp rewriter (the post-process stretches the log window "
+            "into a synthetic workday so a short wall-clock run looks like "
+            "a normal business day on the SIEM)."
         ),
     )
 
@@ -936,6 +1028,7 @@ def main(argv: list[str] | None = None) -> int:
         _list_steps(args.mode)
         return 0
 
+    pacing_cfg = PACING_MODES[args.pacing]
     ctx = Context(
         target=args.target,
         results_dir=args.results_dir,
@@ -943,6 +1036,8 @@ def main(argv: list[str] | None = None) -> int:
         wordlist=args.wordlist,
         mode=args.mode,
         linpeas=args.linpeas,
+        pacing=args.pacing,
+        pacing_speed=float(pacing_cfg["speed"]),
     )
     run_chain(ctx, only=args.only, start=args.start, stop=args.stop)
     return 0

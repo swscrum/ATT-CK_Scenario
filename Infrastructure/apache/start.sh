@@ -10,20 +10,30 @@ log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"; }
 # Build-time activity baseline — render persona-keyed log templates into
 # /var/log/{auth.log,dpkg.log,apt/history.log,cleanup.log} so the host
 # comes up with 14-60 days of believable past activity. Idempotent across
-# restarts via /var/lib/baseline-hydrated. Must run BEFORE cron + lab-fim
-# so the baseline entries are in place before any watcher could surface
-# them as runtime modifications. See Infrastructure/shared-baseline/README.md.
+# restarts via /var/lib/baseline-hydrated. Must run BEFORE rsyslog + cron
+# + lab-fim so the baseline entries are in place before any watcher could
+# surface them as runtime modifications. See Infrastructure/shared-baseline/README.md.
 BASELINE_PERSONA=apache /usr/local/bin/hydrate-baseline.sh 2>&1 \
     | while read -r line; do log "$line"; done \
     || log "[start] hydrate-baseline failed (non-fatal)"
+
+# rsyslog — must start BEFORE sshd so the very first SSH attempt is
+# captured. The 40-lab-persist.conf snippet (added to /etc/rsyslog.d/)
+# mirrors auth.log and syslog into /usr/local/apache2/logs/ which is
+# bind-mounted to host, so the SIEM can ingest them.
+service rsyslog start
 
 # Cron daemon — fires /opt/cleanup.sh every minute as root (the
 # intentional misconfiguration that drives the basic-mode lab privesc).
 service cron start
 
-# SSH daemon — john.stravidis deploys into apache from his workstation, and
-# vinzenz.fedora SSHes in for sysadmin work. Both are used by the chain
-# (basic-mode deploy artefacts, advanced-mode lateral pivots).
+# SSH daemon — apache hosts named accounts for luke.smith (backup pushes
+# per scenario_story.md), john.stravidis (deploys from his workstation),
+# and vinzenz.fedora (sysadmin maintenance via the shared vincent_admin_key).
+# All are used by the chain (basic-mode deploy artefacts, advanced-mode
+# lateral pivots) and by the activity simulator's cross-host SSH baseline,
+# so apache/auth.log has a non-empty baseline for the attacker's
+# stolen-key activity (advanced chain) to hide in.
 service ssh start
 
 # Capability baseline — single snapshot at startup so blue-team teams have
@@ -35,6 +45,7 @@ service ssh start
 CAP_BASELINE=/usr/local/apache2/logs/capability-baseline.txt
 getcap -r /usr/bin /usr/sbin /usr/local/bin 2>/dev/null > "$CAP_BASELINE" || true
 log "[start] capability baseline written ($(wc -l < "$CAP_BASELINE") entries)"
+
 
 # Lab File Integrity Monitor — see lab-fim.sh for the watched paths.
 # Output goes to /usr/local/apache2/logs/lab-fim.log so it persists via

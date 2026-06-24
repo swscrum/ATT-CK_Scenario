@@ -101,8 +101,66 @@ python3 /usr/local/bin/logind-stub.py 2>/dev/null &
 # pick it up and exit the container if the stub ever terminates.
 disown
 
-# Start rsyslog so auth.log and syslog exist and capture SSH login events.
-/usr/sbin/rsyslogd
+# Pin DNS resolution to lab_dns (10.30.0.10) instead of Docker's embedded
+# resolver. Why: workstation activity_sim hits "internet" domains like
+# github.com / archive.ubuntu.com / registry.npmjs.org — these must
+# resolve through the lab_dns hostfile to land at fake_internet (and to
+# generate a logged DNS query the SOC can ingest). Docker's embedded DNS
+# wouldn't know about those domains.
+# Tradeoff: workstation can no longer resolve OTHER container names
+# (apache, db-internal, kali, router) via Docker DNS — those entries
+# are mirrored into lab_dns's hostfile (see Infrastructure/lab_dns/
+# dnsmasq.hosts) so service-name resolution still works.
+cat > /etc/resolv.conf <<EOF
+nameserver 10.30.0.10
+options edns0 timeout:2 attempts:2
+EOF
+
+# Persisted log directory (bind-mounted from host as /var/log/persist).
+# rsyslog drop-in 40-lab-persist.conf mirrors auth.log + syslog into here;
+# lab-fim writes its own log here too. /var/log itself stays container-
+# local with standard root:syslog ownership -- this keeps the HOST side of
+# the bind mount writable by uid 1000 and avoids the PR #69 regression
+# (chowning the host dir to root requires `sudo` to clean between runs and
+# fails under rootless Docker). Matches the pattern luke_ws + vinzenz_ws
+# (and main) already use.
+mkdir -p /var/log/persist
+chown root:syslog /var/log/persist
+chmod 0775 /var/log/persist
+touch /var/log/persist/lab-fim.log && chmod 0644 /var/log/persist/lab-fim.log
+
+# Start the real Linux logging daemon so /var/log/{syslog,auth.log,kern.log}
+# populate the way they would on a production Ubuntu box, and the drop-in
+# at /etc/rsyslog.d/40-lab-persist.conf mirrors auth+syslog to
+# /var/log/persist/ for SIEM ingest. Ubuntu 24.04 ships systemd-only unit
+# files inside the image, so we invoke the binary directly.
+rsyslogd \
+    || echo "[entrypoint] rsyslogd failed to start"
+
+# inotify-based File Integrity Monitor. Writes one structured line per
+# filesystem event on the watched paths (john's ~/.ssh, ~/.bash_history,
+# /var/mail, /etc/{passwd,shadow,sudoers,…}) to /var/log/persist/lab-fim.log.
+# Stands in for auditd, which can't register with the kernel audit
+# subsystem inside this Docker host. Wazuh-FIM uses inotify the same way
+# when auditd is unavailable, so the SIEM-side experience matches a real
+# Linux EDR.
+nohup /usr/local/bin/lab-fim.sh >> /var/log/persist/lab-fim.log 2>&1 &
+echo "[entrypoint] lab-fim watcher PID $!"
+
+# Activity simulator — runs as john.stravidis (the daily-user persona) when
+# ACTIVITY_ENABLED=1 (set by tools/run.sh in --pacing realistic). Generates
+# the developer baseline (git, npm, vim, occasional sudo) so the attacker's
+# post-foothold enumeration walk has actual prior shell history to land in,
+# instead of an empty ~/.bash_history that itself screams "this account
+# isn't used."
+nohup runuser -u john.stravidis -- \
+    env ACTIVITY_ENABLED="${ACTIVITY_ENABLED:-0}" \
+        ACTIVITY_PERSONA=developer \
+        ACTIVITY_HOME=/home/john.stravidis \
+        HOME=/home/john.stravidis \
+    python3 -u /usr/local/bin/activity_sim.py \
+        >> /var/log/activity_sim.log 2>&1 &
+echo "[entrypoint] activity_sim (developer) PID $!"
 
 # Start sshd in the background so the container has a remote shell.
 /usr/sbin/sshd

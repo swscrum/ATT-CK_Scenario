@@ -1,0 +1,56 @@
+title: T1021.004 — SSH Lateral Movement from DMZ to Internal Workstation
+id: 3da4f6a7-b8c9-4d99-cc44-lateral-ssh-01
+status: experimental
+description: |
+  Detects an SSH session into an internal workstation that ORIGINATES from
+  the DMZ (apache, 10.40.0.2 → router → 10.30.0.5). In normal Waystar
+  Royco operations, apache never SSHes to the workstation — the data flow
+  is workstation → apache (John deploys via rsync). A `sshd[N]: Accepted
+  publickey for john.stravidis from 10.30.0.4` line in the workstation
+  auth.log is the smoking gun.
+
+  Why 10.30.0.4 and not the apache IP 10.40.0.2 directly: the router
+  MASQUERADEs traffic on its outgoing interface. When apache→workstation
+  packets traverse the router, the source gets rewritten to the router's
+  *internal_net* leg (10.30.0.4) before being delivered to the workstation.
+  So the workstation's sshd sees 10.30.0.4 as the source, NOT 10.40.0.4
+  (which is the router's DMZ leg, used for the reverse direction).
+
+  Complement with the corresponding router NFLOG line
+  `FW-NEW: SRC=10.40.0.2 DST=10.30.0.5 DPT=22` for the L3 view (NFLOG
+  fires pre-NAT so the original apache source 10.40.0.2 is visible).
+references:
+  - Documentation/mappings.md — rows "T1021.004 SSH lateral"
+  - Attack-chain/lateral_movement.py
+author: Waystar lab
+date: 2026-05-31
+tags:
+  - attack.lateral_movement
+  - attack.t1021.004
+  - attack.t1078
+logsource:
+  category: authentication
+  product: linux
+  service: sshd
+detection:
+  selection_sshd:
+    Message|contains: 'Accepted publickey for john.stravidis from'
+    hostname:
+      - 'ubuntu_workstation'
+      - 'workstation'
+  selection_src:
+    Message|contains: 'from 10.30.0.4 '   # the router's internal-net leg, post-NAT
+  condition: selection_sshd and selection_src
+falsepositives:
+  - John normally SSHes from his own workstation (10.30.0.5 itself) or
+    from the operator's host — not from 10.30.0.4. A legitimate session
+    coming through the router (from any other subnet) should never happen
+    on the chain's lateral path and warrants investigation regardless.
+level: high
+fields:
+  - timestamp
+  - hostname
+  - target_user
+  - src_ip
+  - key_fingerprint
+  - Message

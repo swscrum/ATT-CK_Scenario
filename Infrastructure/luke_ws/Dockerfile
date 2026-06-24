@@ -24,10 +24,13 @@ RUN apt-get update \
         iproute2 \
         iputils-ping \
         ca-certificates \
+        curl \
         rsyslog \
         inotify-tools \
         postgresql-client \
         sqlite3 \
+        python3 \
+        vim \
     && rm -rf /var/lib/apt/lists/* \
     # Reclaim UID 1000 if the base image ships an `ubuntu` user.
     && if id -u ubuntu >/dev/null 2>&1; then userdel -r ubuntu; fi \
@@ -81,10 +84,24 @@ COPY luke_ws/lab-fim.sh         /usr/local/bin/lab-fim.sh
 COPY luke_ws/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
 RUN chmod +x /usr/local/bin/lab-fim.sh
 
-# Build-time activity baseline — see Infrastructure/shared-baseline/README.md
+# Trust the lab internal CA so curl/wget against fake_internet domains
+# (github.com, archive.ubuntu.com, etc.) works WITHOUT -k.
+COPY shared-lab-keys/lab-ca.crt /usr/local/share/ca-certificates/waystar-lab-ca.crt
+RUN update-ca-certificates >/dev/null 2>&1
+
+# Build-time activity baseline — pre-seeds /var/log with 14-60 days of
+# believable past activity (clinical persona). See
+# Infrastructure/shared-baseline/README.md.
 COPY shared-baseline/hydrate-baseline.sh        /usr/local/bin/hydrate-baseline.sh
 COPY shared-baseline/templates/clinical/        /usr/local/share/baseline/clinical/
 RUN chmod +x /usr/local/bin/hydrate-baseline.sh
+
+# Workstation activity simulator — runs as luke.smith from the entrypoint
+# when ACTIVITY_ENABLED=1. Generates the clinical-user baseline (psql to
+# db-internal, vim on session notes) so the attacker's eventual exfil
+# queries have a non-empty postgres history to hide in.
+COPY lab-activity-sim/activity_sim.py /usr/local/bin/activity_sim.py
+RUN chmod +x /usr/local/bin/activity_sim.py
 
 COPY luke_ws/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

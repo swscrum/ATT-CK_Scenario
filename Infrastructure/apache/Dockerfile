@@ -8,12 +8,14 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
     && apt-get -o Acquire::Check-Valid-Until=false update \
     && apt-get install -y --no-install-recommends \
         cron iproute2 dnsutils openssh-server openssh-client coreutils \
+        inotify-tools \
         rsync \
         python3 python3-psycopg2 \
         nmap sshpass \
+        rsyslog \
+        openssl \
         gawk \
         libcap2-bin \
-        inotify-tools \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && (test -x /usr/bin/base64 \
@@ -146,13 +148,50 @@ RUN chown -R luke.smith:luke.smith /home/luke.smith
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
 
+# TLS — server cert signed by the lab internal CA (same CA that signs
+# fake_internet's multi-SAN cert). Workstations trust the lab CA, so
+# they validate apache's cert without `-k`. Earlier iteration used a
+# pure self-signed cert here; that broke workstation→apache TLS
+# verification (e.g. Luke's `curl https://intranet.waystar.local/` got
+# verify_result=18 → no HTTP exchange → no SIEM signal). Signing with
+# the lab CA mirrors real production where the internal cert chain
+# anchors at the corporate-CA root.
+#
+# SAN list:
+#   DNS:apache                   — the Docker hostname workstations resolve
+#   DNS:intranet.waystar.local   — the corporate intranet alias (luke_ws hits)
+#   IP:10.40.0.2                 — direct IP access (NFLOG / curl by IP)
+#
+# Build process: COPY lab CA into a build-time scratch dir, generate a
+# CSR for the apache subject, sign it with the CA, then DELETE the CA
+# key from the image so the leaked-from-image attack surface stays just
+# the leaf cert (which is what the attacker would steal in a real
+# breach anyway).
+COPY shared-lab-keys/lab-ca.crt /tmp/lab-ca.crt
+COPY shared-lab-keys/lab-ca.key /tmp/lab-ca.key
+
+RUN openssl req -new -newkey rsa:2048 -nodes \
+        -keyout /usr/local/apache2/conf/server.key \
+        -out    /tmp/server.csr \
+        -subj "/C=US/O=Waystar Royco/CN=apache" \
+    && printf "subjectAltName=DNS:apache,DNS:intranet.waystar.local,IP:10.40.0.2\n" \
+        > /tmp/server.san \
+    && openssl x509 -req -in /tmp/server.csr \
+        -CA /tmp/lab-ca.crt -CAkey /tmp/lab-ca.key -CAcreateserial \
+        -days 730 -extfile /tmp/server.san \
+        -out /usr/local/apache2/conf/server.crt \
+    && chmod 600 /usr/local/apache2/conf/server.key \
+    && chmod 644 /usr/local/apache2/conf/server.crt \
+    && rm -f /tmp/lab-ca.key /tmp/lab-ca.crt /tmp/server.csr /tmp/server.san /tmp/lab-ca.srl
+
 # Start script + lab-FIM + activity baseline.
-#  - start.sh: cron + ssh, writes capability baseline (T1548.001 detection
-#    anchor — PR #141), hydrates the activity baseline (this PR), kicks off
-#    lab-fim, exec's httpd. Lives in the source tree so it can be edited
-#    without rebaking inline shell into the Dockerfile.
-#  - lab-fim.sh: inotify watcher for the basic-mode privesc tripwire +
-#    cgi-bin webshell drop + sudoers tamper (PR #141).
+#  - start.sh: launches rsyslog + cron + sshd, writes capability baseline
+#    (T1548.001 detection anchor — PR #141), hydrates the activity baseline
+#    (this PR), kicks off lab-fim, exec's httpd. Lives in the source tree
+#    so it can be edited without rebaking inline shell into the Dockerfile.
+#  - lab-fim.sh: inotify watcher for /opt/cleanup.sh privesc tripwire +
+#    cgi-bin webshell drop + sudoers tamper (PR #141). Writes
+#    /usr/local/apache2/logs/lab-fim.log (bind-mounted to host for SIEM).
 #  - hydrate-baseline.sh + templates/apache: persona-keyed log baseline
 #    (this PR) — renders 14-60 days of past auth/dpkg/apt/cleanup activity
 #    so the host doesn't boot with a clean log slate.
@@ -163,6 +202,12 @@ COPY shared-baseline/templates/apache/          /usr/local/share/baseline/apache
 RUN chmod +x /usr/local/bin/start.sh \
              /usr/local/bin/lab-fim.sh \
              /usr/local/bin/hydrate-baseline.sh
+
+# Mirror auth.log + syslog into /usr/local/apache2/logs/ (the bind-mounted
+# dir) so sshd auth events from luke.smith and vinzenz.fedora baseline
+# sessions reach the SIEM. Without this, apache's auth.log only exists
+# inside the container's writable layer and disappears on teardown.
+COPY apache/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf
 
 CMD ["/usr/local/bin/start.sh"]
 

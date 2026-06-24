@@ -24,6 +24,7 @@ RUN apt-get update \
         iproute2 \
         iputils-ping \
         ca-certificates \
+        curl \
         nodejs \
         npm \
         xfce4 \
@@ -67,7 +68,12 @@ RUN apt-get update \
     && sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
     && sed -i 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config \
     && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config \
-    && sed -i 's/^#\?UsePAM.*/UsePAM yes/' /etc/ssh/sshd_config
+    && sed -i 's/^#\?UsePAM.*/UsePAM yes/' /etc/ssh/sshd_config \
+    # LogLevel VERBOSE records the public-key fingerprint of every successful
+    # authentication. Without this, auth.log shows the principal but not which
+    # key was used — leaves a real detection gap for SOC analysts hunting
+    # T1021.004 (Remote Services: SSH).
+    && sed -i 's/^#\?LogLevel.*/LogLevel VERBOSE/' /etc/ssh/sshd_config
 
 # Seed John's home directory + shared deploy keypair.
 COPY ubuntu_workstation/john_home/ /home/john.stravidis/
@@ -99,6 +105,31 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
     && cd /home/john.stravidis/projects/waystar-connect \
     && npm install \
     && chown -R john.stravidis:john.stravidis node_modules
+
+# inotify-based File Integrity Monitor and an rsyslog snippet that opens
+# file-create perms enough for an operator on the host to read the logs
+# without sudo (group/ownership stays realistic — root:syslog 0644).
+# 40-lab-persist.conf is the rsyslog drop-in that mirrors auth.log + syslog
+# into /var/log/persist (the host-bind-mounted directory). /var/log itself
+# stays container-local; this is the safe pattern PR #69 introduced — see
+# the entrypoint's "Persisted log directory" block for context.
+COPY ubuntu_workstation/lab-fim.sh           /usr/local/bin/lab-fim.sh
+COPY ubuntu_workstation/01-lab-perms.conf    /etc/rsyslog.d/01-lab-perms.conf
+COPY ubuntu_workstation/40-lab-persist.conf  /etc/rsyslog.d/40-lab-persist.conf
+RUN chmod +x /usr/local/bin/lab-fim.sh
+
+# Trust the lab internal CA so `curl https://github.com` against
+# fake_internet works WITHOUT -k. CA is at Infrastructure/shared-lab-keys/
+# lab-ca.crt (committed) and signs fake_internet's multi-SAN cert.
+COPY shared-lab-keys/lab-ca.crt /usr/local/share/ca-certificates/waystar-lab-ca.crt
+RUN update-ca-certificates >/dev/null 2>&1
+
+# Workstation activity simulator — runs as john.stravidis from the entrypoint
+# when ACTIVITY_ENABLED=1 (set by tools/run.sh in --pacing realistic). Without
+# it, john's auth.log + bash history + lab-fim feed stay flat-zero except for
+# the attack chain itself, which makes detection trivial.
+COPY lab-activity-sim/activity_sim.py /usr/local/bin/activity_sim.py
+RUN chmod +x /usr/local/bin/activity_sim.py
 
 # ============================================================================
 #  vinzenz.fedora — sysadmin's named account on this host.

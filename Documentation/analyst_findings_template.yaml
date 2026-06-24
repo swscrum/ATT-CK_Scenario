@@ -1,0 +1,56 @@
+# Analyst findings — Waystar Royco SOC exercise
+# ============================================================================
+# Fill this in as you hunt. Each entry = one distinct attack beat you spotted.
+# Hand the completed file back to your instructor for review against the
+# run's ground-truth chain-*.json.
+#
+# Required fields per entry:
+#   tactic       — MITRE ATT&CK tactic ID (TA####)
+#   technique    — MITRE ATT&CK technique ID (T#### or T####.###)
+#   detected_at  — ISO 8601 UTC timestamp from the log line that gave it away
+#                  (use the SIEM dashboard's clock — instructor inverts to
+#                  wall-clock via diurnal_manifest.json)
+#   evidence     — path:line OR a query that reproduces the finding
+#   notes        — one sentence: why this is what you think it is
+#
+# Optional fields:
+#   severity     — low | medium | high | critical (your call)
+#   confidence   — low | medium | high (how sure are you?)
+#   containment  — one sentence: what would you do about it?
+#
+# Save your work as you go. Partial credit is awarded for partial findings.
+# ============================================================================
+
+analyst:
+  name:           # your name
+  session_date:  # YYYY-MM-DD
+  tier:          # 1 | 2 | 3 | 4
+  run_id:        # from Infrastructure/logs/run-<ts>/ or SIEM dashboard
+
+findings:
+  # Example entry (DELETE before submitting):
+  - tactic: TA0001
+    technique: T1190
+    detected_at: 2026-05-31T10:30:56Z
+    evidence: "apache/access.diurnal.log:1234 — POST /cgi-bin/.%32%65/.../bin/sh"
+    notes: "CVE-2021-41773 path traversal, double-URL-encoded; 200 response means the shell ran."
+    severity: critical
+    confidence: high
+    containment: "Patch Apache to ≥2.4.51; block the URL pattern at the WAF."
+
+  # Add one entry per attack beat you spot:
+  # - tactic: ...
+  #   technique: ...
+  #   detected_at: ...
+  #   evidence: ...
+  #   notes: ...
+
+# Anything in the logs that LOOKS suspicious but you concluded was NOT the
+# attacker — record here. Counts as hunting instinct, not toward coverage.
+false_positives_investigated:
+  - source: "noise_user_sim — /wp-login.php POST attempts"
+    why_dismissed: "Source IP 10.10.0.5 (per router NFLOG) is the baseline noise generator, not the attacker (10.10.0.2). All probe paths returned 404 with bot-style User-Agents."
+
+# Notes for the instructor (questions, assumptions, things you'd want more
+# time to investigate). Optional but appreciated.
+analyst_notes: |
