@@ -31,6 +31,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.prompt import Confirm
+from rich.rule import Rule
 
 _console = Console()
 
@@ -287,14 +288,51 @@ def _db_restoration(vinzenz_beacon: str, creds: dict, private_key_pem: str) -> b
 
 _RANSOM_PAID_BANNER = """\
 [bold red]
-  ██████╗  █████╗ ███╗   ██╗███████╗ ██████╗ ███╗   ███╗    ██████╗  █████╗ ██╗██████╗
-  ██╔══██╗██╔══██╗████╗  ██║██╔════╝██╔═══██╗████╗ ████║    ██╔══██╗██╔══██╗██║██╔══██╗
-  ██████╔╝███████║██╔██╗ ██║███████╗██║   ██║██╔████╔██║    ██████╔╝███████║██║██║  ██║
-  ██╔══██╗██╔══██║██║╚██╗██║╚════██║██║   ██║██║╚██╔╝██║    ██╔═══╝ ██╔══██║██║██║  ██║
-  ██║  ██║██║  ██║██║ ╚████║███████║╚██████╔╝██║ ╚═╝ ██║    ██║     ██║  ██║██║██████╔╝
-  ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝     ╚═╝    ╚═╝     ╚═╝  ╚═╝╚═╝╚═════╝
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣤⣿⣤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣤⣼⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣤⣤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⡼⠛⠸⢻⣯⣿⣽⢷⣻⣟⡾⣷⣻⣤⣤⣿⣾⠛⠀⠀⠛⣤⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣤⡼⠻⠏⠀⠀⠀⠀⠀⠘⠟⠻⠛⠟⠻⠛⠟⠻⠻⠀⠀⠀⠀⠀⠀⠀⠛⠟⢦⣤
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣤⠾⠿⠿⠿⠿⠿⢆⡀⠀⠀⠀⠀⠀⠀⢠⣠⡼⠿⠏⠁⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠁
+⠀⠀⠀⠀⠀⠀⠀⠀⣠⠾⠉⠉⠀⠀⠀⠀⠀⠀⠸⢇⡀⠀⠀⠀⢀⡴⠏⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⣀⠾⠉⠀⠀⠀⠀⠀⣀⡀⠲⢆⡀⣽⡇⠀⠀⢀⡸⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⠿⠿⠀⠀⠀⠀⣀⣀⣀⠀⠀⠀⠀⠿⠿⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⣀⠿⠀⠀⠀⠀⠶⣀⠀⠉⢷⡄⢻⣇⡹⠇⠀⠀⢸⡇⠀⠀⠀⠀⠀⠀⠀⢰⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⠀⢿⣿⠿⠀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡆
+⠀⠀⠀⠀⠀⣿⠀⠀⠀⠀⠀⠀⣿⠀⠀⣿⡷⠏⠉⠁⠀⠀⠀⢸⡇⠀⠀⠀⠀⠀⠀⢰⡞⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠶⠾⠉⠶⠶⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢵
+⠀⠀⠀⠀⣀⠿⠀⠀⠀⠀⠶⣀⣿⡷⠶⠋⠀⠀⠀⠀⠀⠀⠀⠈⠱⢆⣀⣀⣀⣀⣰⠞⢱⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⡏
+⠀⠀⠀⠀⣿⠀⠀⠀⠀⠀⣶⠋⠙⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠋⠙⠉⠋⠁⠀⠈⢳⣆⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⡴⠏⢳
+⠀⠀⠀⣶⠛⠀⠀⠀⠀⠀⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⢀⡀⡀⢀⡀⢀⠘⠛⢳⣴⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣶⣴⣶⣶⣴⣦⠛⠛⠀⠀⠀
+⠀⠀⢀⣿⠀⠀⠀⠀⠀⠀⠀⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢰⣤⡜⠛⠛⠛⠛⠛⢳⡜⠛⠛⠋⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣤⠀⠀⣤⠀⣤⣤⣤⠀⠀⠀⠀⠀⠀
+⠀⠀⣿⠀⠀⠀⠀⠀⠀⠀⠀⠛⣤⠀⠀⠀⢤⣤⣤⣤⣤⡄⠀⢸⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⡤⠀⠀⢠⣤⣼⠛⠛⠛⠛⠀⠀⠀⠀⠀⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⢀⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣦⠛⠛⠃⠀⠀⠀⠀⠘⠛⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠓⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣤⣤⠀⠀⣤⠛⠀⠀⠀⠀⠀⠀
+⠈⠻⣤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠛⠛⠛⠛⠃⠀⠀⠀⠘⠃⢠⣤⣤⣤⣤⣤⡼⠛⢫⣤⣤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣤⠛⠛⠛⠛⠛⠛⣤⠟⠂⠀⠀
+⠀⠀⣿⠻⣤⣤⣤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⡜⠃⠀⠀⠀⠀⠘⠛⢫⣄⠘⠛⠛⠛⠛⠛⠛⠛⠛⠻⣤⠛⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠈⠻⣤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⡼⢣⡄⠀⠀⠀⠀⠀⠀⠀⢸⡷⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣻⡄⠀⠀
+⠀⠀⠀⠀⠉⠿⠿⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⣤⡼⠿⠿⠏⠀⠈⠸⢧⡄⠀⠀⠀⠀⠀⢸⣟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠿⣤⣤⠀⠀⠀⠀⠀⠀⠀⠀⣾⠁⠹⠟⠿
+⠀⠀⠀⠀⠀⠀⠀⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠀⠀⠀⠀⠀⠀⠀⠈⠹⢧⣀⡄⠀⠀⠈⢹⡷⠀⠀⠀⠀⠀⠀⠀⠀⣿⠉⠉⠿⠿⠿⠀⠀⠀⠾⠉⠀⠀⠀⠀⠀
 [/bold red]
-[dim]              P A Y M E N T   R E C E I V E D   ·   I N I T I A T I N G   D E C R Y P T I O N[/dim]"""
+[dim]P A Y M E N T   R E C E I V E D   ·   D E C R Y P T I O N   I N I T I A T I N G[/dim]"""
+
+_SKULL_ART = """\
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⡟⠀⣴⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⠏⢰⣡⢞⡽⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⠟⢁⣠⣟⡵⠛⠀⠀⠀⣀⡠⠤⢀⣀⣀⣒⣒⣢⣤⣤⣤⣀⣀⠠⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⣛⣀⣴⠟⢋⡿⠁⣀⠴⠚⠋⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠁⠈⠉⠙⠓⠿⢶⣤⣀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⣶⢿⣋⡽⠋⢀⣾⡷⠚⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⢶⢤⡀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⠟⠉⠀⣰⠋⠀⣠⣾⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠑⢄⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⡶⠋⠁⢀⣠⣾⢷⣶⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢳
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⢿⣫⠔⠒⣾⣯⡥⣴⣿⡛⠀⠀⠀⠀⠀⣠⠄⠀⢀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣴⡿⠟⢋⣀⠤⠚⣉⣷⡾⠟⠝⣱⠂⢠⣤⠐⢀⡻⠀⠀⢸⣿⣷⣶⣤⣤⣤⣤⣤⣶⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⢯⣁⡤⠒⠋⢁⣠⠞⣻⠋⢠⠞⢸⠁⣠⣿⣮⣧⢴⠳⠄⢀⡼⣿⣿⣿⣿⣿⣿⠟⠛⣻⣟⣀⡀⠀⠀⢠⣴⡶⠒⠲⣤⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡴⠋⠀⣺⠇⢷⢀⡴⠛⢁⣴⡇⣠⠋⢠⣿⣴⣿⣿⣿⡏⠀⠀⠀⠘⣟⣛⣻⣿⣿⣿⣿⡦⠖⠛⠚⠚⠿⢿⣲⠦⣽⣦⡄⠀⠸⡆⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡴⠋⠀⣀⡞⠁⠀⣸⡟⢀⣴⠟⠀⢙⠇⠀⣾⣿⣿⣿⣿⠟⠀⠀⠀⠀⠀⠀⢹⣿⠛⠁⠉⠁⠀⠀⠀⠀⠀⠀⠀⠈⣧⡆⢹⣧⠀⠀⠉⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⠎⠀⢀⣴⣏⣠⣴⠿⠋⠛⠛⢁⡠⠞⠋⠀⢠⣿⡏⢘⣿⣷⣦⡀⠀⠀⠀⣤⣤⣂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠁⣸⡿⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⣴⡟⠀⣠⡿⠀⢈⣽⠁⠀⣀⡴⠒⠉⠀⠀⠀⢀⡞⠉⣟⠛⣄⣿⣿⣿⣦⡄⠸⣿⡿⠉⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣤⣤⣤⣶⡟⠁⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⢀⣄⡀⣤⠞⠹⣦⣾⣯⣤⣠⠟⠁⠸⡏⠁⠀⠀⠀⠀⠀⢠⣿⠇⠀⠈⢹⣿⣿⣿⠛⠿⣿⣏⠁⠀⠀⠀⠀⠀⠀⠀⣠⣴⣾⣿⣿⠇⢸⣿⣿⣿⣿⣶⣤⣀⠀⠀⠀⠀⠀⠀
+⠀⢀⣼⠋⠀⠳⢧⣄⢀⣿⣞⠑⣮⣁⠤⠴⠞⠁⠀⠀⠀⠀⠀⠀⠸⣿⠀⠀⠀⠀⠘⠀⡿⡏⠉⠉⠀⠀⠀⠀⠀⠀⠀⠀⣰⣿⣿⣿⣿⡿⠀⢸⡿⢟⣹⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀
+⢀⣼⣧⠀⠀⠀⢀⣼⡟⠳⠙⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠹⣄⣀⣠⣤⠀⠀⠀⠀⠀⠀⢀⠀⢀⠀⡀⠀⠀⢸⢿⣿⣿⣿⠟⠃⠀⠀⠀⣼⣿⣿⣽⣿⠋⣿⠃⠀⠀⠀⠀
+⡾⣱⠏⠀⠀⣠⠾⣋⡇⢀⠜⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢹⣽⣿⡄⠀⢠⠀⢠⡆⢸⡀⢸⠀⡇⡇⠀⣸⣿⣿⣿⠏⠀⠀⠀⠀⣤⣿⣿⣿⠟⠁⠀⠋⠀⠀⠀⠀⢠
+⣴⠋⠀⣠⡞⠁⣰⠋⣱⠏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣿⣿⠀⣄⣼⡦⡾⡷⢻⠏⠻⣿⠻⣿⣾⣿⣿⣿⡇⠀⠀⠀⢀⣤⣾⣿⣿⣿⡇⠀⠀⠀⢀⣀⣠⣤⡾
+⠁⣠⡾⠋⠀⡴⢁⣴⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣻⡞⢏⠉⡇⡇⡆⢸⡆⠰⠃⠀⢸⠹⣿⠟⠉⠀⠀⢀⡴⠋⠀⣿⣿⣿⠟⠿⣶⣾⣿⠿⠷⠚⠉⠀"""
 
 _DECRYPT_PHASES = [
     "Verifying XMR transaction ...",
@@ -361,8 +399,7 @@ def _animate_and_restore(vinzenz_beacon: str, creds: dict) -> bool:
     _console.print(Panel(
         "[bold green]✓  All files have been restored.[/bold green]\n\n"
         "[dim]Your data has been recovered.\n"
-        "We trust you have learned a valuable lesson about endpoint protection.\n"
-        "We were just better at IT than you.[/dim]",
+        "We trust you have learned a valuable lesson about endpoint protection.[/dim]",
         border_style="green",
         padding=(1, 4),
     ))
@@ -398,16 +435,27 @@ def run(root_sliver_session: str, vinzenz_beacon: str, results_dir: str) -> dict
     ))
     _console.print()
 
-    do_restore = Confirm.ask(
-        "[bold yellow]Pay the ransom and decrypt files?[/bold yellow]"
-    )
+    _console.print()
+    _console.print(Rule(
+        "[bold yellow]  Pay the ransom and decrypt files?  [/bold yellow]",
+        style="yellow",
+    ))
+    _console.print()
+    do_restore = Confirm.ask("[bold yellow]Decrypt now[/bold yellow]")
 
     if not do_restore:
         log("[*] User declined restoration. Environment remains encrypted.")
-        _console.print(
-            "\n[dim red]Environment left encrypted. Wallpaper remains on victim desktop.\n"
-            "Re-run with --only advanced_restoration to restore later.[/dim red]\n"
-        )
+        _console.print()
+        _console.print(Panel(
+            _SKULL_ART + "\n\n"
+            "[bold red]You chose not to pay.[/bold red]\n\n"
+            "[bold]Your data will be published and sold within 72 hours.[/bold]\n"
+            "[dim]All encrypted files will be leaked to public darknet forums.[/dim]",
+            title="[bold red]  DATA LEAK IMMINENT  [/bold red]",
+            border_style="red",
+            padding=(1, 4),
+        ))
+        _console.print()
         return {"restore_success": False}
 
     # Phase 2: discover DB creds, animate, decrypt

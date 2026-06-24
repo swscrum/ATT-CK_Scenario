@@ -819,6 +819,15 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                     elapsed = time.perf_counter() - t0
                     ended = _iso_utc()
                     _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
+                    if isinstance(exc, ModuleNotFoundError):
+                        console.print(Panel(
+                            "[bold]A Python dependency is missing from the container image.[/bold]\n\n"
+                            "Rebuild and re-run:\n\n"
+                            f"  [bold cyan]tools/run.sh --build --mode {ctx.mode}[/bold cyan]",
+                            title="[bold yellow]⚠  Stale image[/bold yellow]",
+                            border_style="yellow",
+                            padding=(1, 4),
+                        ))
                     attacklog.end_phase(step.name, ok, elapsed, ended)
                     results.append(_result_entry(step, ok=ok, started=started,
                                                  ended=ended, elapsed=elapsed,
