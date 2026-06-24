@@ -692,47 +692,58 @@ CHAIN_BASIC: list[Step] = [
 # the lateral step produces. All advanced-step state values are Sliver
 # session/beacon IDs (strings) -- no socket handles, no teardown.
 CHAIN_ADVANCED: list[Step] = [
-    Step("recon", _step_advanced_recon),
-    Step("exploit", _step_advanced_exploit),
+    # dwell_before mirrors CHAIN_BASIC semantics: realistic APT seconds,
+    # divided by ctx.pacing_speed at run time.  Advanced dwells are longer
+    # than basic — this is a targeted, patient operator.
+    Step("recon", _step_advanced_recon, dwell_before=0),
+    Step("exploit", _step_advanced_exploit, dwell_before=20 * 60),
     Step(
         "webserver_post_exploit_enum",
         _step_advanced_webserver_post_exploit_enum,
+        dwell_before=10 * 60,
         requires=("sliver_session",),
     ),
     Step(
         "webserver_privesc",
         _step_advanced_webserver_privesc,
+        dwell_before=25 * 60,
         requires=("sliver_session", "cap_binary"),
     ),
     Step(
         "webserver_persistence",
         _step_advanced_webserver_persistence,
+        dwell_before=15 * 60,
         requires=("root_sliver_session",),
     ),
     Step(
         "advanced_lateral_movement",
         _step_advanced_lateral_movement,
+        dwell_before=3 * 3600,          # APT waits hours before moving laterally
         requires=("root_sliver_session",),
     ),
     Step(
         "advanced_vinzenzws_privesc",
         _step_advanced_vinzenzws_privesc,
+        dwell_before=30 * 60,
         requires=("vinzenz_beacon",),
     ),
     Step(
         "advanced_exfiltration",
         _step_advanced_exfiltration,
+        dwell_before=45 * 60,           # stage + compress data before exfil
         requires=("root_sliver_session", "vinzenz_beacon"),
     ),
     Step(
         "advanced_cleanup_backdoor",
         _step_advanced_cleanup_backdoor,
+        dwell_before=20 * 60,
         requires=("root_sliver_session", "vinzenz_beacon"),
         optional=True,
     ),
     Step(
         "advanced_restoration",
         _step_advanced_restoration,
+        dwell_before=15 * 60,
         requires=("root_sliver_session", "vinzenz_beacon"),
         optional=True,
     ),

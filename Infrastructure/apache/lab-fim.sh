@@ -33,6 +33,6 @@ fi
 
 exec inotifywait -m -r \
     --timefmt '%Y-%m-%dT%H:%M:%S%z' \
-    --format '%T tag=lab_fim path=%w%f event=%e' \
+    --format '%T tag=lab_fim host=apache path=%w%f event=%e' \
     -e modify -e attrib -e move -e create -e delete -e delete_self \
     "${EXISTING[@]}"
