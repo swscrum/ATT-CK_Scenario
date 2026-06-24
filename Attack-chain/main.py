@@ -164,17 +164,17 @@ STEP_META_ADVANCED: dict[str, dict] = {
         #             Cyrillic taunt on vinzenz_ws, FIN7 Cobalt-Strike-
         #             profile staging script — misdirect attribution).
         # Persistence family:
-        # T1053.003 — Scheduled Task/Job: Cron (apache backdoor via
-        #             /etc/cron.d/apt-cache-refresh, hourly).
-        # T1543.002 — Create or Modify System Process: Systemd Service
-        #             (vinzenz_ws lab-update-agent.service + .timer).
         # T1098.004 — Account Manipulation: SSH Authorized Keys (extra
         #             entry in vinzenz.fedora's authorized_keys masquerading
         #             as ansible-deploy@cm-prod).
         "techniques": ["T1485", "T1070.002", "T1070.003", "T1070.004",
-                       "T1565.001",
-                       "T1053.003", "T1543.002", "T1098.004"],
+                       "T1565.001", "T1098.004"],
         "color": "red",
+    },
+    "advanced_restoration": {
+        "tactic": "TA0040 · Impact (Recovery)",
+        "techniques": ["T1490", "T1491.001"],
+        "color": "green",
     },
 }
 def _step_meta(name: str, mode: str = "basic") -> dict:
@@ -579,6 +579,18 @@ def _step_advanced_cleanup_backdoor(ctx: Context) -> dict[str, Any]:
     )
 
 
+def _step_advanced_restoration(ctx: Context) -> dict[str, Any]:
+    from advanced_restoration import run as restore_run
+
+    result = restore_run(
+        root_sliver_session=ctx.state["root_sliver_session"],
+        vinzenz_beacon=ctx.state.get("vinzenz_beacon"),
+        results_dir=ctx.results_dir,
+    )
+    # restore_success=False means user chose N — not a chain error
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Chain definition
 # ---------------------------------------------------------------------------
@@ -668,6 +680,12 @@ CHAIN_ADVANCED: list[Step] = [
     Step(
         "advanced_cleanup_backdoor",
         _step_advanced_cleanup_backdoor,
+        requires=("root_sliver_session", "vinzenz_beacon"),
+        optional=True,
+    ),
+    Step(
+        "advanced_restoration",
+        _step_advanced_restoration,
         requires=("root_sliver_session", "vinzenz_beacon"),
         optional=True,
     ),
@@ -796,6 +814,15 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                     elapsed = time.perf_counter() - t0
                     ended = _iso_utc()
                     _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
+                    if isinstance(exc, ModuleNotFoundError):
+                        console.print(Panel(
+                            "[bold]A Python dependency is missing from the container image.[/bold]\n\n"
+                            "Rebuild and re-run:\n\n"
+                            f"  [bold cyan]tools/run.sh --build --mode {ctx.mode}[/bold cyan]",
+                            title="[bold yellow]⚠  Stale image[/bold yellow]",
+                            border_style="yellow",
+                            padding=(1, 4),
+                        ))
                     attacklog.end_phase(step.name, ok, elapsed, ended)
                     results.append(_result_entry(step, ok=ok, started=started,
                                                  ended=ended, elapsed=elapsed,

