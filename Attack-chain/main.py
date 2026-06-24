@@ -587,7 +587,6 @@ def _step_advanced_cleanup_backdoor(ctx: Context) -> dict[str, Any]:
 def _step_advanced_restoration(ctx: Context) -> dict[str, Any]:
     from advanced_restoration import run as restore_run
 
-
     result = restore_run(
         root_sliver_session=ctx.state["root_sliver_session"],
         vinzenz_beacon=ctx.state.get("vinzenz_beacon"),

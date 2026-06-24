@@ -79,18 +79,17 @@ def _beacon_exec_wait(beacon_id: str, command: str, *,
 def _reset_wallpaper(vinzenz_beacon: str) -> None:
     """Reset XFCE wallpaper to default on ubuntu_workstation (removes ransom note)."""
     reset_script = (
-        "JOHN_UID=$(id -u john.stravidis); "
-        "DBUS_ADDR=$(cat /proc/$(pgrep -u john.stravidis -x xfce4-session 2>/dev/null"
-        " | head -1)/environ 2>/dev/null | tr '\\0' '\\n'"
-        " | grep ^DBUS_SESSION_BUS_ADDRESS= | cut -d= -f2-); "
+        "JOHN_UID=$(id -u john.stravidis 2>/dev/null); "
+        "SESS_PID=$(pgrep -u john.stravidis -x xfce4-session 2>/dev/null | head -1); "
+        "DBUS_ADDR=$(cat /proc/${SESS_PID}/environ 2>/dev/null "
+        "| tr '\\0' '\\n' | grep ^DBUS_SESSION_BUS_ADDRESS= | cut -d= -f2-); "
         '[ -z "$DBUS_ADDR" ] && DBUS_ADDR="unix:path=/run/user/${JOHN_UID}/bus"; '
-        "runuser -u john.stravidis -- env DISPLAY=:1 "
-        'DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" '
+        "echo 'VinzenzAdmin!2026' | sudo -S -u john.stravidis -- "
+        'env DISPLAY=:1 DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" '
         "xfconf-query -c xfce4-desktop "
         "-p /backdrop/screen0/monitor0/workspace0/last-image "
         "-r 2>/dev/null || true; "
         f"rm -f {WALLPAPER_REMOTE} 2>/dev/null || true; "
-        "pkill -USR1 -u john.stravidis xfdesktop 2>/dev/null || true; "
         "echo WALLPAPER_RESET"
     )
     b64 = base64.b64encode(reset_script.encode()).decode()
@@ -245,7 +244,7 @@ def _db_restoration(vinzenz_beacon: str, creds: dict, private_key_pem: str) -> b
             f"echo '{privkey_b64}' | base64 -d > /tmp/privkey.pem && "
             f"openssl cms -decrypt -binary -in /var/lib/postgresql/TEST.sql.enc "
             f"-inkey /tmp/privkey.pem -out /tmp/restore.sql && "
-            f"psql -U waystar -d waystar -f /tmp/restore.sql && "
+            f"PGPASSWORD='{creds['password']}' psql -h 127.0.0.1 -U {creds['user']} -d waystar -f /tmp/restore.sql && "
             f"rm -f /tmp/privkey.pem /tmp/restore.sql /var/lib/postgresql/TEST.sql.enc$$;"
         )
         db_code = (
