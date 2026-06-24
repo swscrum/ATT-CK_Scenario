@@ -35,9 +35,10 @@ What the SOC trainee gets to detect: the CVE attack path, the cron-poison prives
 3. **Pivot to Vinzenz Fedora (sysadmin).** From John's box, the attacker enumerates the fleet and identifies `vinzenz_ws` (`10.30.0.8`). They reach Vinzenz via a credential left on John's box (a stale ssh config, a documented `vinzenz.fedora@*` SSH alias in `~/.ssh/config`, or a captured password) and SSH in. On Vinzenz's box they find `~/.ssh/id_ed25519` — the cross-fleet master key (T1552.004 — unsecured private key).
 4. **Lateral to Luke via the sysadmin's account.** Using Vinzenz's key, the attacker SSHes into Luke's box as `vinzenz.fedora` (a real sudoer account on Luke's host, installed during fleet provisioning). They're now root-equivalent on Luke's box without ever having Luke's password.
 5. **Read Luke's `.pgpass` + query the patient DB.** With Luke's `waystar-readonly` credentials they run `psql` from his box and pull everything in `patients`, `session_notes`, and `appointments`. Same query a legitimate SOC analyst would write — but from the wrong identity at the wrong time.
-6. **Exfil + impact (groups D–E).** Tunnel the patient data out over the existing C2 channel; with Vinzenz's superuser `.pgpass` (full RW on `db-internal`) optionally proceed to T1490/T1486 (inhibit recovery, encrypt for impact).
+6. **Exfil + impact (groups D–E).** Tunnel the patient data out over the existing C2 channel (T1041/T1567). Then run `advanced_cleanup_backdoor`: selective log scrubbing, false-flag attribution drops, artefact shredding, a single SSH authorized_keys backdoor on vinzenz_ws (T1098.004), and a ransom wallpaper on John's XFCE desktop (T1491.001).
+7. **Optional restoration (`advanced_restoration`).** Interactive prompt lets the operator decrypt all `.enc` files and restore the database for a repeat demo run. Resets the ransom wallpaper on success.
 
-What advanced adds for the SOC trainee: the **sysadmin-key-theft** detection beat (lab-fim on `~vinzenz.fedora/.ssh/id_ed25519`), the **lateral via sysadmin account** beat (sshd log shows `vinzenz.fedora` logging into Luke's box from `vinzenz_ws` IP — legitimate sysadmin behaviour, but possibly at off-hours from the wrong source IP if the attacker is sloppy), and the **patient-DB exfiltration** beat (postgres query log shows large `SELECT *` against `patients` + `session_notes` issued by `waystar-readonly` from Luke's host).
+What advanced adds for the SOC trainee: the **sysadmin-key-theft** detection beat (lab-fim on `~vinzenz.fedora/.ssh/id_ed25519`), the **lateral via sysadmin account** beat (sshd log shows `vinzenz.fedora` logging into Luke's box from `vinzenz_ws` IP — legitimate sysadmin behaviour, but possibly at off-hours from the wrong source IP if the attacker is sloppy), the **patient-DB exfiltration** beat (postgres query log shows large `SELECT *` against `patients` + `session_notes` issued by `waystar-readonly` from Luke's host), the **false-flag attribution** beat (simultaneous Lazarus/APT28/FIN7 artefacts on unrelated hosts), and the **single stealthy backdoor** (a new `ansible-deploy@cm-prod` key that looks like provisioning automation).
 
 ## Chain summary
 
@@ -50,22 +51,24 @@ What advanced adds for the SOC trainee: the **sysadmin-key-theft** detection bea
 | Privilege Escalation | (existing) cron + chmod 777 | T1053.003 |
 | Credential Access | deploy creds in files on apache | T1552.001 |
 | Discovery + Credential Access | nmap sweep + sshpass spray from apache | T1018, T1046, T1110.004 |
-| Lateral Movement | SSH to John | T1021.004, T1078 |
+| Lateral Movement | SSH to John | T1021.004, T1078.003 |
 | Persistence | authorized_keys + systemd user unit | T1098.004, T1543.002 |
 | Command & Control | encrypted reverse tunnel | T1572, T1071.001 |
 | Discovery | files, accounts, history on John's box | T1083, T1087, T1518 |
 | Lateral (failed) | brute force on hardened boxes | T1110 (detected/denied) |
 | Discovery | Luke artefacts | T1083, T1087 |
 | Credential Access | Luke's personal SSH key | T1552.004 |
-| Lateral Movement | SSH to Luke | T1021.004, T1078 |
+| Lateral Movement | SSH to Luke | T1021.004, T1078.003 |
 | Collection | mail mining for sysadmin coords | T1114.001 |
 | Initial Access (phase 2) | spearphishing attachment to Vinzenz | T1566.001 |
 | Execution | user opens attachment (sim) | T1204.002 |
-| Lateral / Privesc | sysadmin shell | T1078 |
-| Defense Evasion | inhibit backups before ransomware | T1490 |
+| Lateral / Privesc | sysadmin shell | T1078.003 |
 | Collection | DB + session notes | T1005, T1213 |
 | Exfiltration | over C2 tunnel | T1041 |
-| Impact | ransomware encryption | T1486 |
+| Defense Evasion | selective log grep-out, history rotation, artefact shred, false-flag drops | T1485, T1070.002, T1070.003, T1070.004, T1565.001 |
+| Persistence | SSH authorized_keys backdoor on vinzenz_ws | T1098.004 |
+| Impact | ransom wallpaper on john's desktop | T1491.001 |
+| Impact (Recovery) | interactive decrypt + lab reset | T1490, T1491.001 |
 
 ## Sequence diagram (UML)
 
@@ -114,8 +117,14 @@ sequenceDiagram
     Att->>S: 13. Dump patient DB, tarball session notes
     S-->>Att: 13. data
     Att->>Att: 14. Receive exfil chunks (over C2 tunnel from step 5)
-    Att->>S: 15. Disable backups (T1490)
-    Att->>S: 15. Encrypt files in place + drop ransom note
+    Att->>S: 15. Scrub logs, plant false flags, dilute evidence (T1070/T1565.001)
+    Att->>S: 15. Shred staged artefacts (T1485)
+    Att->>S: 15. Plant SSH authorized_keys backdoor on vinzenz_ws (T1098.004)
+    Att->>J: 15. Set ransom wallpaper on John's desktop (T1491.001)
+    Note over Att,J: Optional — repeat demo reset
+    Att->>Att: 16. Prompt: Pay the ransom and decrypt files?
+    Att->>S: 16. Decrypt .enc files network-wide (T1490 reversed)
+    Att->>J: 16. Reset wallpaper to default
 ```
 
 ## Per-phase detail
@@ -170,8 +179,8 @@ Output of this step seeds `ctx.state["john_ip"]` so the lateral-movement step sk
 
 #### Phase 5 — Foothold establishment
 
-Three things, in order:
-1. **Persistence**: append a new public key to `~/.ssh/authorized_keys`; install a hidden `~/.config/systemd/user/<service>.service` providing a re-connect-on-boot daemon.
+Two things, in order:
+1. **Persistence**: append a new public key to `~/.ssh/authorized_keys`.
 2. **Encrypted C2 tunnel**: bring up an autossh + TLS-wrapped reverse tunnel back to attacker infrastructure. Subsequent steps' traffic flows through this rather than touching the open Internet.
 3. **Light cleanup**: prune obvious bash-history entries, set `HISTFILE=/dev/null` in the spawned shells.
 
@@ -289,12 +298,42 @@ Vinzenz is the prize because he holds the keys:
 - Pace the upload to avoid burst-volume detection; spread over minutes/hours in a real engagement, compressed for demo.
 - ATT&CK: Exfiltration over C2 channel.
 
-#### Phase 15 — Impact
+#### Phase 15 — Impact + Cleanup + Backdoor (`advanced_cleanup_backdoor`)
 
-In strict order (this matters for realism — backups go first):
-1. **Disable backups**: revoke or corrupt backup credentials, kill the systemd timer that runs incremental backups, delete the most recent local backup snapshots. (T1490 Inhibit System Recovery.)
-2. **Encrypt files in place**: walk reachable file trees, AES-encrypt session notes / DB exports / any reachable Waystar Connect data. Custom binary preferred over shipping an off-the-shelf ransomware family (the project rules forbid known malware).
-3. **Drop ransom note**: a `RANSOM.txt` (or themed Markdown) in each affected directory and on each compromised host's desktop.
+Implemented in `Attack-chain/advanced_cleanup_backdoor.py`. Runs after exfiltration as the closing act of the advanced chain.
+
+**Phase 1 — Log scrubbing (T1070.002/.003/.004)**
+Selective grep-out of attacker artefacts from apache and vinzenz_ws auth logs (no truncation — blank logs are themselves a tell). History rotation on vinzenz_ws (plausible entries inserted; history not deleted).
+
+**Phase 2 — False-flag evidence planting (T1565.001)**
+Three artefacts planted to misdirect forensic attribution:
+- Lazarus Group AppleJeus magic bytes on apache
+- APT28 Cyrillic-taunt file on vinzenz_ws
+- FIN7 Cobalt-Strike-style staging script on apache
+
+**Phase 3 — Evidence dilution**
+Postgres log dilution (80 plausible `waystar-readonly` SELECTs) and NFLOG flow dilution (benign outbound HTTPS fan-out from vinzenz_ws) to bury the real exfil events in noise.
+
+**Phase 4 — Artefact wipe (T1485)**
+`shred -n 3` of all staged files on both apache and vinzenz_ws; free-space fill to defeat recovery.
+
+**Phase 5 — Ransom wallpaper (T1491.001)**
+`ran_wall.jpg` uploaded kali → vinzenz_ws → john_ws via Sliver + SCP. XFCE4 wallpaper set on John's desktop (VNC `:5901`) via xfconf-query running as `john.stravidis`.
+
+**Backdoor planted (T1098.004)**
+One stealthy SSH authorized_keys entry appended to `~vinzenz.fedora/.ssh/authorized_keys` on vinzenz_ws, masquerading as `ansible-deploy@cm-prod`. This is the only backdoor — three-backdoor designs (apache cron, systemd timer, SSH key) were reduced to one for realism: a disciplined APT plants the minimum footprint.
+
+#### Phase 16 — Interactive Restoration (`advanced_restoration`)
+
+Implemented in `Attack-chain/advanced_restoration.py`. Optional final step, only relevant for repeat demo runs.
+
+**Prompt**: "Pay the ransom and decrypt files?" (Rich `Confirm.ask`). In non-interactive / automated runs the step skips gracefully (EOFError handled).
+
+**Y path**: Rich progress animation while decryption runs in a background thread. Decrypts all `.enc` files network-wide (vinzenz_ws, john_ws, luke_ws, apache) via openssl CMS using the private key from `Attack-chain/exfil_keys/private.pem`. Restores the postgres database from the encrypted SQL dump. On success, resets the XFCE4 ransom wallpaper to the default on john's desktop.
+
+**N path**: Environment stays encrypted; a skull panel warns that data will be published within 72 hours.
+
+MITRE: T1490 (reversed — decryption of in-place-encrypted files), T1491.001 (reversed — wallpaper reset).
 
 ## Lab artifacts that need to exist for this plan
 

@@ -210,6 +210,30 @@ runuser -u john.stravidis -- \
     dbus-launch --exit-with-session \
         sh -c "$TUMBLERD & sleep 1 && exec xfce4-session" &
 
+# Save the DBUS session-bus address to a world-readable file so external tools
+# (attack-chain wallpaper setter running as vinzenz.fedora) can locate the bus
+# without needing access to /proc/<john-pid>/environ.  Root can read any proc
+# entry; chmod 644 makes it readable by vinzenz.fedora and attack scripts that
+# sudo -u john.  Loop up to 30 s so the XFCE session is up before we probe.
+(
+    for i in $(seq 1 30); do
+        SESS_PID=$(pgrep -u john.stravidis xfce4-session 2>/dev/null | head -1)
+        if [ -n "$SESS_PID" ]; then
+            DBUS_VAL=$(cat /proc/${SESS_PID}/environ 2>/dev/null \
+                       | tr '\0' '\n' \
+                       | grep '^DBUS_SESSION_BUS_ADDRESS=' \
+                       | head -1 | cut -d= -f2-)
+            if [ -n "$DBUS_VAL" ]; then
+                echo "$DBUS_VAL" > /run/user/${JOHN_UID}/.dbus_addr
+                chmod 644 /run/user/${JOHN_UID}/.dbus_addr
+                break
+            fi
+        fi
+        sleep 1
+    done
+) &
+disown
+
 # Block PID 1 on the X server (foreground for Docker), so the container stays
 # alive as long as VNC is running.
 wait -n

@@ -71,7 +71,7 @@ STEP_META = {
     },
     "post_exploit_enumeration": {
         "tactic": "TA0007 · Discovery",
-        "techniques": ["T1082", "T1087.001", "T1057", "T1053.003", "T1016", "T1552.001"],
+        "techniques": ["T1082", "T1087.001", "T1057", "T1053.003", "T1016", "T1552.001", "T1562.003"],
         "color": "blue",
     },
     "privesc": {
@@ -86,7 +86,7 @@ STEP_META = {
     },
     "lateral": {
         "tactic": "TA0007 · Discovery · TA0008 · Lateral Movement",
-        "techniques": ["T1018", "T1046", "T1110.004", "T1021.004", "T1078"],
+        "techniques": ["T1018", "T1046", "T1110.004", "T1021.004", "T1078.003"],
         "color": "magenta",
     },
     "enumeration_john_ws": {
@@ -96,7 +96,7 @@ STEP_META = {
     },
     "exfiltrate": {
         "tactic": "TA0009 · Collection · TA0010 · Exfiltration",
-        "techniques": ["T1552.001", "T1213", "T1041"],
+        "techniques": ["T1552.001", "T1213", "T1048.003"],
         "color": "red",
     },
     "defense_evasion": {
@@ -124,7 +124,7 @@ STEP_META_ADVANCED: dict[str, dict] = {
     "webserver_post_exploit_enum": {
         "tactic": "TA0007 · Discovery",
         "techniques": ["T1082", "T1087.001", "T1057", "T1083",
-                       "T1548.001", "T1016"],
+                       "T1016"],
         "color": "blue",
     },
     "webserver_privesc": {
@@ -140,7 +140,7 @@ STEP_META_ADVANCED: dict[str, dict] = {
     },
     "advanced_lateral_movement": {
         "tactic": "TA0008 · Lateral Movement · TA0040 · Impact",
-        "techniques": ["T1021.004", "T1556.003", "T1499.004"],
+        "techniques": ["T1021.004", "T1563.001", "T1499.003"],
         "color": "magenta",
     },
     "advanced_vinzenzws_privesc": {
@@ -151,9 +151,44 @@ STEP_META_ADVANCED: dict[str, dict] = {
         # T1140 — Deobfuscate/Decode Files or Information (we base64-encode
         # the payload before piping it through ``base64 -d >> ~/.bashrc``
         # to dodge sliver ``execute``'s shell-quoting quirks).
-        # T1078 — Valid Accounts (the captured credential will be reused
+        # T1078.003 — Valid Accounts: Local Accounts (the captured credential will be reused
         # by the admin's own identity to land root in a follow-up step).
-        "techniques": ["T1546.004", "T1140", "T1078"],
+        "techniques": ["T1546.004", "T1140", "T1078.003"],
+        "color": "green",
+    },
+    "advanced_exfiltration": {
+        "tactic": "TA0010 · Exfiltration",
+        # T1041 — Exfiltration Over C2 Channel (HTTP POST to kali receiver).
+        # T1567 — Exfiltration Over Web Service (one-shot HTTP server).
+        "techniques": ["T1041", "T1567"],
+        "color": "cyan",
+    },
+    "advanced_cleanup_backdoor": {
+        "tactic": "TA0005 · Defense Evasion · TA0003 · Persistence",
+        # Defense Evasion family:
+        # T1485     — Data Destruction (shred + free-space wipe on /tmp).
+        # T1070.002 — Clear Linux/Mac System Logs (SELECTIVE grep-out, not
+        #             truncation — the basic chain does truncation; advanced
+        #             intentionally avoids that fingerprint).
+        # T1070.003 — Clear Command History (ROTATION with believable
+        #             vinzenz commands rather than deletion — empty history
+        #             is itself a tell).
+        # T1070.004 — File Deletion (shred of staged artefacts).
+        # T1565.001 — Stored Data Manipulation (false-flag artefacts:
+        #             Lazarus AppleJeus magic header on apache, APT28
+        #             Cyrillic taunt on vinzenz_ws, FIN7 Cobalt-Strike-
+        #             profile staging script — misdirect attribution).
+        # Persistence family:
+        # T1098.004 — Account Manipulation: SSH Authorized Keys (extra
+        #             entry in vinzenz.fedora's authorized_keys masquerading
+        #             as ansible-deploy@cm-prod).
+        "techniques": ["T1485", "T1070.002", "T1070.003", "T1070.004",
+                       "T1565.001", "T1098.004"],
+        "color": "red",
+    },
+    "advanced_restoration": {
+        "tactic": "TA0040 · Impact (Recovery)",
+        "techniques": ["T1490", "T1491.001"],
         "color": "green",
     },
 }
@@ -537,6 +572,61 @@ def _step_advanced_vinzenzws_privesc(ctx: Context) -> dict[str, Any]:
     }
 
 
+def _step_advanced_exfiltration(ctx: Context) -> dict[str, Any]:
+    from advanced_exfiltration import run as exfil_run
+
+    result = exfil_run(
+        root_sliver_session=ctx.state["root_sliver_session"],
+        vinzenz_beacon=ctx.state.get("vinzenz_beacon"),
+        results_dir=ctx.results_dir,
+    )
+    if not result.get("exfil_success"):
+        raise RuntimeError("Advanced DB exfiltration failed")
+    return result
+
+
+def _step_advanced_cleanup_backdoor(ctx: Context) -> dict[str, Any]:
+    """Final stealth-cleanup + backdoor step of the advanced chain.
+
+    Runs after exfiltration (PR #153). Reads the captured admin password
+    from vinzenz_ws, removes the loud persistence stagers, plants three
+    diverse stealth backdoors (apache cron + vinzenz_ws systemd timer +
+    vinzenz_ws SSH key), drops false-flag artefacts, selectively scrubs
+    the logs the attacker can reach, dilutes the ones they cannot
+    (postgres + NFLOG via volume noise), and secure-wipes the staged
+    artefacts. See advanced_cleanup_backdoor.py module docstring.
+
+    ``exfil_success`` is a soft prerequisite — we warn if it's False but
+    still run, because cleanup-after-failed-exfil is also a valid
+    operator choice (revert + retry the chain).
+    """
+    from advanced_cleanup_backdoor import run as cleanup_run
+
+    if not ctx.state.get("exfil_success"):
+        log.warning("[!] advanced_cleanup_backdoor: exfil_success absent/False — "
+                    "running cleanup anyway (operator may prefer to abort)")
+
+    return cleanup_run(
+        root_sliver_session   = ctx.state["root_sliver_session"],
+        vinzenz_beacon        = ctx.state["vinzenz_beacon"],
+        vinzenz_password_file = ctx.state.get("vinzenz_password_file",
+                                              "/tmp/.sys_update.lock"),
+        kali_host             = ctx.kali_host,
+    )
+
+
+def _step_advanced_restoration(ctx: Context) -> dict[str, Any]:
+    from advanced_restoration import run as restore_run
+
+    result = restore_run(
+        root_sliver_session=ctx.state["root_sliver_session"],
+        vinzenz_beacon=ctx.state.get("vinzenz_beacon"),
+        results_dir=ctx.results_dir,
+    )
+    # restore_success=False means user chose N — not a chain error
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Chain definition
 # ---------------------------------------------------------------------------
@@ -628,6 +718,23 @@ CHAIN_ADVANCED: list[Step] = [
         "advanced_vinzenzws_privesc",
         _step_advanced_vinzenzws_privesc,
         requires=("vinzenz_beacon",),
+    ),
+    Step(
+        "advanced_exfiltration",
+        _step_advanced_exfiltration,
+        requires=("root_sliver_session", "vinzenz_beacon"),
+    ),
+    Step(
+        "advanced_cleanup_backdoor",
+        _step_advanced_cleanup_backdoor,
+        requires=("root_sliver_session", "vinzenz_beacon"),
+        optional=True,
+    ),
+    Step(
+        "advanced_restoration",
+        _step_advanced_restoration,
+        requires=("root_sliver_session", "vinzenz_beacon"),
+        optional=True,
     ),
 ]
 
@@ -774,6 +881,15 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                     elapsed = time.perf_counter() - t0
                     ended = _iso_utc()
                     _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
+                    if isinstance(exc, ModuleNotFoundError):
+                        console.print(Panel(
+                            "[bold]A Python dependency is missing from the container image.[/bold]\n\n"
+                            "Rebuild and re-run:\n\n"
+                            f"  [bold cyan]tools/run.sh --build --mode {ctx.mode}[/bold cyan]",
+                            title="[bold yellow]⚠  Stale image[/bold yellow]",
+                            border_style="yellow",
+                            padding=(1, 4),
+                        ))
                     attacklog.end_phase(step.name, ok, elapsed, ended)
                     results.append(_result_entry(step, ok=ok, started=started,
                                                  ended=ended, elapsed=elapsed,

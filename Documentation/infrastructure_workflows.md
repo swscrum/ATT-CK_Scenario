@@ -149,7 +149,7 @@ managed."
 - Failed-reach command noise (incl. hosts not in the current fleet) — `ubuntu_workstation/john_home/.bash_history:65-71`
 
 *Why realistic:* the denied attempts are themselves a SOC signal (failed
-`T1021.004` / `T1078`), and the stale config entries model how access notes
+`T1021.004` / `T1078.003`), and the stale config entries model how access notes
 accumulate.
 
 ### 3.2 Luke Smith

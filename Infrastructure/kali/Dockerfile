@@ -23,6 +23,7 @@ RUN echo 'deb http://kali.download/kali kali-rolling main contrib non-free non-f
     python3 \
     python3-requests \
     python3-rich \
+    python3-psycopg2 \
     sliver \
     netexec \
     git \
