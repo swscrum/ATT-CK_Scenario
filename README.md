@@ -77,7 +77,8 @@ The Kali container ships with `nmap`, `gobuster`, `ffuf`, `nikto`, `python3`, `s
 # Option 1)
 #Automated Orchestration of all phases and automated cleanup:
 tools/run.sh                       # defaults to --mode basic
-tools/run.sh --mode advanced       # stealthier variant (placeholder, mirrors basic for now)
+tools/run.sh --mode advanced       # stealthier APT-style variant (fileless Sliver C2,
+                                   # sysadmin pivot to vinzenz_ws, in-place DB encryption + restore)
 tools/run.sh --build               # rebuild images first — use after a `git pull`
                                    # that changed a Dockerfile or seeded file
 
