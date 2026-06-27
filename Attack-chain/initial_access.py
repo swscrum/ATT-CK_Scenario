@@ -11,7 +11,7 @@ from chainlog import log
 # production environment (apache redirects normal browser traffic 80 → 443),
 # the only plain-HTTP requests apache receives are bots, scanners, and the
 # attacker's CGI probe — a high-signal indicator a SOC can train on. The
-# CVE-2021-41773 path-traversal works identically over either transport;
+# CVE-2021-42013 path-traversal works identically over either transport;
 # choosing HTTP keeps the attacker visibly distinct from the noise/activity
 # baselines which all run over TLS.
 
@@ -55,7 +55,7 @@ def _send_request(host, port, request):
 
 
 def fire_exploit(target_url, lhost, lport, attempt_delay=0):
-    """Probe the Apache RCE (CVE-2021-41773) via raw TCP sockets.
+    """Probe the Apache RCE (CVE-2021-42013) via raw TCP sockets.
 
     Before the working request, a handful of plausible-but-failing variants are
     sent to mimic an attacker fine-tuning the exploit. Each one reaches the

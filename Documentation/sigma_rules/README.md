@@ -10,7 +10,7 @@ alerts firing during a `--pacing realistic` run.
 
 | Rule | MITRE | Source log | Confidence |
 |---|---|---|---|
-| `apache_cve_2021_41773_traversal.yml` | T1190 | apache access.log | high (URL pattern is unmistakable) |
+| `apache_cve_2021_42013_traversal.yml` | T1190 | apache access.log | high (URL pattern is unmistakable) |
 | `lab_fim_cleanup_sh_modified.yml` | T1053.003 | apache lab-fim.log | high (cleanup.sh modified by anyone but the sysadmin process == foul play) |
 | `sshd_failed_password_burst.yml` | T1110.004 | workstation/luke_ws/vinzenz_ws auth.log | medium (same-src 3+ failures in 60s) |
 | `sshd_lateral_via_apache.yml` | T1021.004 | workstation auth.log + router NFLOG | high (apache should not SSH to the workstation in normal ops) |

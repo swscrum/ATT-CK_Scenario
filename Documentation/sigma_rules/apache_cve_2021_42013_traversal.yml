@@ -1,12 +1,15 @@
-title: T1190 — CVE-2021-41773 Path Traversal Exploitation Against Apache
-id: 8d8d4f1a-3f71-4d36-9e72-cve41773-waystar-01
+title: T1190 — CVE-2021-42013 Path Traversal Exploitation Against Apache
+id: 8d8d4f1a-3f71-4d36-9e72-cve42013-waystar-01
 status: experimental
 description: |
-  Detects exploitation attempts of CVE-2021-41773 against Apache 2.4.49/2.4.50.
-  The path-traversal pattern uses URL-encoded `.%2e` (or double-encoded
-  `.%32%65`) segments inside `/cgi-bin/` to escape the cgi-bin directory and
-  reach `/bin/sh` (or any other binary). A POST with this pattern that returns
-  200 means a shell ran.
+  Detects exploitation attempts of CVE-2021-42013 (the double-encoding bypass
+  of the incomplete CVE-2021-41773 patch) against Apache 2.4.49/2.4.50.
+  The path-traversal pattern uses URL-encoded `.%2e` (the original,
+  single-encoded CVE-2021-41773 pattern) or double-encoded `.%32%65`
+  (the CVE-2021-42013 bypass that actually succeeds in this lab) segments
+  inside `/cgi-bin/` to escape the cgi-bin directory and reach `/bin/sh`
+  (or any other binary). A POST with this pattern that returns 200 means
+  a shell ran.
 
   In the lab the attacker sends three plausible-but-failing variants before
   the working POST payload (initial_access.py:fire_exploit), so a real chain
@@ -21,13 +24,15 @@ description: |
   plain-HTTP access log is sufficient to fire the rule, and the absence
   of any matching `access_ssl.log` entry is itself confirmatory.
 references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-42013
   - https://nvd.nist.gov/vuln/detail/CVE-2021-41773
-  - Documentation/mappings.md — row "T1190 (CVE-2021-41773)"
+  - Documentation/mappings.md — row "T1190 (CVE-2021-42013)"
 author: Waystar lab
 date: 2026-05-31
 tags:
   - attack.initial_access
   - attack.t1190
+  - cve.2021.42013
   - cve.2021.41773
 logsource:
   category: webserver

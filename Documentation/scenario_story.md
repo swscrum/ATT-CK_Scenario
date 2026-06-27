@@ -40,7 +40,7 @@ Hired post-breach to draft and shepherd the turnaround. They are not directly re
 
 Solo frontend specialist. Hired to build Waystar Connect's web presence end-to-end. Waystar has historically not needed an in-house dev team and doesn't have one to back him up. His response under pressure:
 
-- Reaches for a familiar Docker base image — Apache 2.4.50, the version that ships CVE-2021-41773. He's a frontend specialist; infrastructure auditing isn't his strength and nobody in his contract chain is positioned to ask the right question.
+- Reaches for a familiar Docker base image — Apache 2.4.50, the version that ships CVE-2021-42013. He's a frontend specialist; infrastructure auditing isn't his strength and nobody in his contract chain is positioned to ask the right question.
 - "Vibecodes" the bulk of the rest with AI assistance. Output ships without review.
 - Sets the scheduled-maintenance script `/opt/cleanup.sh` to `chmod 777` while debugging a permissions issue. Plans to revert before go-live, gets pulled into the timeline cut, never reverts. The TODO comment he left in the script ("set back to 700 before go-live") is still there, exactly as written.
 - Uses a Linux workstation provisioned for him by IT with throwaway credentials (`labuser` / `labpass` initially, later `john.stravidis` / `waystar2026!`) that were meant to be rotated before go-live — never were.
@@ -104,7 +104,7 @@ The eventual end-state for the lab is **exfiltration plus ransomware** (parked f
 
 | Lab artifact | What it is in the story |
 |---|---|
-| Apache 2.4.50 (vulnerable to CVE-2021-41773) | Stravidis's go-to Docker base image, never audited under time pressure |
+| Apache 2.4.50 (vulnerable to CVE-2021-42013) | Stravidis's go-to Docker base image, never audited under time pressure |
 | `/opt/cleanup.sh` set to `chmod 777` with the TODO comment | Literal artifact of Stravidis's debugging session — the in-script TODO already says exactly this |
 | Ubuntu workstation on the internal network | Dev/staging box Stravidis used during the project, sitting on Waystar's in-progress Linux fleet |
 | `labuser` / `labpass` SSH credentials | The transition team's interim credentials — meant to be rotated, never were |

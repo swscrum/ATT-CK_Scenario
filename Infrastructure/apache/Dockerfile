@@ -1,4 +1,4 @@
-# Base image ships the vulnerable Apache version (CVE-2021-41773).
+# Base image ships the vulnerable Apache version (CVE-2021-42013).
 FROM httpd:2.4.50
 
 # Debian Buster is end of life — `apt update` doesn't work against the live
@@ -31,7 +31,7 @@ RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive
 #  app's UID. He thought the capability applied only to the CGI script; in
 #  reality file capabilities are per-binary, so EVERY invocation of
 #  /usr/bin/python3 (by any user) silently gets cap_setuid+ep. A www-data
-#  shell from CVE-2021-41773 can call os.setuid(0) and become root without
+#  shell from CVE-2021-42013 can call os.setuid(0) and become root without
 #  touching cron, sudo, or any SUID bit — and without writing to any path
 #  the lab FIM is currently watching.
 #
@@ -43,14 +43,14 @@ RUN setcap cap_setuid,cap_setgid+ep "$(readlink -f /usr/bin/python3)" \
     && getcap "$(readlink -f /usr/bin/python3)"
 
 # Building Apache 2.4.49 ourselves would also work, but using the upstream
-# httpd:2.4.50 image is faster and equally vulnerable to CVE-2021-41773.
+# httpd:2.4.50 image is faster and equally vulnerable (to CVE-2021-42013).
 
 # ============================================================================
 #  MISCONFIGURATION — MITRE ATT&CK T1053.003 (Cron)
 # ----------------------------------------------------------------------------
 #  /opt/cleanup.sh is run by root cron every minute AND is world-writable
 #  (chmod 777). Any user inside the container — including www-data, which is
-#  the result of the CVE-2021-41773 exploit — can overwrite the script and
+#  the result of the CVE-2021-42013 exploit — can overwrite the script and
 #  have arbitrary code executed as root within ~60 seconds.
 # ============================================================================
 
@@ -96,7 +96,7 @@ RUN chown -R john.stravidis:john.stravidis /home/john.stravidis \
 #  cgi-bin/book.py to insert into the appointments table on db-internal.
 #  File is mode 0640 (root:www-data) — readable by the Apache worker, not
 #  world-readable. NOTE: an attacker who lands a www-data shell via
-#  CVE-2021-41773 can still read it, which is the intended scenario surface.
+#  CVE-2021-42013 can still read it, which is the intended scenario surface.
 # ============================================================================
 RUN mkdir -p /etc/waystar \
     && printf 'PGHOST=db-internal\nPGPORT=5432\nPGDATABASE=waystar\nPGUSER=waystar-app\nPGPASSWORD=AppBooking!2026\n' \

@@ -12,7 +12,7 @@
                 ],
                 [
                     "description",
-                    "The Waystar Royco Basic Scenario is a full seven-phase kill\n  chain that begins by exploiting CVE-2021-41773, an Apache httpd\n  2.4.49 path-traversal flaw that grants remote code execution\n  via mod_cgi on the internet-facing web server. After landing a\n  reverse shell, the attacker abuses a world-writable root cron\n  script (/opt/cleanup.sh) to escalate to root, harvests reused\n  credentials to move laterally onto an internal workstation, and\n  finishes by exfiltrating the Waystar patient database over\n  plain HTTP before wiping logs to cover its tracks."
+                    "The Waystar Royco Basic Scenario is a full seven-phase kill\n  chain that begins by exploiting CVE-2021-42013, an Apache httpd\n  2.4.50 double-URL-encoded path-traversal bypass that grants remote\n  code execution via mod_cgi on the internet-facing web server. After landing a\n  reverse shell, the attacker abuses a world-writable root cron\n  script (/opt/cleanup.sh) to escalate to root, harvests reused\n  credentials to move laterally onto an internal workstation, and\n  finishes by exfiltrating the Waystar patient database over\n  plain HTTP before wiping logs to cover its tracks."
                 ],
                 [
                     "author",
@@ -1875,7 +1875,7 @@
                 ],
                 [
                     "description",
-                    "CVE-2021-41773 path traversal against httpd 2.4.49 + mod_cgi"
+                    "CVE-2021-42013 double-encoded path traversal against httpd 2.4.50 + mod_cgi"
                 ],
                 [
                     "confidence",
@@ -5867,11 +5867,11 @@
             "properties": [
                 [
                     "name",
-                    "CVE-2021-41773"
+                    "CVE-2021-42013"
                 ],
                 [
                     "description",
-                    "Apache httpd 2.4.49 path traversal -> mod_cgi RCE"
+                    "Apache httpd 2.4.50 double-encoded path traversal -> mod_cgi RCE"
                 ]
             ],
             "anchors": {

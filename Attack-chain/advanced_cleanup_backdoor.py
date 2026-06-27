@@ -296,7 +296,7 @@ def _phase2_drop_false_flags(root_sliver_session: str,
 # Phase 3 — Selective log scrubbing (selective grep-out, NEVER truncate)
 # =============================================================================
 
-# Patterns to grep -v OUT of apache logs — CVE-2021-41773 fingerprint, kali src
+# Patterns to grep -v OUT of apache logs — CVE-2021-42013 fingerprint, kali src
 # IP, our custom UAs. Other access.log lines (workstation noise, healthcheck
 # hits) are preserved so the log doesn't suddenly look fresh.
 _APACHE_LOG_PATTERNS = "|".join([

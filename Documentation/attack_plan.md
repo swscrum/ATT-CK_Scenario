@@ -46,7 +46,7 @@ What advanced adds for the SOC trainee: the **sysadmin-key-theft** detection bea
 |---|---|---|
 | Recon | (existing) external scanning | T1592, T1595 |
 | Recon | post-foothold network scan | T1018, T1046 |
-| Initial Access | (existing) CVE-2021-41773 | T1190 |
+| Initial Access | (existing) CVE-2021-42013 | T1190 |
 | Execution | (existing) reverse shell | T1059.004 |
 | Privilege Escalation | (existing) cron + chmod 777 | T1053.003 |
 | Credential Access | deploy creds in files on apache | T1552.001 |
@@ -82,7 +82,7 @@ sequenceDiagram
     participant S as Sysadmin WS
 
     Note over Att,Web: Group A — Public-facing entry (already implemented)
-    Att->>Web: 1. CVE-2021-41773 path traversal
+    Att->>Web: 1. CVE-2021-42013 path traversal
     Web-->>Att: www-data reverse shell
     Att->>Web: 2. Overwrite chmod-777 /opt/cleanup.sh
     Web-->>Att: root shell via cron
@@ -131,7 +131,7 @@ sequenceDiagram
 
 ### Group A — Public-facing entry *(already implemented)*
 
-#### Phase 1 — Initial Access via CVE-2021-41773
+#### Phase 1 — Initial Access via CVE-2021-42013
 
 Status: ✓ implemented in `Attack-chain/initial_access.py`.
 - Attacker sends double-encoded path-traversal POST to `http://router/cgi-bin/.%32%65/.../bin/sh` containing a bash reverse-shell payload.
@@ -369,7 +369,7 @@ Allowed flows (everything else dropped by `FORWARD` policy):
 
 | From → To | Ports | Use |
 |---|---|---|
-| External → DMZ | tcp 80 (via DNAT) | the CVE-2021-41773 entry path |
+| External → DMZ | tcp 80 (via DNAT) | the CVE-2021-42013 entry path |
 | DMZ → External | any | apache's reverse shells dial back to kali :4444 / :5555 |
 | DMZ → Internal | tcp 22 | Phase 4 lateral SSH (apache → john.stravidis) — **now loggable** |
 | Internal → DMZ | tcp 22 | deploy path (john pushing back to apache) |
