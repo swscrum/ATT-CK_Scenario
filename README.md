@@ -21,7 +21,7 @@ ssh labuser@<ubuntu_workstation-IP>
 | Container | Image | Network | Purpose |
 |---|---|---|---|
 | `router` | Ubuntu 22.04 | `public_net` + `dmz_net` + `internal_net` | Edge router; forwards port 80 to apache |
-| `apache` | httpd:2.4.50 (vulnerable) | `dmz_net` | Waystar Connect webserver; CVE-2021-41773 target |
+| `apache` | httpd:2.4.50 (vulnerable) | `dmz_net` | Waystar Connect webserver; CVE-2021-42013 target |
 | `ubuntu_workstation` | Ubuntu 24.04 | `internal_net` | John Stravidis's dev workstation (VNC on port 5901) |
 | `luke_ws` | Ubuntu 24.04 | `internal_net` | Luke Smith's workstation (psychiatrist, 10.30.0.7); read-only patient-DB client |
 | `vinzenz_ws` | Ubuntu 24.04 | `internal_net` | Vinzenz Fedora's sysadmin workstation (10.30.0.8); cross-fleet SSH reach + superuser DB credentials |
@@ -115,7 +115,7 @@ host-persisted log (`Infrastructure/logs/`), with the MITRE ATT&CK IDs.
 | Phase | Attacker | Defender log | ATT&CK |
 |---|---|---|---|
 | `recon` | scan/fuzz Kali → apache:80 | `logs/apache/{access,error,forensic_log}` (404 probe flood) | T1595, T1592 |
-| `exploit` | CVE-2021-41773 traversal + www-data reverse shell | `logs/apache/access.log` (`cgi-bin/.%32%65/…/bin/sh` URI) | T1190, T1059.004 |
+| `exploit` | CVE-2021-42013 traversal + www-data reverse shell | `logs/apache/access.log` (`cgi-bin/.%32%65/…/bin/sh` URI) | T1190, T1059.004 |
 | `lateral` | SSH cred-stuffing apache → workstations | `logs/{luke_ws,vinzenz_ws}/auth.log` (`Failed password for john.stravidis`) | T1110.004, T1021.004, T1078.003, T1046 |
 | `exfiltrate` | `pg_dump` as `waystar-readonly` → Kali | `logs/db/postgresql-*.log` (connection + `SELECT`/`COPY`, `log_statement=all`) | T1213, T1048.003, T1552.001 |
 | `cleanup` | truncate apache logs, clear history | `logs/apache/*.log` (truncation visible on persisted files) | T1070, T1070.003 |

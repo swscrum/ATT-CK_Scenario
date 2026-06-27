@@ -12,7 +12,7 @@
                 ],
                 [
                     "description",
-                    "The Waystar Royco Advanced Scenario is an APT-paced kill chain that gains a foothold by\n  exploiting CVE-2021-41773, an Apache httpd 2.4.49 path-traversal flaw that yields remote code\n  execution via mod_cgi, then reflectively loads an in-memory Sliver implant that beacons out\n  over HTTPS C2. After escalating to root through a cap_setuid binary and planting a\n  health_check.cgi web shell for resilient re-entry, the operator pivots to the sysadmin\n  workstation vinzenz_ws by hijacking a forwarded SSH-agent session under cover of an\n  application-exhaustion DoS, and phishes root by appending a malicious sudo() function to the\n  admin's ~/.bashrc. It then exfiltrates the Waystar patient database over the Sliver C2 channel\n  and performs selective, low-signature cleanup — grep-filtered logs, rotated command history,\n  false-flag artefacts, and an authorized_keys backdoor — before ransomware-style impact and an\n  optional restoration phase, with long dwell times throughout to emulate a patient, targeted\n  adversary."
+                    "The Waystar Royco Advanced Scenario is an APT-paced kill chain that gains a foothold by\n  exploiting CVE-2021-42013, an Apache httpd 2.4.50 double-URL-encoded path-traversal bypass\n  that yields remote code execution via mod_cgi, then reflectively loads an in-memory Sliver implant that beacons out\n  over HTTPS C2. After escalating to root through a cap_setuid binary and planting a\n  health_check.cgi web shell for resilient re-entry, the operator pivots to the sysadmin\n  workstation vinzenz_ws by hijacking a forwarded SSH-agent session under cover of an\n  application-exhaustion DoS, and phishes root by appending a malicious sudo() function to the\n  admin's ~/.bashrc. It then exfiltrates the Waystar patient database over the Sliver C2 channel\n  and performs selective, low-signature cleanup — grep-filtered logs, rotated command history,\n  false-flag artefacts, and an authorized_keys backdoor — before ransomware-style impact and an\n  optional restoration phase, with long dwell times throughout to emulate a patient, targeted\n  adversary."
                 ],
                 [
                     "author",
@@ -2100,7 +2100,7 @@
                 ],
                 [
                     "description",
-                    "CVE-2021-41773 path traversal against httpd 2.4.49 + mod_cgi"
+                    "CVE-2021-42013 double-encoded path traversal against httpd 2.4.50 + mod_cgi"
                 ],
                 [
                     "confidence",
@@ -6877,11 +6877,11 @@
             "properties": [
                 [
                     "name",
-                    "CVE-2021-41773"
+                    "CVE-2021-42013"
                 ],
                 [
                     "description",
-                    "Apache httpd 2.4.49 path traversal -> mod_cgi RCE"
+                    "Apache httpd 2.4.50 double-encoded path traversal -> mod_cgi RCE"
                 ]
             ],
             "anchors": {

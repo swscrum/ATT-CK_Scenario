@@ -33,7 +33,7 @@ findings:
     technique: T1190
     detected_at: 2026-05-31T10:30:56Z
     evidence: "apache/access.diurnal.log:1234 — POST /cgi-bin/.%32%65/.../bin/sh"
-    notes: "CVE-2021-41773 path traversal, double-URL-encoded; 200 response means the shell ran."
+    notes: "CVE-2021-42013 path traversal, double-URL-encoded; 200 response means the shell ran."
     severity: critical
     confidence: high
     containment: "Patch Apache to ≥2.4.51; block the URL pattern at the WAF."

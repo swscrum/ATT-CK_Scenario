@@ -207,7 +207,7 @@ Advanced mode has no `defense_evasion` step. `advanced_restoration` is optional 
 
 | Path | Format | Ingest for |
 |---|---|---|
-| `Infrastructure/logs/apache/access.log`, `error.log`, `forensic_log` | Apache combined / error / forensic | `recon` (404 probe noise), `exploit` (CVE-2021-41773 traversal URI — T1190); `forensic_log` pairs `+id`/`-id` per request and captures truncated/aborted requests that never get a normal `access.log` line (useful for failed CVE-2021-41773 attempts) |
+| `Infrastructure/logs/apache/access.log`, `error.log`, `forensic_log` | Apache combined / error / forensic | `recon` (404 probe noise), `exploit` (CVE-2021-42013 traversal URI — T1190); `forensic_log` pairs `+id`/`-id` per request and captures truncated/aborted requests that never get a normal `access.log` line (useful for failed CVE-2021-41773 attempts) |
 | `Infrastructure/logs/workstation/auth.log` | rsyslog ISO; sshd default `INFO` on `ubuntu_workstation` (no key fingerprint) | `Accepted publickey` for `john.stravidis` on `ubuntu_workstation` (T1021.004) |
 | `Infrastructure/logs/luke_ws/auth.log`, `Infrastructure/logs/vinzenz_ws/auth.log` | rsyslog ISO; sshd `LogLevel VERBOSE` on `luke_ws` and `vinzenz_ws` (key fingerprint logged) | `Failed password` entries from the `lateral` credential-stuffing pass (T1110.004) |
 | `Infrastructure/logs/db/postgresql-YYYY-MM-DD.log` | Postgres, `log_statement=all`, prefix `%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h` | every connect/disconnect and query against `waystar`, including the `pg_dump` exfil (T1213, T1041) |

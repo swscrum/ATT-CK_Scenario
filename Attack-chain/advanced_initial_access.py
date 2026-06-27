@@ -19,7 +19,7 @@ from chainlog import log
 #   T1071.001 – Application Layer Protocol: Web Protocols  (Sliver HTTP C2)
 # -----------------------------------------------------------------------------
 # Drops two in-memory Sliver implants on the apache target via a Base64-
-# encoded Python loader delivered through CVE-2021-41773 path-traversal RCE:
+# encoded Python loader delivered through CVE-2021-42013 path-traversal RCE:
 #   * Session implant — real-time, used for interactive enumeration / upload
 #   * Beacon implant  — 5-second async check-in, used for long-running tasks
 # Both implants are anonymous file descriptors (memfd_create) and process-
@@ -117,7 +117,7 @@ def ensure_sliver_listener():
     Cold-daemon gRPC handshake on :31337 can take 12-20 s after
     ``sliver-server daemon`` boots, so the original 10 s subprocess
     timeout was firing routinely and the exception was treated as
-    non-fatal: the chain advanced, sent the CVE-2021-41773 exploit,
+    non-fatal: the chain advanced, sent the CVE-2021-42013 exploit,
     and then polled fruitlessly for 14 × 5 s before failing with the
     misleading "no Sliver session/beacon" error.
 

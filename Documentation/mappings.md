@@ -9,7 +9,7 @@ Phase numbering matches `attack_plan.md`.
 | **Reconnaissance** | Pre-foothold: existing `initial_recon_1.py` (nmap, gobuster, ffuf, nikto). Post-foothold: phases 6, 8, 10. |
 | **Weaponization** | Mostly attacker-side and not modelled in the lab. The variant-walk addition to phase 1 (per 2026-04-27 protocol) gives a *visible* weaponization beat. |
 | **Delivery** | Phases 1, 11 (HTTP traversal payload; spearphishing attachment). |
-| **Exploitation** | Phase 1 (CVE-2021-41773), phase 11 (attachment execution). |
+| **Exploitation** | Phase 1 (CVE-2021-42013), phase 11 (attachment execution). |
 | **Installation** | Phase 5 (persistence + encrypted C2 tunnel — the real Kill Chain phase 5 the lab currently skips). |
 | **Command & Control** | Phase 5 establishes the tunnel; subsequent phases ride it. |
 | **Actions on Objectives** | Phases 13–15 (Collection, Exfiltration, Impact). |
@@ -24,7 +24,7 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 
 | Phase | Technique | Where it bites |
 |---|---|---|
-| 1 | [T1190](https://attack.mitre.org/techniques/T1190/) Exploit Public-Facing Application | CVE-2021-41773 path traversal |
+| 1 | [T1190](https://attack.mitre.org/techniques/T1190/) Exploit Public-Facing Application | CVE-2021-42013 path traversal |
 | 1 | [T1059.004](https://attack.mitre.org/techniques/T1059/004/) Command and Scripting Interpreter: Unix Shell | bash reverse shell payload |
 | 2 | [T1053.003](https://attack.mitre.org/techniques/T1053/003/) Scheduled Task/Job: Cron | overwriting `/opt/cleanup.sh` so the root cron runs the attacker's payload |
 | 2 | [T1068](https://attack.mitre.org/techniques/T1068/) Exploitation for Privilege Escalation | the chmod-777-cron-as-root chain itself |
@@ -103,7 +103,7 @@ For SOC training and customer SIEM/EDR demos, what *should* fire on each techniq
 
 | Technique(s) | Detection source | Signature / behaviour | Lab log path (PR #58) |
 |---|---|---|---|
-| T1190 (CVE-2021-41773) | Apache access log + NIDS | URL pattern `cgi-bin/.%32%65/.../bin/sh` is unmistakeable; ETOPEN Suricata rules ship for this CVE | `logs/apache/access.log`, `logs/apache/forensic_log`; router NFLOG `FW-NEW: SRC=10.10.0.2 DST=10.40.0.2 DPT=80` in `logs/router/ulog-iptables.log` |
+| T1190 (CVE-2021-42013) | Apache access log + NIDS | URL pattern `cgi-bin/.%32%65/.../bin/sh` is unmistakeable; ETOPEN Suricata rules ship for this CVE | `logs/apache/access.log`, `logs/apache/forensic_log`; router NFLOG `FW-NEW: SRC=10.10.0.2 DST=10.40.0.2 DPT=80` in `logs/router/ulog-iptables.log` |
 | T1059.004 reverse-shell payload | EDR (auditd execve) | `bash -i >& /dev/tcp/...` is a textbook signature | router NFLOG `FW-NEW: SRC=10.40.0.2 DST=10.10.0.2 DPT={4444,5555}` in `logs/router/ulog-iptables.log` (apache calling back to kali) |
 | T1053.003 cron discovery + tampering | auditd file watch on `/opt/cleanup.sh`; cron logs | discovery: `cat /etc/crontab`, `ls -la /etc/cron.*/`, `crontab -l`, `ls /etc/cron.d/` — all silent (bash history suppressed by the chain, no lab-fim watch on these paths); tampering: content change of `/opt/cleanup.sh`, run as root every minute, fires lab-fim | `/var/log/lab-fim.log` line `tag=lab_fim path=/opt/cleanup.sh event=MODIFY` (inside the apache container; inotify substitute for auditd — see implementation note below) |
 | T1552.001 / .004 credential discovery | auditd file watch on `/root/.ssh/`, `/opt/waystar-connect/`; scenario log | unusual reads from www-data / root after foothold; **noise searches** for `passwords.txt`, `secrets.json`, `config.backup`, `credentials.txt`, `.passwd`, `db_password.txt` across `/home /root /tmp /var/www /opt /etc` appear in the scenario log and apache shell history before the real `.env` read — six `find` commands all returning empty, making the attacker's file-hunting visible to defenders | scenario log (`[-] '…' not found in …` lines from `_search_noise_files`); apache shell history (bash stores the `find` commands); lab-fim does not trigger (no matching watch path) |

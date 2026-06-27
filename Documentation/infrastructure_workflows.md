@@ -35,7 +35,7 @@ artefact *origins* without being attack targets:
 | Container | Network(s) | IP(s) | Role | Who touches it |
 |---|---|---|---|---|
 | `router` | public / dmz / internal | 10.10.0.3 / 10.40.0.4 / 10.30.0.4 | Zone-crossing iptables router | Vinzenz (config), attacker (transit) |
-| `apache` | dmz | 10.40.0.2 | Waystar Connect webserver (CVE-2021-41773) | John (deploys), `www-data` (CGI), Vinzenz (fleet), Luke (note backups) |
+| `apache` | dmz | 10.40.0.2 | Waystar Connect webserver (CVE-2021-42013) | John (deploys), `www-data` (CGI), Vinzenz (fleet), Luke (note backups) |
 | `ubuntu_workstation` | internal | 10.30.0.5 | John's dev/staging box | John (daily), Vinzenz (fleet) |
 | `luke_ws` | internal | 10.30.0.7 | Luke's clinical box | Luke (daily), Vinzenz (fleet) |
 | `vinzenz_ws` | internal | 10.30.0.8 | Sysadmin master box | Vinzenz (exclusive) |

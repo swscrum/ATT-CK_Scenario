@@ -80,7 +80,7 @@ if [ -n "$APACHE_IP" ] && [ -n "$INTERNAL_IF" ] && [ -n "$DMZ_IF" ] && [ -n "$PU
     iptables -P FORWARD DROP
     iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
-    # External → DMZ: the CVE-2021-41773 attack path. HTTP for legacy
+    # External → DMZ: the CVE-2021-42013 attack path. HTTP for legacy
     # clients (apache redirects to HTTPS for non-cgi-bin paths), HTTPS
     # for the production-realistic transport. Both terminate at apache.
     iptables -A FORWARD -i $PUBLIC_IF   -o $DMZ_IF      -p tcp -d $APACHE_IP --dport 80  -j ACCEPT

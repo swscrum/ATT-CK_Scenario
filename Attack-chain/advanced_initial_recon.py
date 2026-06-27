@@ -4,7 +4,7 @@
 Replaces the loud ``initial_recon_1.py`` (nmap full-scan + gobuster + ffuf +
 nikto) with an APT-style minimal probe: three HTTP requests that confirm the
 Apache banner and the presence of ``mod_cgi`` -- the only two facts the
-attacker actually needs before firing the CVE-2021-41773 exploit. No port
+attacker actually needs before firing the CVE-2021-42013 exploit. No port
 sweep, no directory bruteforce, no vulnerability scanner.
 
 The narrative around the probes simulates prior OSINT (Shodan / Censys /
@@ -71,7 +71,7 @@ def _osint_narrative(target: str) -> None:
     log(f"    Shodan match     : Apache httpd / port 80 on {target}")
     log(f"    Cert transparency: waystar-royco.example -> {target}")
     log(f"    Wayback snapshot : /cgi-bin/ present in 2024-Q4 crawl")
-    log("    Conclusion       : Apache + mod_cgi, candidate for CVE-2021-41773")
+    log("    Conclusion       : Apache + mod_cgi, candidate for CVE-2021-42013")
 
 
 def phase_banner_grab(target: str) -> tuple[int, str]:

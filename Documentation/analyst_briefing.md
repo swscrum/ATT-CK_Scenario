@@ -229,7 +229,7 @@ Per-technique detection signal pointers. This is the subset of
 
 | Technique | Where to look | What to look for |
 |---|---|---|
-| **T1190** Exploit Public-Facing App (CVE-2021-41773) | `logs/apache/access.log` (plain HTTP, port 80) | Double-URL-encoded path traversal targeting `/cgi-bin/`. **The attacker uses plain HTTP — everyone else (noise containers, workstation curls, activity_sim) hits apache over HTTPS on :443.** Plain HTTP requests to `/cgi-bin/` are the high-signal anomaly in a TLS-everywhere baseline. NFLOG shows :80 flow from `SRC=10.10.0.2` (kali) to `DST=10.40.0.2` (apache); apache's `access.log` shows the URL pattern uniquely |
+| **T1190** Exploit Public-Facing App (CVE-2021-42013) | `logs/apache/access.log` (plain HTTP, port 80) | Double-URL-encoded path traversal targeting `/cgi-bin/`. **The attacker uses plain HTTP — everyone else (noise containers, workstation curls, activity_sim) hits apache over HTTPS on :443.** Plain HTTP requests to `/cgi-bin/` are the high-signal anomaly in a TLS-everywhere baseline. NFLOG shows :80 flow from `SRC=10.10.0.2` (kali) to `DST=10.40.0.2` (apache); apache's `access.log` shows the URL pattern uniquely |
 | **T1059.004** Reverse Shell | `logs/router/ulog-iptables.log` | `FW-NEW: SRC=10.40.0.2 DST=10.10.0.2 DPT=4444` — apache calling back to kali |
 | **T1053.003** Cron Tampering | `logs/apache/lab-fim.log` | `tag=lab_fim path=/opt/cleanup.sh event=MODIFY` |
 | **T1552.001** Credentials in Files | `logs/apache/lab-fim.log` + bash history | `cat /home/john.stravidis/.env` reads |

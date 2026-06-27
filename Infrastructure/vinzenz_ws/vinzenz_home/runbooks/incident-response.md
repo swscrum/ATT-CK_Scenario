@@ -21,7 +21,7 @@ Triggers worth a `notes/<date>_oncall.md` entry:
 - Unexpected `Accepted publickey for vinzenz.fedora` from a source IP that
   isn't `10.30.0.8` (my workstation)
 - Apache `error.log` showing `mod_cgi` invocations from `/cgi-bin/.%32%65/...`
-  (CVE-2021-41773 fingerprint — we are still on 2.4.50)
+  (CVE-2021-42013 fingerprint — we are still on 2.4.50)
 - Postgres `log_statement=all` entries from a client IP that isn't a
   known workstation (10.30.0.5/.7/.8 or apache 10.40.0.2)
 - Any sudo by `www-data` in `/var/log/auth.log` on apache (should never happen)
