@@ -27,13 +27,12 @@
 # ============================================================================
 FROM nginx:alpine
 
-# Cert pre-generated on the host by tools/generate-lab-ca.sh (or manually with openssl).
-# The lab CA cert is committed; server.key is gitignored (private key).
-# Regenerate with: cd Infrastructure/fake_internet/ssl && openssl req -new -newkey rsa:2048
-#   -nodes -keyout server.key -out server.csr -subj '/C=US/O=Waystar Royco/CN=lab-internet'
-#   && openssl x509 -req -in server.csr -CA ../../shared-lab-keys/lab-ca.crt
-#   -CAkey ../../shared-lab-keys/lab-ca.key -CAcreateserial -days 730
-#   -extfile <(printf 'subjectAltName=DNS:github.com,...') -out server.crt
+# server.key + server.crt are generated on the host by tools/generate-lab-ca.sh,
+# which tools/run.sh invokes before every build — so a fresh clone builds with
+# no manual step. Both are gitignored (the cert is re-derivable from the
+# committed lab CA, so it isn't tracked). The lab CA .crt is committed.
+# To regenerate by hand: delete Infrastructure/fake_internet/ssl/server.{key,crt}
+# and rerun tools/generate-lab-ca.sh.
 COPY shared-lab-keys/lab-ca.crt      /etc/nginx/ssl/lab-ca.crt
 COPY fake_internet/ssl/server.crt    /etc/nginx/ssl/server.crt
 COPY fake_internet/ssl/server.key    /etc/nginx/ssl/server.key
