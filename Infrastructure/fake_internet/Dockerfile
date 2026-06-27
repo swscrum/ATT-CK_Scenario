@@ -27,34 +27,20 @@
 # ============================================================================
 FROM nginx:alpine
 
-RUN apk add --no-cache openssl ca-certificates
+# Cert pre-generated on the host by tools/generate-lab-ca.sh (or manually with openssl).
+# The lab CA cert is committed; server.key is gitignored (private key).
+# Regenerate with: cd Infrastructure/fake_internet/ssl && openssl req -new -newkey rsa:2048
+#   -nodes -keyout server.key -out server.csr -subj '/C=US/O=Waystar Royco/CN=lab-internet'
+#   && openssl x509 -req -in server.csr -CA ../../shared-lab-keys/lab-ca.crt
+#   -CAkey ../../shared-lab-keys/lab-ca.key -CAcreateserial -days 730
+#   -extfile <(printf 'subjectAltName=DNS:github.com,...') -out server.crt
+COPY shared-lab-keys/lab-ca.crt      /etc/nginx/ssl/lab-ca.crt
+COPY fake_internet/ssl/server.crt    /etc/nginx/ssl/server.crt
+COPY fake_internet/ssl/server.key    /etc/nginx/ssl/server.key
 
-# Workstation cert chain anchors: copy the lab CA + use it to sign the
-# multi-SAN server cert. The lab CA cert is committed (public); the key
-# only lives on the dev host (see tools/generate-lab-ca.sh) and is mounted
-# into the build at build time via a build-arg-driven COPY.
-#
-# Build context is Infrastructure/ so we can reach into shared-lab-keys.
-COPY shared-lab-keys/lab-ca.crt /etc/nginx/ssl/lab-ca.crt
-COPY shared-lab-keys/lab-ca.key /etc/nginx/ssl/lab-ca.key
-
-RUN mkdir -p /etc/nginx/ssl /var/log/nginx /usr/share/nginx/html/fixtures \
-    && cd /etc/nginx/ssl \
-    && openssl req -new -newkey rsa:2048 -nodes \
-        -keyout server.key \
-        -out    server.csr \
-        -subj '/C=US/O=Waystar Royco/CN=lab-internet' \
-    && SAN='subjectAltName=DNS:archive.ubuntu.com,DNS:security.ubuntu.com,DNS:registry.npmjs.org,DNS:github.com,DNS:api.github.com,DNS:raw.githubusercontent.com,DNS:slack.com,DNS:api.slack.com,DNS:time.cloudflare.com,DNS:connectivity-check.ubuntu.com' \
-    && printf "%s\n" "$SAN" > san.ext \
-    && openssl x509 -req -in server.csr \
-        -CA lab-ca.crt -CAkey lab-ca.key -CAcreateserial \
-        -days 730 -extfile san.ext \
-        -out server.crt \
-    && chmod 600 server.key lab-ca.key \
-    && chmod 644 server.crt lab-ca.crt \
-    && rm -f server.csr san.ext lab-ca.key
-    # Delete the CA key right after signing — fake_internet never needs it
-    # again, and we don't want it sitting inside an image.
+RUN mkdir -p /var/log/nginx /usr/share/nginx/html/fixtures \
+    && chmod 600 /etc/nginx/ssl/server.key \
+    && chmod 644 /etc/nginx/ssl/server.crt /etc/nginx/ssl/lab-ca.crt
 
 COPY fake_internet/nginx.conf      /etc/nginx/nginx.conf
 COPY fake_internet/fixtures/       /usr/share/nginx/html/fixtures/
