@@ -12,7 +12,7 @@
 # work without code changes.
 set -e
 
-ip route add 10.40.0.0/24 via 10.10.0.3 2>/dev/null || true
+command -v ip >/dev/null 2>&1 && ip route add 10.40.0.0/24 via 10.10.0.3 2>/dev/null || true
 
 # Pass through to noise.py — it reads its config from env vars
 # (NOISE_ENABLED, NOISE_TARGET, NOISE_THREADS, NOISE_PROBE_PCT).

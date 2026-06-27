@@ -71,7 +71,11 @@ done
 # one but not the other.
 case "$PACING" in
     realistic) export NOISE_ENABLED=1 ACTIVITY_ENABLED=1 ;;
-    *)         export NOISE_ENABLED=0 ACTIVITY_ENABLED=0 ;;
+    fast)      export NOISE_ENABLED=0 ACTIVITY_ENABLED=0 ;;
+    *)
+        echo "[run.sh] ERROR: unknown --pacing value '${PACING}'. Valid values: fast, realistic" >&2
+        exit 1
+        ;;
 esac
 
 # Snapshot destination for this run's logs.
@@ -145,7 +149,7 @@ cleanup() {
         echo "[run.sh] tearing down lab (removes veth* and br-* interfaces)"
         docker compose down
     else
-        echo "[run.sh] --keep-up: lab still running. Tear down later with: docker compose down"
+        echo "[run.sh] --keep-up: lab still running. Tear down later with: cd Infrastructure/ && docker compose down"
         echo ""
         echo "[run.sh] analyst entry points (lab is up — verify findings live):"
         echo "  Web app          curl http://localhost:80/"
@@ -229,4 +233,11 @@ if [ "$ready" -ne 1 ]; then
     exit 1
 fi
 
-docker compose exec -T kali python3 /Attack-chain/main.py "${chain_args[@]}"
+if ! docker compose exec -T kali python3 /Attack-chain/main.py "${chain_args[@]}"; then
+    ec=$?
+    echo "" >&2
+    echo "[run.sh] ERROR: main.py exited $ec — scenario did not complete." >&2
+    [ ${#chain_args[@]} -gt 0 ] && \
+        echo "[run.sh]        args forwarded to main.py: ${chain_args[*]}" >&2
+    exit $ec
+fi

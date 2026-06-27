@@ -15,12 +15,6 @@
 # ============================================================================
 FROM python:3.12-alpine
 
-# iproute2 for `ip route add` at startup (we model an internet host whose
-# default gw points at our router). ca-certificates so urllib has a trust
-# store even though we only do HTTP today — costs almost nothing and makes
-# the image future-proof for HTTPS noise.
-RUN apk add --no-cache iproute2 ca-certificates
-
 COPY noise.py /usr/local/bin/noise.py
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /usr/local/bin/noise.py /entrypoint.sh
