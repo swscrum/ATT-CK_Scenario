@@ -191,6 +191,13 @@ cleanup() {
 trap cleanup EXIT
 
 # -------------------------------------------------------------------- run
+# Ensure the lab CA and the fake_internet server cert exist before any build.
+# Both private keys are gitignored, so a fresh clone has no server.key/.crt and
+# the fake_internet image's COPY would fail. The generator is idempotent: it
+# regenerates only what's missing and no-ops when both already exist.
+echo "[run.sh] ensuring lab CA + fake_internet cert exist..."
+../tools/generate-lab-ca.sh
+
 echo "[run.sh] ensuring lab is up..."
 if [ "$BUILD" -eq 1 ]; then
     echo "[run.sh] --build: rebuilding changed images (layer cache keeps this cheap)"
