@@ -417,31 +417,73 @@ def _list_sliver(query: str, timeout: int = 10) -> str:
         return ""
 
 
-def sliver_exec(implant_id: str, *commands: str, timeout: int = 30) -> str:
-    """Drive a Sliver implant: ``use <id>`` followed by each command, then ``exit``.
-
-    Reused by advanced_webserver_post_exploit_enum and advanced_webserver_privesc.
-    Returns the captured sliver-client stdout; caller is responsible for any
-    parsing (per-command output is interleaved without a clean delimiter).
-    """
-    rc_path = "/tmp/sliver_exec.rc"
+def _poll_beacon_task(beacon_id: str, task_id: str, max_polls: int = 60, poll_interval: int = 2) -> str | None:
+    rc_path = f"/tmp/fetch_{task_id}.rc"
     with open(rc_path, "w") as f:
-        f.write(f"use {implant_id}\n")
-        for cmd in commands:
-            f.write(f"{cmd}\n")
+        f.write(f"use {beacon_id}\n")
+        f.write(f"tasks fetch {task_id}\n")
         f.write("exit\n")
-    try:
-        res = subprocess.run(
-            ["sliver-client", "--rc", rc_path],
-            capture_output=True, text=True, timeout=timeout,
-        )
-        return res.stdout
-    except subprocess.TimeoutExpired:
-        log(f"[-] sliver_exec(use {implant_id}, …) timed out after {timeout}s")
-        return ""
-    except Exception as e:
-        log(f"[-] sliver_exec(use {implant_id}, …) failed: {e}")
-        return ""
+        
+    for i in range(max_polls):
+        time.sleep(poll_interval)
+        try:
+            res = subprocess.run(
+                ["sliver-client", "--rc", rc_path],
+                capture_output=True, text=True, timeout=30
+            )
+            fetch_out = res.stdout
+            if "✅ Completed" in fetch_out:
+                if "[*] Output:" in fetch_out:
+                    return fetch_out.split("[*] Output:", 1)[1].strip()
+                return fetch_out
+        except Exception as e:
+            log(f"[-] Error polling task {task_id}: {e}")
+    return None
+
+
+def sliver_exec(implant_id: str, *commands: str, timeout: int = 120, poll_interval: int = 2) -> str:
+    """Drive a Sliver implant (session or beacon).
+    
+    If the implant is a beacon, automatically waits for each tasked command
+    to complete by polling 'tasks fetch <task_id>' and returns the accumulated
+    output. If it is a session, executes instantly.
+    """
+    accumulated_output = []
+    
+    for cmd in commands:
+        rc_path = f"/tmp/sliver_cmd_{implant_id}.rc"
+        with open(rc_path, "w") as f:
+            f.write(f"use {implant_id}\n")
+            f.write(f"{cmd}\n")
+            f.write("exit\n")
+            
+        try:
+            res = subprocess.run(
+                ["sliver-client", "--rc", rc_path],
+                capture_output=True, text=True, timeout=timeout
+            )
+            output = res.stdout
+        except subprocess.TimeoutExpired:
+            log(f"[-] sliver_exec command {cmd!r} timed out after {timeout}s")
+            continue
+        except Exception as e:
+            log(f"[-] sliver_exec command {cmd!r} failed: {e}")
+            continue
+            
+        # Check if this command was tasked on a beacon
+        m = re.search(r"Tasked beacon \w+ \((.*?)\)", output)
+        if m:
+            task_id = m.group(1)
+            # Poll for the task output
+            task_output = _poll_beacon_task(implant_id, task_id, poll_interval=poll_interval)
+            if task_output:
+                accumulated_output.append(task_output)
+            else:
+                accumulated_output.append(f"[-] Task {task_id} timed out or failed.")
+        else:
+            accumulated_output.append(output)
+            
+    return "\n".join(accumulated_output)
 
 
 def sliver_upload(implant_id: str, local_path: str, remote_path: str,
