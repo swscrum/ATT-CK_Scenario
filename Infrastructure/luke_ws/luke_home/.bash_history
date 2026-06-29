@@ -13,8 +13,6 @@ ls -la ~/Documents/notes/
 vim ~/Documents/notes/2026-05-18_session_notes.md
 ls -la ~/Documents/cases/
 cat ~/Documents/cases/case_A/treatment_plan.md
-rsync -avz ~/Documents/notes/ luke.smith@apache:/home/luke.smith/backup/notes/
-ssh apache
 curl -sI http://apache/
 df -h
 free -h
