@@ -131,20 +131,6 @@ RUN chown -R vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora \
     && chown vinzenz.fedora:vinzenz.fedora /home/vinzenz.fedora/.config/.maint_token \
     && chmod 600 /home/vinzenz.fedora/.config/.maint_token
 
-# ============================================================================
-#  luke.smith — psychiatrist's named account on this host.
-#  Luke SSHes in from his workstation (10.30.0.7) to push periodic backups
-#  of his ~/Documents/notes/ tree (see ~luke.smith/.bash_history). NO sudo
-#  — Luke is a clinical end-user, not an admin. Password auth (his sshd
-#  on apache already allows it; mirrors his own workstation's posture).
-# ============================================================================
-RUN useradd -m -s /bin/bash luke.smith \
-    && echo 'luke.smith:WaystarLuke!2026' | chpasswd \
-    && mkdir -p /home/luke.smith/backup/notes
-# Seed Luke's apache-side home (his backup-target account).
-COPY apache/luke_home/ /home/luke.smith/
-RUN chown -R luke.smith:luke.smith /home/luke.smith
-
 # NOTE: cgi-bin is bind-mounted from ./apache/cgi-bin in docker-compose, so the
 # +x bit on book.py is preserved from the host filesystem; no chmod here.
 
@@ -204,7 +190,7 @@ RUN chmod +x /usr/local/bin/start.sh \
              /usr/local/bin/hydrate-baseline.sh
 
 # Mirror auth.log + syslog into /usr/local/apache2/logs/ (the bind-mounted
-# dir) so sshd auth events from luke.smith and vinzenz.fedora baseline
+# dir) so sshd auth events from vinzenz.fedora and john.stravidis baseline
 # sessions reach the SIEM. Without this, apache's auth.log only exists
 # inside the container's writable layer and disappears on teardown.
 COPY apache/40-lab-persist.conf /etc/rsyslog.d/40-lab-persist.conf

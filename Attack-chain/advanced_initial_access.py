@@ -46,33 +46,36 @@ def ensure_sliver_daemon():
     If not active, starts the daemon in the background and polls until
     the gRPC control socket is accepting connections.
 
-    On fresh-boot containers, sliver-server can take 30-60 s to finish
-    its TLS / SQLite metadata initialisation before binding :31337 --
-    the previous fixed ``time.sleep(12)`` consistently raced past it,
-    so subsequent ``sliver-client --rc ...`` calls connected to a not-
-    yet-ready daemon and hung silently until sliver-client's internal
-    12 s gRPC timeout fired, returning empty stdout. Symptom downstream
-    was the listener silently failing to start.
+    Uses robust process cleanup, logs stdout/stderr to /tmp/sliver-daemon.log,
+    and tails the log on timeout for easy debugging.
     """
     if is_port_open(31337):
         log("[+] Sliver daemon is active.")
         return
 
-    log("[*] Sliver daemon is not active. Starting sliver-server daemon...")
-    subprocess.Popen(
-        ["sliver-server", "daemon"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True
-    )
+    log("[*] Sliver daemon is not active or unresponsive. Cleaning up stale daemon processes...")
+    subprocess.run(["pkill", "-9", "-f", "sliver-server"], capture_output=True)
+    time.sleep(1)
+
+    log("[*] Starting fresh sliver-server daemon...")
+    try:
+        log_file = open("/tmp/sliver-daemon.log", "w")
+        subprocess.Popen(
+            ["sliver-server", "daemon"],
+            stdout=log_file,
+            stderr=log_file,
+            start_new_session=True
+        )
+    except Exception as e:
+        log(f"[-] Failed to start sliver-server process: {e}")
+        raise
 
     # Generous timeout: on a first-ever build the daemon has to generate
     # TLS certs + initialise the SQLite ops DB before binding :31337,
-    # which can push past 90 s on slower hosts. Subsequent runs hit the
-    # cached state and bind in 2-5 s, so this only costs the first cold
-    # boot after `docker compose build kali`.
-    DAEMON_READY_TIMEOUT = 180  # seconds
-    POLL_INTERVAL        = 2
+    # which can push past 300 s on slower host systems (like Windows/WSL2).
+    # Since we poll, a large timeout does not slow down normal runs.
+    DAEMON_READY_TIMEOUT = 450  # seconds
+    POLL_INTERVAL        = 3
     log(f"[*] Waiting up to {DAEMON_READY_TIMEOUT} s for Sliver daemon gRPC :31337 to bind...")
     deadline = time.time() + DAEMON_READY_TIMEOUT
     while time.time() < deadline:
@@ -85,10 +88,22 @@ def ensure_sliver_daemon():
             return
         time.sleep(POLL_INTERVAL)
 
+    # Diagnostic output on timeout: read and log the end of the daemon logs
+    log_tail = ""
+    try:
+        with open("/tmp/sliver-daemon.log", "r") as f:
+            lines = f.readlines()
+            log_tail = "".join(lines[-20:])
+    except Exception as e:
+        log_tail = f"(Could not read daemon log: {e})"
+
     raise RuntimeError(
         f"ensure_sliver_daemon: sliver-server did not bind :31337 within "
-        f"{DAEMON_READY_TIMEOUT} s. Check the daemon process is alive "
-        "(ps -ef | grep sliver-server) and inspect any startup errors."
+        f"{DAEMON_READY_TIMEOUT} s.\n"
+        f"--- Start of sliver-daemon.log tail ---\n"
+        f"{log_tail}"
+        f"--- End of sliver-daemon.log tail ---\n"
+        f"Check the daemon process status (ps -ef | grep sliver-server)."
     )
 
 def ensure_sliver_client_configured():
@@ -458,6 +473,9 @@ def sliver_exec(implant_id: str, *commands: str, timeout: int = 30) -> str:
     Returns the captured sliver-client stdout; caller is responsible for any
     parsing (per-command output is interleaved without a clean delimiter).
     """
+    import attacklog
+    for cmd in commands:
+        log(f"$ {cmd}")
     rc_path = "/tmp/sliver_exec.rc"
     with open(rc_path, "w") as f:
         f.write(f"use {implant_id}\n")
@@ -469,7 +487,23 @@ def sliver_exec(implant_id: str, *commands: str, timeout: int = 30) -> str:
             ["sliver-client", "--rc", rc_path],
             capture_output=True, text=True, timeout=timeout,
         )
-        return res.stdout
+        out = res.stdout
+        
+        # Clean sliver output lines
+        clean_lines = []
+        for line in out.splitlines():
+            # Skip C2 banners, prompt interactions, and empty status logs
+            if (line.startswith("[*] Active session") or
+                line.startswith("sliver (") or
+                line.strip() == "exit" or
+                "using session" in line.lower()):
+                continue
+            clean_lines.append(line)
+        cleaned_output = "\n".join(clean_lines).strip()
+        if cleaned_output:
+            attacklog._append_output(cleaned_output)
+            
+        return out
     except subprocess.TimeoutExpired:
         log(f"[-] sliver_exec(use {implant_id}, …) timed out after {timeout}s")
         return ""

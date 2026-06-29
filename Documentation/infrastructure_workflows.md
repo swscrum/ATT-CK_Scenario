@@ -35,7 +35,7 @@ artefact *origins* without being attack targets:
 | Container | Network(s) | IP(s) | Role | Who touches it |
 |---|---|---|---|---|
 | `router` | public / dmz / internal | 10.10.0.3 / 10.40.0.4 / 10.30.0.4 | Zone-crossing iptables router | Vinzenz (config), attacker (transit) |
-| `apache` | dmz | 10.40.0.2 | Waystar Connect webserver (CVE-2021-42013) | John (deploys), `www-data` (CGI), Vinzenz (fleet), Luke (note backups) |
+| `apache` | dmz | 10.40.0.2 | Waystar Connect webserver (CVE-2021-42013) | John (deploys), `www-data` (CGI), Vinzenz (fleet) |
 | `ubuntu_workstation` | internal | 10.30.0.5 | John's dev/staging box | John (daily), Vinzenz (fleet) |
 | `luke_ws` | internal | 10.30.0.7 | Luke's clinical box | Luke (daily), Vinzenz (fleet) |
 | `vinzenz_ws` | internal | 10.30.0.8 | Sysadmin master box | Vinzenz (exclusive) |
@@ -169,7 +169,7 @@ during provisioning means he never types the password.
 - Read-only DB cred — `luke_ws/luke_home/.pgpass:1` (`waystar-readonly` / `ChangeMe!2026`, same cred John holds)
 - `notes` / `mypatients` aliases — `luke_ws/luke_home/.bashrc:21-22`
 - Query trail — `luke_ws/luke_home/.bash_history:4-9`
-- `Host apache` / `Host db-internal` reach — `luke_ws/luke_home/.ssh/config:5-13`
+- `Host db-internal` reach — `luke_ws/luke_home/.ssh/config:5-8`
 
 *Why realistic:* a clinician with read access plus a `.pgpass` is the default
 "credentialed end-user" posture.
@@ -187,21 +187,6 @@ risk flags, session headlines), queried via the `localnotes` alias / `sqlite3`.
 *Why realistic:* clinicians routinely keep a personal offline copy of "their"
 patients despite a central system. It is the Phase-11 local-cache loot artefact
 (T1005) and the reason patient data sits on an end-user box at all.
-
-#### 3.2.3 Backs up his session notes to the apache host
-
-Rsyncs his notes folder to a `backup/notes/` directory under his named account on
-`apache`, the one internal server he can reach, then SSHes in to confirm.
-
-**Artefacts left behind:**
-- Backup target dir — `/home/luke.smith/backup/notes/`, created at `apache/Dockerfile:104-107`
-- `luke.smith` account on apache (no sudo, password auth) — `apache/Dockerfile:104-105`
-- Rsync + follow-up `ssh apache` — `luke_ws/luke_home/.bash_history:16-17`
-
-*Why realistic:* a non-technical user improvising a backup to a server he happens
-to reach is exactly the unsanctioned data-spread that puts clinical notes on a
-DMZ-adjacent webserver. (The source `~/Documents/notes/` tree is not materialised
-— see §5.)
 
 ### 3.3 Vinzenz Fedora
 
@@ -299,7 +284,7 @@ a defender uses to scope blast radius. Each row resolves to a story above.
 | `waystar-app` / `AppBooking!2026` | `apache` (`/etc/waystar/db.env`), `db-internal` (the role) | booking CGI's insert-only account | §3.1.5 |
 | interim password `waystar2026!` | `ubuntu_workstation` (account), `apache` (`~/.env` `WS_PASS`) | same unrotated secret copied into a project `.env` | §3.1.1, §3.1.5 |
 | `vinzenz.fedora` sudoer account | all four Linux hosts | Vinzenz's named admin account per provisioning | §3.3.1 |
-| patient data | `db-internal` (authoritative) → `luke_ws` (`patients.sqlite`) → `apache` (`backup/notes/`) | Luke's offline cache + ad-hoc note backup | §3.2.2, §3.2.3 |
+| patient data | `db-internal` (authoritative) → `luke_ws` (`patients.sqlite`) | Luke's offline patient cache | §3.2.2 |
 
 - **`waystar-readonly` is the widest-spread low-privilege secret** — on two
   end-user boxes; either leaks the same DB read access.
@@ -338,7 +323,7 @@ read-only over the existing infrastructure.
 — a realism break and a missed loot opportunity (real notes/runbooks would be
 strong T1005 targets).
 
-- **Luke's `~/Documents/notes/`** — rsync source at `luke_ws/luke_home/.bash_history:16`; dir is only `Documents/.gitkeep`.
+- **Luke's `~/Documents/notes/`** — listed at `luke_ws/luke_home/.bash_history:12`; dir is only `Documents/.gitkeep`.
 - **Luke's `~/Documents/cases/case_A/treatment_plan.md`** — read at `luke_ws/luke_home/.bash_history:14-15`; does not exist.
 - **Vinzenz's `~/runbooks/2026-q2-patching.md` + `~/notes/2026-05-15_oncall.md`** — edited at `vinzenz_ws/vinzenz_home/.bash_history:16-17`; dirs are only `.gitkeep`.
 - **Vinzenz's `/srv/log-archive/luke/` + `/srv/log-archive/john/`** — rsync destinations at `vinzenz_ws/vinzenz_home/.bash_history:19-20`; path does not exist.

@@ -18,7 +18,7 @@ The token timestamps below MUST match across all four `templates/<persona>/auth.
 | D-2 | 10:25 | `{BSD-2-10h-25m}` | luke | `ssh luke 'sudo apt update'` |
 | D-3 | 10:05 | `{BSD-3-10h-05m}` | apache | uptime + cleanup.log check |
 | D-3 | 10:19 | `{BSD-3-10h-19m}` | john | uptime + dev-env check |
-| D-3 | 10:27 | `{BSD-3-10h-27m}` | luke | uptime + backup-dir check |
+| D-3 | 10:27 | `{BSD-3-10h-27m}` | luke | uptime check |
 | D-4 | 10:01 | `{BSD-4-10h-01m}` | apache | quick health check |
 | D-4 | 10:14 | `{BSD-4-10h-14m}` | john |  |
 | D-4 | 10:21 | `{BSD-4-10h-21m}` | luke |  |

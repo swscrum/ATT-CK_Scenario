@@ -27,10 +27,10 @@ service rsyslog start
 # intentional misconfiguration that drives the basic-mode lab privesc).
 service cron start
 
-# SSH daemon — apache hosts named accounts for luke.smith (backup pushes
-# per scenario_story.md), john.stravidis (deploys from his workstation),
-# and vinzenz.fedora (sysadmin maintenance via the shared vincent_admin_key).
-# All are used by the chain (basic-mode deploy artefacts, advanced-mode
+# SSH daemon — apache hosts named accounts for john.stravidis (deploys from
+# his workstation) and vinzenz.fedora (sysadmin maintenance via the shared
+# vincent_admin_key). Both are used by the chain (basic-mode deploy artefacts,
+# advanced-mode
 # lateral pivots) and by the activity simulator's cross-host SSH baseline,
 # so apache/auth.log has a non-empty baseline for the attacker's
 # stolen-key activity (advanced chain) to hide in.

@@ -353,6 +353,8 @@ services:
       - ../Attack-chain:/Attack-chain
       - ./logs/attacker:/Infrastructure/logs/attacker  # must run docker-compose from Infrastructure/
       - ./shared-lab-keys:/shared-lab-keys:ro
+      - sliver-server-data:/root/.sliver
+      - sliver-client-data:/root/.sliver-client
     networks:
       public_net:
         ipv4_address: 10.10.0.2
@@ -381,3 +383,7 @@ networks:
     ipam:
       config:
         - subnet: 10.30.0.0/24
+
+volumes:
+  sliver-server-data:
+  sliver-client-data:
