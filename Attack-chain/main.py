@@ -206,7 +206,7 @@ def _step_meta(name: str, mode: str = "basic") -> dict:
 
 @dataclass
 class Context:
-    
+    """State carried between chain steps."""
 
     target: str = DEFAULT_TARGET
     results_dir: str = DEFAULT_RESULTS_DIR
@@ -214,6 +214,10 @@ class Context:
     wordlist: str = DEFAULT_WORDLIST
     mode: str = "basic"
     linpeas: bool = True
+    # Pacing — set from PACING_MODES in main(). pacing_speed is the divisor
+    # step modules apply to their attacker-decided sleeps (think-time,
+    # rate-limits). Infrastructure-bound sleeps (cron firing window, mail
+    # processor delay, SSH handshake) MUST NOT use this — they're physical.
     pacing: str = DEFAULT_PACING
     pacing_speed: float = float(PACING_MODES[DEFAULT_PACING]["speed"])
     state: dict[str, Any] = field(default_factory=dict)
@@ -880,7 +884,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
             ok = True
             err = ""
             try:
-                delta = step.run(ctx) or {} #  Adapter aufrufen → gibt Dict zurück
+                delta = step.run(ctx) or {}
             except Exception as exc:
                 ok = False
                 err = str(exc)
@@ -904,7 +908,7 @@ def run_chain(ctx: Context, *, only=None, start=None, stop=None) -> Context:
                     raise
             elapsed = time.perf_counter() - t0
             ended = _iso_utc()
-            ctx.state.update(delta) # Dict in den State schreiben
+            ctx.state.update(delta)
             executed.append(step)
             _print_step_result(step, elapsed, ok, err, mode=ctx.mode)
             attacklog.end_phase(step.name, ok, elapsed, ended)
