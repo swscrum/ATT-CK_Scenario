@@ -26,10 +26,10 @@ mkdir -p "$OUT_DIR"
 
 # ── CA generation ─────────────────────────────────────────────────────────────
 if [ -f "$CA_KEY" ] && [ -f "$CA_CRT" ]; then
-    echo "[lab-ca] already exists — skipping CA generation."
+    echo "[lab-ca] CA already exists — skipping CA generation."
     echo "  $CA_CRT"
     echo "  $CA_KEY"
-    echo "[lab-ca] delete both files to rotate the CA."
+    echo "[lab-ca] Delete both files to regenerate the CA (also delete server.key/crt)."
 else
     echo "[lab-ca] generating fresh CA (RSA 2048, 10 year validity)..."
     openssl req -x509 -nodes -newkey rsa:2048 \
