@@ -8,16 +8,31 @@ steps, and the full log inventory.
 
 ## Prerequisites
 
-Docker and the Compose plugin. `cd Infrastructure` before any `docker
-compose` command — all paths in `docker-compose.yml` (bind mounts, build
-contexts) are relative to that directory. `tools/run.sh` does this `cd`
-itself, so it can be invoked from the repo root. First run after a clone (or
-after a `git pull` that touched a Dockerfile or seeded file) needs an image
-build; every run after that reuses the cached layers.
+- Docker and the Compose plugin. `cd Infrastructure` before any `docker
+  compose` command — all paths in `docker-compose.yml` (bind mounts, build
+  contexts) are relative to that directory. `tools/run.sh` does this `cd`
+  itself, so it can be invoked from the repo root. First run after a clone (or
+  after a `git pull` that touched a Dockerfile or seeded file) needs an image
+  build; every run after that reuses the cached layers.
+- Python 3.7+ on the host (required only for `--pacing realistic`; not needed
+  for `--pacing fast`). Used by `tools/run.sh` to run the diurnal log rewriter
+  after the chain finishes.
 
 ## Pre-run checklist
 
 Run through this before every scenario, especially `--mode advanced` or `--pacing realistic`.
+
+### 0 — Generate lab keys (first clone only)
+
+```bash
+tools/generate-lab-ca.sh
+```
+
+Generates the lab internal CA keypair and the `fake_internet` TLS server cert.
+Must be run once on every fresh clone — the private keys are gitignored and are
+not included in the repository. Commit any regenerated
+`Infrastructure/fake_internet/ssl/server.crt` and
+`Infrastructure/shared-lab-keys/lab-ca.crt` if the CA was rotated.
 
 ### 1 — Tear down any previous lab instance
 

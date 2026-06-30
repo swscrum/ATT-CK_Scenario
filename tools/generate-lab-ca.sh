@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Generate the Waystar lab internal CA.
+# Generate the Waystar lab internal CA and the fake_internet server cert.
 #
 # Used by:
-#   - fake_internet container (signs its multi-SAN server cert with this CA)
+#   - fake_internet container (signs its multi-SAN server cert with this CA;
+#     server.key + server.crt are generated here and kept gitignored / committed)
 #   - all three workstation containers (trust this CA so `curl https://github.com`
 #     against fake_internet succeeds without -k)
 #
 # Output:
-#   Infrastructure/shared-lab-keys/lab-ca.crt   (public, committed)
-#   Infrastructure/shared-lab-keys/lab-ca.key   (private, gitignored)
+#   Infrastructure/shared-lab-keys/lab-ca.crt          (public, committed)
+#   Infrastructure/shared-lab-keys/lab-ca.key          (private, gitignored)
+#   Infrastructure/fake_internet/ssl/server.key        (private, gitignored)
+#   Infrastructure/fake_internet/ssl/server.crt        (public, committed)
 #
-# Run this ONCE during initial setup OR whenever you want to rotate the CA.
-# The key never leaves the dev host; only the .crt is shipped into images.
+# Run this ONCE on a fresh clone, or whenever you rotate the CA.
+# The private keys never leave the dev host; only the .crt files are committed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -21,6 +24,7 @@ CA_CRT="$OUT_DIR/lab-ca.crt"
 
 mkdir -p "$OUT_DIR"
 
+# ── CA generation ─────────────────────────────────────────────────────────────
 if [ -f "$CA_KEY" ] && [ -f "$CA_CRT" ]; then
     echo "[lab-ca] already exists — skipping CA generation."
     echo "  $CA_CRT"

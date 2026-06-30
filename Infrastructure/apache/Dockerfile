@@ -110,7 +110,7 @@ RUN mkdir -p /etc/waystar \
 #  vincent_admin_key keypair. He has sudo. This is the sysadmin reach the
 #  attack chain pivots to once the attacker compromises Vinzenz's box.
 # ============================================================================
-RUN apt-get update \
+RUN apt-get -o Acquire::Check-Valid-Until=false update \
     && apt-get install -y --no-install-recommends sudo \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -s /bin/bash -G sudo vinzenz.fedora \

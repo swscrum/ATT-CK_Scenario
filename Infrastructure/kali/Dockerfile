@@ -48,7 +48,7 @@ RUN chmod +x /opt/linpeas.sh
 # ---------------------------------------------------------------------------
 RUN set -eux; \
     sliver-server daemon >/tmp/sliver-build.log 2>&1 & SLIVER_PID=$!; \
-    sleep 15; \
+    for _i in $(seq 1 30); do ss -tlnp 2>/dev/null | grep -q ':31337' && break; sleep 2; done; \
     sliver-server operator --name admin --lhost 127.0.0.1 --permissions all \
         --save /tmp/admin.cfg; \
     sliver-client import /tmp/admin.cfg; \
