@@ -2,7 +2,7 @@
 # General
 ########################
 # PDF builds — generated from Typst source, not tracked
-intern/Dokumentation/main.pdf
+#intern/Dokumentation/main.pdf
 *.env
 *.env.*
 /.*ignore*
