@@ -4,9 +4,23 @@ This project is about an custom attack scenario to showcase IT security demonstr
 
 Currently, it consists of an attacker client (Kali Linux), a router container that simulates the edge of the network, a victim webserver, victim Ubuntu workstations (one with an XFCE desktop), and an internal PostgreSQL database server (`db-internal`). The network is split into three router-controlled zones: `public_net` (attacker side), `dmz_net` (the webserver), and `internal_net` (workstations + database). All cross-zone traffic traverses the router, which forwards only port 80 inbound to the webserver.
 
+## About the credentials in this repository
+
+Everything in this repository is a self-contained, isolated lab. **Every credential, private
+key, SSH key, password and certificate you find here is a deliberate prop** — planted so the
+simulated attacker has something realistic to discover. That includes `.env` files, the
+`shared-lab-keys/` SSH keys, the exfiltration keypair and the lab CA.
+
+None of them are real, none of them grant access to any real system, and none of them should
+be reported as a leaked secret. Automated secret scanners will flag some of them; that is
+expected. The patient records, names and email addresses in the database are synthetic too.
+
+The scenario is offensive tooling. Run it only inside the provided isolated Docker network,
+never against systems you do not own or have written permission to test.
+
 ## Network topology
 
-![Network topology](intern/Bilder/network-topology.jpg)
+![Network topology](Documentation/assets/network-topology.jpg)
 
 The Ubuntu workstation exposes its desktop on host port 5901 — connect with any VNC client (e.g. `vinagre`, `remmina`, `tigervnc-viewer`) to `localhost:5901`. No VNC password is set; this is a placeholder lab host. SSH (port 22) and the VNC server run side-by-side inside the container.
 

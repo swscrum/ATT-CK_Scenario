@@ -99,7 +99,7 @@ Per phase, in chain order. ATT&CK technique IDs are linked to mitre.org; sub-tec
 
 ## Detection notes per technique
 
-For SOC training and customer SIEM/EDR demos, what *should* fire on each technique. Implementation of the actual detection pipeline (Wazuh / Sigma / Suricata rules) is out of scope here. Persistent log volumes — the customer ask in `intern/Protokolle/Protokoll - 27.04.26.md:20` — landed in PR #58: every signal below now writes to a host-mounted file under `Infrastructure/logs/` so an external SIEM can ingest them.
+For SOC training and customer SIEM/EDR demos, what *should* fire on each technique. Implementation of the actual detection pipeline (Wazuh / Sigma / Suricata rules) is out of scope here. Persistent log volumes — a customer ask — landed in PR #58: every signal below now writes to a host-mounted file under `Infrastructure/logs/` so an external SIEM can ingest them.
 
 | Technique(s) | Detection source | Signature / behaviour | Lab log path (PR #58) |
 |---|---|---|---|
