@@ -1,5 +1,7 @@
 # Attack scenario
 
+( _This repository was created from an original private repository to share the code publicly since the original one had internal data and secrets. The commit history has been preserved, but pull requests, issues, and other internal discussions have not been migrated._ )
+
 This project is about an custom attack scenario to showcase IT security demonstrations.
 
 Currently, it consists of an attacker client (Kali Linux), a router container that simulates the edge of the network, a victim webserver, victim Ubuntu workstations (one with an XFCE desktop), and an internal PostgreSQL database server (`db-internal`). The network is split into three router-controlled zones: `public_net` (attacker side), `dmz_net` (the webserver), and `internal_net` (workstations + database). All cross-zone traffic traverses the router, which forwards only port 80 inbound to the webserver.
