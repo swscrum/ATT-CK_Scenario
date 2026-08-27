@@ -139,4 +139,3 @@ host-persisted log (`Infrastructure/logs/`), with the MITRE ATT&CK IDs.
 Console output, the per-run ground-truth JSON, and the logs all share a UTC
 ISO-8601 timestamp so they correlate to the second.
 
-
