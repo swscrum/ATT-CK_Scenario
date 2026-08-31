@@ -31,7 +31,6 @@ The Ubuntu workstation exposes its desktop on host port 5901 — connect with an
 ```bash
 ssh labuser@<ubuntu_workstation-IP>
 ```
-
 ## Services
 
 | Container | Image | Network | Purpose |
