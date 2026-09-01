@@ -2,7 +2,10 @@
 
 ( _This repository was created from an original private repository to share the code publicly since the original one had internal data and secrets. The commit history has been preserved, but pull requests, issues, and other internal discussions have not been migrated._ )
 
-This project is about an custom attack scenario to showcase IT security demonstrations.
+This project is a realistic, self-contained cyber-attack scenario you can run on your own machine. A safe practice range for training security analysts.
+
+A single automated run drives the full kill chain end to end: recon, exploitation (CVE-2021-42013), lateral movement, credential theft, and patient-data exfiltration, each phase tagged with its ATT&CK technique and a UTC-synced ground-truth timeline. It emits real, host-persisted logs (Apache, Linux auth.log, PostgreSQL log_statement=all) that drop straight into Splunk, ELK, or any SIEM via a file/forwarder input. Analysts then hunt the logs, rebuild the attacker's timeline, and map findings back to ATT&CK. Detection engineers get authentic attack data to test against — the repo ships example Sigma rules covering the traversal exploit, SSH cred-stuffing bursts, cross-zone scanning, and anti-forensic cleanup. Because the whole scenario is scripted and isolated, the ground truth is known and every exercise is repeatable and reset-able. Nothing leaves the host.
+
 
 Currently, it consists of an attacker client (Kali Linux), a router container that simulates the edge of the network, a victim webserver, victim Ubuntu workstations (one with an XFCE desktop), and an internal PostgreSQL database server (`db-internal`). The network is split into three router-controlled zones: `public_net` (attacker side), `dmz_net` (the webserver), and `internal_net` (workstations + database). All cross-zone traffic traverses the router, which forwards only port 80 inbound to the webserver.
 
